@@ -37,7 +37,7 @@
     <div class="rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-2.5 text-sm"><?= h($f) ?></div>
   </div>
   <?php endif; ?>
-  <main class="flex-1 w-full max-w-5xl mx-auto px-4 py-8">
+  <main class="flex-1 w-full <?= !empty($fullWidth) ? 'max-w-none px-4 md:px-8 py-6' : 'max-w-5xl mx-auto px-4 py-8' ?>">
     <?= $content ?>
   </main>
 </body>

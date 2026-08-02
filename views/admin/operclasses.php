@@ -1,0 +1,82 @@
+<?php
+$title = 'Operclasses'; $active = 'operclasses';
+$permLabels = [
+    'oper' => 'Operator commands (kline/gline/zline/shun, kill, global, spamfilter, badword…) and viewing user IPs',
+    'manage_users' => 'Promote / demote / ban users',
+    'manage_channels' => 'Force topics, drop channels, change visibility',
+    'manage_bans' => 'Add / remove global bans',
+    'manage_badwords' => 'Manage the bad-word filter',
+    'manage_roles' => 'Manage custom roles',
+    'manage_opers' => 'Manage o:lines and operator classes',
+    'rehash' => 'Reload server configuration (/rehash)',
+];
+?>
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-bold text-white">Operator classes</h1>
+  <details class="relative">
+    <summary class="btn-primary cursor-pointer">＋ New class</summary>
+    <form method="post" action="/admin/action" class="absolute right-0 mt-2 w-80 card p-4 space-y-3 z-20">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="back" value="/admin/operclasses">
+      <input type="hidden" name="id" value="0">
+      <div>
+        <label class="label">Name</label>
+        <input class="input" name="name" placeholder="e.g. netadmin" required>
+      </div>
+      <div>
+        <label class="label">Colour</label>
+        <input class="input" type="color" name="color" value="#ffd700">
+      </div>
+      <div class="space-y-1">
+        <?php foreach ($permLabels as $key => $label): ?>
+        <label class="flex items-start gap-2 text-xs text-discord-300">
+          <input type="checkbox" name="perms[]" value="<?= h($key) ?>" class="mt-0.5 accent-blurple"> <?= h($label) ?>
+        </label>
+        <?php endforeach; ?>
+      </div>
+      <button name="action" value="operclass_save" class="btn-primary w-full justify-center">Create class</button>
+    </form>
+  </details>
+</div>
+<?php require ROOT . '/views/admin/_nav.php'; ?>
+<div class="text-xs text-discord-500 mb-3">Operator classes are permission bundles granted to an operator when they `/oper` up against their o:line. Default classes (netadmin, serveradmin, globalop, localop) ship with the server.</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <?php foreach ($classes as $c): $perms = json_decode((string) $c['perms'], true) ?: []; ?>
+  <details class="card p-4">
+    <summary class="cursor-pointer flex items-center gap-2 text-sm font-semibold text-white">
+      <span class="w-3 h-3 rounded-full inline-block" style="background:<?= h($c['color']) ?>"></span>
+      <?= h($c['name']) ?>
+      <?php if ($c['is_default']): ?><span class="text-[10px] text-discord-500">default</span><?php endif; ?>
+    </summary>
+    <form method="post" action="/admin/action" class="mt-3 space-y-3">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="back" value="/admin/operclasses">
+      <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label">Name</label>
+          <input class="input" name="name" value="<?= h($c['name']) ?>" required>
+        </div>
+        <div>
+          <label class="label">Colour</label>
+          <input class="input" type="color" name="color" value="<?= h($c['color']) ?>">
+        </div>
+      </div>
+      <div class="space-y-1">
+        <?php foreach ($permLabels as $key => $label): ?>
+        <label class="flex items-start gap-2 text-xs text-discord-300">
+          <input type="checkbox" name="perms[]" value="<?= h($key) ?>" <?= in_array($key, $perms, true) ? 'checked' : '' ?> class="mt-0.5 accent-blurple"> <?= h($label) ?>
+        </label>
+        <?php endforeach; ?>
+      </div>
+      <div class="flex gap-2">
+        <button name="action" value="operclass_save" class="btn-primary text-xs !py-1.5">Save</button>
+        <?php if (!$c['is_default']): ?>
+        <button name="action" value="operclass_del" class="btn-ghost text-xs !py-1.5 text-red-400" onclick="return confirm('Delete this class? Its o:lines are removed too.')">Delete</button>
+        <?php endif; ?>
+      </div>
+    </form>
+  </details>
+  <?php endforeach; ?>
+</div>

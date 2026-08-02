@@ -187,7 +187,7 @@ final class ChannelService
     public static function members(int|string $channelId): array
     {
         return Database::all(
-            'SELECT u.id, u.username, u.away, u.away_at, u.last_seen, u.role, u.bot, cm.level,
+            'SELECT u.id, u.username, u.away, u.away_at, u.last_seen, u.role, u.bot, u.guest, cm.level,
                     (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
              FROM channel_members cm
              JOIN users u ON u.id = cm.user_id

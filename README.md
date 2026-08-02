@@ -119,10 +119,12 @@ There are **no hardcoded default credentials**. The first account registered on 
 database automatically becomes the server admin (the second and later accounts are regular
 users). Log in as that account to reach `/admin`.
 
-After that, admins can promote other users from the **Users** page or set an operator
-password in **Settings**, which lets anyone run `/oper <their nick> <password>` to become
-an IRCop. (You can also set the `users.role` column directly in SQLite if you ever need to
-recover admin access.)
+After that, admins can promote other users from the **Users** page, or create an **o:line**
+in **Admin → O-lines** (username + password + operator class) so a user can `/oper` up
+against their own nick and gain that class's permissions. Default classes: `netadmin`,
+`serveradmin`, `globalop`, `localop` (custom classes via **Admin → Operclasses**). There is
+no shared operator password. (You can also set the `users.role` column directly in SQLite
+if you ever need to recover admin access.)
 
 ## Testing
 
@@ -164,4 +166,6 @@ data/            SQLite database (beside public/, never web-served)
 - Passwords: argon2id (`password_hash`), channel keys hashed, all queries prepared
 - CSRF tokens on every POST; HTML-escaped output with a small safe-markup renderer
 - Rate limiting on sends; spam filters, shuns, and global bans enforced server-side
-- The `oper_password` in Settings is a shared secret — set it strong or leave blank
+- Operators authenticate with per-user **o:lines** (Admin → O-lines) against an
+  operator class (netadmin, serveradmin, globalop, localop, or custom) — there is no
+  shared operator password; `/oper` only works for the nick the o:line is tied to

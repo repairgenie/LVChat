@@ -264,18 +264,53 @@ final class Auth
         return is_array($perms) ? $perms : [];
     }
 
-    /** Check a permission key (admins have everything; custom roles grant the rest). */
+    /** Permissions from the current /oper session (o:line operclass), if any. */
+    public static function operSessionPerms(): array
+    {
+        $id = $_SESSION['operclass_id'] ?? null;
+        if (!$id) {
+            return [];
+        }
+        $r = Database::row('SELECT perms FROM operclasses WHERE id = ?', [$id]);
+        $perms = json_decode((string) ($r['perms'] ?? '[]'), true);
+        return is_array($perms) ? $perms : [];
+    }
+
+    /** Name of the active oper class, if operating. */
+    public static function operSessionClass(): ?string
+    {
+        $id = $_SESSION['operclass_id'] ?? null;
+        if (!$id) {
+            return null;
+        }
+        return Database::scalar('SELECT name FROM operclasses WHERE id = ?', [$id]) ?: null;
+    }
+
+    /** Check a permission key (admins have everything; roles + oper classes grant the rest). */
     public static function can(array $user, string $permission): bool
     {
         if ($user['role'] === 'admin') {
             return true;
         }
-        return in_array($permission, self::rolePerms($user), true);
+        if (in_array($permission, self::rolePerms($user), true)) {
+            return true;
+        }
+        return in_array($permission, self::operSessionPerms(), true);
     }
 
-    /** An IRC Operator: server admin, or a user with the 'oper' permission. */
+    /** An IRC Operator: server admin, a user with the 'oper' permission, or an active o:line. */
     public static function isOper(array $user): bool
     {
-        return $user['role'] === 'admin' || in_array('oper', self::rolePerms($user), true);
+        if ($user['role'] === 'admin') {
+            return true;
+        }
+        return in_array('oper', self::rolePerms($user), true)
+            || in_array('oper', self::operSessionPerms(), true);
+    }
+
+    /** Drop the current /oper session. */
+    public static function deoper(): void
+    {
+        unset($_SESSION['operclass_id']);
     }
 }

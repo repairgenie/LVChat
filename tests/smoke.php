@@ -337,8 +337,8 @@ $res = CommandParser::run('/hs status', $alice, $ch);
 check('/hs alias', str_contains($res['replies'][0] ?? '', 'vhost'));
 
 echo "== operserv ==\n";
-$res = CommandParser::run('/oper bob password', $bob2, $ch);
-check('/oper without password configured', str_contains($res['replies'][0] ?? '', 'No operator password'));
+$res = CommandParser::run('/oper bob_the_second password', $bob2, $ch);
+check('/oper with no o:line rejected', str_contains($res['replies'][0] ?? '', 'Incorrect oper credentials'), $res['replies'][0] ?? '');
 $res = CommandParser::run('/clients', $alice, $ch);
 check('/clients', count($res['replies']) >= 1);
 $res = CommandParser::run('/serverstats', $alice, $ch);
@@ -556,6 +556,27 @@ check('guest /join nonexistent denied', str_contains($res['replies'][0] ?? '', '
 Database::query('UPDATE users SET last_seen = datetime("now", "-2 days") WHERE username = "anoncat"');
 Auth::purgeGuests();
 check('inactive guest purged', Database::scalar('SELECT id FROM users WHERE username = "anoncat"') === false);
+
+// ── O:lines / operclasses ───────────────────────────────────────────────────
+echo "== o-lines ==\n";
+$netadmin = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "netadmin"');
+check('netadmin operclass seeded', $netadmin > 0);
+Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES ("erin", ?, ?)', [password_hash('erinsecret', PASSWORD_ARGON2ID), $netadmin]);
+$res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
+check('/oper with o:line succeeds', str_contains($res['replies'][0] ?? '', 'netadmin'), $res['replies'][0] ?? '');
+check('oper session grants isOper', Auth::isOper($erin) === true);
+$res = CommandParser::run('/clients', $erin, $ch);
+check('oper can use /clients', !str_contains($res['replies'][0] ?? '', 'restricted'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/oper erin wrongpass', $erin, $ch);
+check('/oper wrong password rejected', str_contains($res['replies'][0] ?? '', 'Incorrect oper credentials'));
+$res = CommandParser::run('/oper alice whatever', $erin, $ch);
+check('/oper requires matching nick', str_contains($res['replies'][0] ?? '', 'matches your nickname'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/deoper', $erin, $ch);
+check('/deoper drops oper', $res['replies'][0] === 'You are no longer operating.');
+check('deoper clears isOper', Auth::isOper($erin) === false);
+Database::query('UPDATE opers SET enabled = 0 WHERE username = "erin"');
+$res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
+check('disabled o:line rejected', str_contains($res['replies'][0] ?? '', 'Incorrect oper credentials'));
 
 // --- Audit / admin helpers ---
 echo "== admin dashboard data ==\n";

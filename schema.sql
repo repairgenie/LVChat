@@ -155,6 +155,24 @@ CREATE TABLE IF NOT EXISTS roles (
   perms TEXT NOT NULL DEFAULT '[]'
 );
 
+-- IRC-style operator classes (permission bundles) and o:lines (per-user oper accounts).
+CREATE TABLE IF NOT EXISTS operclasses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  color TEXT NOT NULL DEFAULT '#ffd700',
+  perms TEXT NOT NULL DEFAULT '[]',
+  is_default INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS opers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,
+  operclass_id INTEGER NOT NULL REFERENCES operclasses(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Append-only archive. Every channel message/action/system event (and PMs) is
 -- written here with a denormalized channel name, so logs survive even when an
 -- unregistered channel is deleted. Admins have full visibility into this table.
@@ -165,6 +183,7 @@ CREATE TABLE IF NOT EXISTS chat_logs (
   username TEXT,
   kind TEXT NOT NULL DEFAULT 'message',
   content TEXT NOT NULL DEFAULT '',
+  guest INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

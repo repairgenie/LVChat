@@ -26,3 +26,21 @@
 
 /* The chat app is always a full-viewport fixed layer. */
 body.chat-app { position: fixed; inset: 0; overflow: hidden; }
+
+/* Channel sidebar: off-canvas drawer on mobile, collapsible on desktop. */
+.sidebar { transition: transform .2s ease; }
+@media (min-width: 768px) {
+  body.sidebar-collapsed .sidebar { display: none; }
+}
+@media (max-width: 767.98px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: 240px;
+    transform: translateX(-100%);
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); box-shadow: 0 0 28px rgba(0,0,0,.55); }
+}

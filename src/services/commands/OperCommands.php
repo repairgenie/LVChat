@@ -2,34 +2,42 @@
 
 declare(strict_types=1);
 
-// ─── OperServ / IRCop commands (server administrators) ───────────────────────
+// ─── OperServ / IRCop commands (o:lines grant operator classes) ─────────────
 
 CommandRegistry::register('oper', [
     'group' => 'OperServ',
-    'desc' => 'Oper up (grant yourself IRCop / admin rights).',
+    'desc' => 'Oper up against your o:line and gain your operator class permissions.',
     'usage' => '/oper <username> <password>',
     'run' => function (array $args, array $user, ?array $channel) {
         if ($user['role'] === 'admin') {
-            return ['replies' => ['You are already an IRC Operator.']];
+            return ['replies' => ['You are already an IRC Operator (server admin).']];
         }
-        $operPw = config_get('oper_password', '');
-        if ($operPw === '') {
-            return ['replies' => ['No operator password is configured. Contact the server owner.']];
-        }
-        $pw = $args[1] ?? '';
         $name = $args[0] ?? '';
-        if (strtolower($name) === strtolower($user['username']) && $pw !== '' && password_verify($pw, $user['password_hash']) === false && hash_equals($operPw, $pw) === false) {
-            return ['replies' => ['Incorrect operator password.']];
-        }
+        $pw = $args[1] ?? '';
         if (strtolower($name) !== strtolower($user['username'])) {
-            return ['replies' => ['You may only oper your own account.']];
+            return ['replies' => ['You may only oper the account that matches your nickname.']];
         }
-        if (!hash_equals($operPw, $pw)) {
-            return ['replies' => ['Incorrect operator password.']];
+        $op = Database::row('SELECT * FROM opers WHERE username = ? COLLATE NOCASE', [$name]);
+        if (!$op || (int) $op['enabled'] !== 1 || !password_verify($pw, $op['password_hash'])) {
+            return ['replies' => ['Incorrect oper credentials.']];
         }
-        Database::query('UPDATE users SET role = "admin" WHERE id = ?', [$user['id']]);
-        log_audit('oper', $user['username'], 'promoted to IRCop via /oper');
-        return ['replies' => ['You are now an IRC Operator. Full admin dashboard access granted.']];
+        $class = Database::row('SELECT * FROM operclasses WHERE id = ?', [$op['operclass_id']]);
+        if (!$class) {
+            return ['replies' => ['Your operator class no longer exists.']];
+        }
+        $_SESSION['operclass_id'] = (int) $class['id'];
+        log_audit('oper', $user['username'], 'operclass: ' . $class['name']);
+        return ['replies' => ["You are now operating as " . $class['name'] . ". /deoper to drop operator status."]];
+    },
+]);
+
+CommandRegistry::register('deoper', [
+    'group' => 'OperServ',
+    'desc' => 'Drop your operator status.',
+    'usage' => '/deoper',
+    'run' => function (array $args, array $user, ?array $channel) {
+        Auth::deoper();
+        return ['replies' => ['You are no longer operating.']];
     },
 ]);
 

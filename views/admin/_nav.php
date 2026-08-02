@@ -11,6 +11,8 @@ function admin_nav(string $active): void {
     'spamfilters' => ['/admin/spamfilters', 'Spam filters'],
     'badwords' => ['/admin/badwords', 'Bad words'],
     'roles' => ['/admin/roles', 'Roles'],
+    'opers' => ['/admin/opers', 'O-lines'],
+    'operclasses' => ['/admin/operclasses', 'Operclasses'],
     'motd' => ['/admin/motd', 'MOTD'],
     'logs' => ['/admin/logs', 'Chat logs'],
     'settings' => ['/admin/settings', 'Settings'],

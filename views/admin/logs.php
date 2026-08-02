@@ -1,4 +1,8 @@
-<?php $title = 'Chat logs'; $active = 'logs'; ?>
+<?php
+$title = 'Chat logs';
+$active = 'logs';
+$fullWidth = true;
+?>
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-bold text-white">Chat logs</h1>
   <form method="get" action="/admin/logs" class="flex gap-2">
@@ -35,7 +39,7 @@
 <!-- Day log modal -->
 <div id="log-modal" class="hidden fixed inset-0 z-[200] flex items-center justify-center p-4">
   <div class="absolute inset-0 bg-black/70" data-close></div>
-  <div class="relative card w-[min(92vw,900px)] h-[min(85vh,700px)] flex flex-col overflow-hidden">
+  <div class="relative card w-[min(96vw,1400px)] h-[85vh] flex flex-col overflow-hidden">
     <div class="px-4 py-2.5 border-b border-discord-700 flex items-center justify-between gap-2 shrink-0">
       <span id="log-modal-title" class="font-semibold text-white text-sm truncate"></span>
       <div class="flex items-center gap-2 shrink-0">

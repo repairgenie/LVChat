@@ -28,10 +28,5 @@
     <label class="label">Max channels per user</label>
     <input class="input" type="number" min="1" name="max_channels_per_user" value="<?= (int) $settings['max_channels_per_user'] ?>">
   </div>
-  <div>
-    <label class="label">Operator password (for /oper)</label>
-    <input class="input" name="oper_password" placeholder="Set or leave blank to keep current" autocomplete="off">
-    <p class="text-xs text-discord-400 mt-1">Anyone who enters this password with /oper &lt;their nick&gt; &lt;password&gt; is granted admin rights. Keep it strong.</p>
-  </div>
   <button name="action" value="settings_save" class="btn-primary">Save settings</button>
 </form>

@@ -83,13 +83,14 @@
       return `<div class="msg-system px-4 py-1.5 text-xs text-discord-400 italic text-center select-none" data-kind="${esc(m.kind)}">${linkify(m.content)}</div>`;
     }
     const isAdmin = m.role === 'admin';
+    const guestTag = m.guest ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
     const roleStyle = (!isAdmin && m.role_color) ? ' style="color:' + esc(m.role_color) + '"' : '';
     const nameColor = isAdmin ? 'text-red-400' : (COLORS[m.level || 'normal'] || COLORS.normal);
     const contentColor = isAdmin ? 'text-red-400' : 'text-discord-200';
     if (m.kind === 'action') {
       return `<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="${m.id}" data-kind="action" data-author="${esc(m.username)}">
         <div class="w-10 shrink-0"></div>
-        <div class="text-sm ${contentColor}"${roleStyle}><span class="italic">* <span class="font-medium ${nameColor}"${roleStyle}>${esc(m.username)}</span> ${linkify(m.content)}</span></div>
+        <div class="text-sm ${contentColor}"${roleStyle}><span class="italic">* <span class="font-medium ${nameColor}"${roleStyle}>${esc(m.username)}</span>${guestTag} ${linkify(m.content)}</span></div>
       </div>`;
     }
     const initial = (m.username || '?').charAt(0).toUpperCase();
@@ -113,7 +114,7 @@
       <div class="w-10 h-10 shrink-0 rounded-full bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600">${esc(initial)}</div>
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 h-[22px]">
-          <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ${nameColor}"${roleStyle} data-nick="${esc(m.username)}">${sym}${esc(m.username)}</span>
+          <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ${nameColor}"${roleStyle} data-nick="${esc(m.username)}">${sym}${esc(m.username)}${guestTag}</span>
           <span class="time text-[11px] text-discord-400 hidden group-hover:inline">${timeStr(m.created_at)}</span>
           ${m.edited_at ? '<span class="text-[10px] text-discord-400">(edited)</span>' : ''}
         </div>
@@ -132,6 +133,9 @@
 
   function appendMsg(m) {
     if (!msgsEl) return;
+    // Dedupe by id: a poll that was already in flight can echo a message the
+    // sender just appended optimistically (this used to duplicate emojis/text).
+    if (m.id && msgsEl.querySelector('.msg[data-id="' + m.id + '"]')) return;
     const date = String(m.created_at || '').slice(0, 10);
     let html = '';
     if (date && date !== lastDate) {
@@ -402,6 +406,77 @@
 
   const modeHelpBtn = document.querySelector('[data-help-mode]');
   if (modeHelpBtn) modeHelpBtn.addEventListener('click', () => runCommand('/mode ' + modeHelpBtn.dataset.helpMode));
+
+  // ── Emoji picker ────────────────────────────────────────────────────────────
+  const EMOJIS = ('😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🤭 🤫 🤥 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 👹 👺 🤡 💩 👻 💀 👽 👾 🤖 🎃 😺 😸 😹 😻 😼 😽 🙀 😿 😾' +
+  ' 👋 🤚 🖐 ✋ 🖖 👌 🤌 🤏 ✌ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏 ✍ 💅 🤳 💪 🦾 🖕' +
+  ' ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 💕 💞 💓 💗 💖 💘 💝 💯 🔥 ⚡ ✨ 🌟 🎉 🎊 🎈 🎁 🏆 🥇 🥈 🥉 ⭐ 🌈 ☀️ 🌙 ⭐ 💫' +
+  ' 🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🐤 🦆 🦅 🦉 🐺 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐢 🐍 🦎 🐙 🦑 🐠 🐟 🐬 🐳 🦈 🐊 🐅 🐆 🐘 🦏 🐫 🦒 🐕 🐈' +
+  ' 🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🥑 🥦 🥬 🥕 🌽 🥔 🍞 🥖 🥨 🧀 🥚 🍳 🥞 🥓 🍔 🍟 🍕 🌮 🌯 🥗 🍜 🍲 🍣 🍱 🍝 🍦 🍰 🎂 🧁 🍪 🍩 🍫 🍿 🍯 ☕ 🍵 🍺 🍻 🥂 🍷 🍸' +
+  ' ❤️ 💔 💯 💢 💥 💫 💦 💨 🕳 💬 💭 👁 👀 🧠 🦴 🦷 👅 👄 💋' +
+  ' 🚗 🚕 🚙 🚌 🏎 🚓 🚑 🚒 🚐 🚚 🚛 🚜 🛴 🚲 🛵 🏍 🚨 🚔 🚍 🚘 🚖 🚡 🚠 🚟 🚃 🚋 🚝 🚄 🚅 🚈 🚞 🚂 🚆 🚇 🚊 🚉 ✈️ 🛫 🛬 🛩 💺 🛰 🚀 🛸 🚁 🛶 ⛵ 🚤 🛥 🛳 ⛴ 🚢 ⚓' +
+  ' ⌚ 📱 💻 ⌨️ 🖥 🖨 🖱 💽 💾 💿 📀 📼 📷 📸 📹 🎥 📽 🎞 📞 ☎️ 📟 📠 📺 📻 🎙 🎚 🎛 🧭 ⏱ ⏲ ⏰ 🕰 ⌛ ⏳ 📡 🔋 🔌 💡 🔦 🕯 🪔 🧯 🛢 💸 💵 💴 💶 💷 💰 💳' +
+  ' 🗿 🗽 🗼 🏰 🏯 🏟 🎡 🎢 🎠 ⛲ ⛱ 🏖 🏝 🏜 🌋 ⛰ 🏔 🗻 🏕 ⛺ 🏠 🏡 🏘 🏚 🏗 🏭 🏢 🏬 🏣 🏤 🏥 🏦 🏨 🏪 🏫 🏩 💒 🏛 ⛪ 🕌 🕍 🕋 ⛩').split(/\s+/).filter(Boolean);
+  const emojiPanel = document.getElementById('emoji-panel');
+  const emojiBtn = document.getElementById('emoji-btn');
+  function populateEmojis() {
+    if (!emojiPanel) return;
+    emojiPanel.innerHTML = EMOJIS.map((e) => '<button type="button" class="emoji-btn text-xl hover:bg-discord-700 rounded p-1" data-emoji="' + e + '">' + e + '</button>').join('');
+    emojiPanel.querySelectorAll('.emoji-btn').forEach((b) => b.addEventListener('click', () => insertEmoji(b.dataset.emoji)));
+  }
+  function insertEmoji(emoji) {
+    const i = document.getElementById('chat-input');
+    if (!i) return;
+    const start = i.selectionStart ?? i.value.length;
+    const end = i.selectionEnd ?? i.value.length;
+    i.value = i.value.slice(0, start) + emoji + i.value.slice(end);
+    const pos = start + emoji.length;
+    i.setSelectionRange(pos, pos);
+    i.focus();
+    hideEmojiPanel();
+  }
+  function hideEmojiPanel() { if (emojiPanel) emojiPanel.classList.add('hidden'); }
+  if (emojiBtn) emojiBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (emojiPanel.classList.contains('hidden')) { populateEmojis(); emojiPanel.classList.remove('hidden'); }
+    else hideEmojiPanel();
+  });
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#emoji-panel') || e.target.closest('#emoji-btn')) return;
+    hideEmojiPanel();
+  });
+
+  // ── Sidebar toggle (desktop collapse + mobile drawer) ─────────────────────
+  (function () {
+    const btn = document.getElementById('sidebar-toggle');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (!btn) return;
+    const isMobile = () => window.innerWidth < 768;
+    function closeSidebar() {
+      document.body.classList.remove('sidebar-open');
+      if (backdrop) backdrop.classList.add('hidden');
+    }
+    function openSidebar() {
+      document.body.classList.add('sidebar-open');
+      if (backdrop) backdrop.classList.remove('hidden');
+    }
+    btn.addEventListener('click', () => {
+      if (isMobile()) {
+        if (document.body.classList.contains('sidebar-open')) closeSidebar();
+        else openSidebar();
+      } else {
+        const collapsed = document.body.classList.toggle('sidebar-collapsed');
+        try { localStorage.setItem('lvc.sidebar', collapsed ? '0' : '1'); } catch (e) {}
+      }
+    });
+    if (backdrop) backdrop.addEventListener('click', closeSidebar);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSidebar(); });
+    try {
+      if (!isMobile() && localStorage.getItem('lvc.sidebar') === '0') {
+        document.body.classList.add('sidebar-collapsed');
+      }
+    } catch (e) {}
+  })();
 
   // ── Share / part / create ──────────────────────────────────────────────────
   const shareBtn = document.getElementById('share-btn');

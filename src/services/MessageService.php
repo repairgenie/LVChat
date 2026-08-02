@@ -14,7 +14,7 @@ final class MessageService
         );
         $id = (int) Database::lastId();
         $msg = Database::row(
-            'SELECT m.*, u.username, u.bot, u.role,
+            'SELECT m.*, u.username, u.bot, u.role, u.guest,
                     (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id) AS level,
                     (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
              FROM messages m LEFT JOIN users u ON u.id = m.sender_id
@@ -26,7 +26,8 @@ final class MessageService
             $senderId,
             $msg['username'] ?? null,
             $kind,
-            $content
+            $content,
+            (int) ($msg['guest'] ?? 0)
         );
         self::notifyMentions($msg, $channelId, $senderId);
         return $msg;
@@ -50,20 +51,20 @@ final class MessageService
     }
 
     /** Append-only archive write (never deleted, survives channel lifecycle). */
-    public static function logRow(?string $channelName, ?int $userId, ?string $username, string $kind, string $content): void
+    public static function logRow(?string $channelName, ?int $userId, ?string $username, string $kind, string $content, int $guest = 0): void
     {
         Database::query(
-            'INSERT INTO chat_logs (channel_name, user_id, username, kind, content) VALUES (?, ?, ?, ?, ?)',
-            [$channelName, $userId, $username, $kind, $content]
+            'INSERT INTO chat_logs (channel_name, user_id, username, kind, content, guest) VALUES (?, ?, ?, ?, ?, ?)',
+            [$channelName, $userId, $username, $kind, $content, $guest]
         );
     }
 
     /** Log a private message exchange into the archive (channel_name = "PM: nick"). */
-    public static function logPm(int $senderId, string $senderName, string $recipientName, string $content): void
+    public static function logPm(int $senderId, string $senderName, string $recipientName, string $content, int $guest = 0): void
     {
         Database::query(
-            'INSERT INTO chat_logs (channel_name, user_id, username, kind, content) VALUES (?, ?, ?, "pm", ?)',
-            ['PM: ' . $recipientName, $senderId, $senderName, $content]
+            'INSERT INTO chat_logs (channel_name, user_id, username, kind, content, guest) VALUES (?, ?, ?, "pm", ?, ?)',
+            ['PM: ' . $recipientName, $senderId, $senderName, $content, $guest]
         );
     }
 
@@ -78,7 +79,7 @@ final class MessageService
     public static function channelParticipants(string $channelName): array
     {
         return Database::all(
-            'SELECT username, user_id, COUNT(*) AS messages, MAX(created_at) AS last_at
+            'SELECT username, user_id, COUNT(*) AS messages, MAX(created_at) AS last_at, MAX(guest) AS guest
              FROM chat_logs WHERE channel_name = ? AND kind NOT IN ("join","part","quit","kick","ban","topic","mode","system","nick","notice") AND username IS NOT NULL
              GROUP BY username, user_id ORDER BY messages DESC',
             [$channelName]
@@ -88,7 +89,7 @@ final class MessageService
     public static function forChannel(int $channelId, int $since = 0, int $limit = 100): array
     {
         $rows = Database::all(
-            'SELECT m.*, u.username, u.bot, u.role,
+            'SELECT m.*, u.username, u.bot, u.role, u.guest,
                     (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id) AS level,
                     (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
              FROM messages m LEFT JOIN users u ON u.id = m.sender_id
@@ -103,7 +104,7 @@ final class MessageService
     public static function history(int $channelId, int $limit = 60): array
     {
         $rows = Database::all(
-            'SELECT m.*, u.username, u.bot, u.role,
+            'SELECT m.*, u.username, u.bot, u.role, u.guest,
                     (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id) AS level,
                     (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
              FROM messages m LEFT JOIN users u ON u.id = m.sender_id
@@ -118,7 +119,7 @@ final class MessageService
     public static function forDm(int $me, int $other, int $since = 0, int $limit = 100): array
     {
         $rows = Database::all(
-            'SELECT pm.*, u.username, u.bot, u.role, NULL AS level
+            'SELECT pm.*, u.username, u.bot, u.role, u.guest, NULL AS level
              FROM private_messages pm JOIN users u ON u.id = pm.sender_id
              WHERE pm.id > ? AND ((pm.sender_id = ? AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = ?))
              ORDER BY pm.id ASC
@@ -137,6 +138,7 @@ final class MessageService
                 'bot' => (int) $r['bot'],
                 'role' => $r['role'],
                 'role_color' => null,
+                'guest' => (int) ($r['guest'] ?? 0),
                 'level' => 'normal',
                 'reply_to_id' => null,
                 'edited_at' => null,
@@ -175,7 +177,7 @@ final class MessageService
     public static function recentDmPartners(int $userId, int $limit = 30): array
     {
         return Database::all(
-            'SELECT u.id, u.username, u.role, u.last_seen, u.away,
+            'SELECT u.id, u.username, u.role, u.guest, u.last_seen, u.away,
                     (SELECT pm.read_at FROM private_messages pm
                      WHERE ((pm.sender_id = u.id AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = u.id))
                      ORDER BY pm.id DESC LIMIT 1) IS NOT NULL AS all_read
@@ -264,6 +266,7 @@ final class MessageService
             'role' => $m['role'] ?? 'user',
             'level' => $m['level'] ?? 'normal',
             'role_color' => $m['role_color'] ?? null,
+            'guest' => (int) ($m['guest'] ?? 0),
             'reply_to_id' => $m['reply_to_id'] === null ? null : (int) $m['reply_to_id'],
             'edited_at' => $m['edited_at'],
             'deleted' => (int) $m['deleted'],

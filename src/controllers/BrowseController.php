@@ -15,8 +15,7 @@ final class BrowseController
     public static function browse(): void
     {
         $user = Auth::require();
-        $term = trim((string) ($_GET['q'] ?? ''));
-        $channels = ChannelService::publicChannels($term);
+        $channels = ChannelService::publicChannels(''); // full set; search/filter/sort is client-side
         $joined = ChannelService::joinedChannelNames((int) $user['id']);
         $joinedMap = [];
         foreach ($joined as $c) {
@@ -26,7 +25,6 @@ final class BrowseController
             'user' => $user,
             'channels' => $channels,
             'joinedMap' => $joinedMap,
-            'term' => $term,
         ]);
     }
 }

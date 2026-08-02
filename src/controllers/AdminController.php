@@ -109,6 +109,23 @@ final class AdminController
         render_view('admin/roles', ['admin' => $admin, 'roles' => $roles]);
     }
 
+    public static function opers(): void
+    {
+        $admin = self::require();
+        $opers = Database::all(
+            'SELECT o.*, c.name AS operclass FROM opers o LEFT JOIN operclasses c ON c.id = o.operclass_id ORDER BY o.username COLLATE NOCASE'
+        );
+        $classes = Database::all('SELECT id, name FROM operclasses ORDER BY name COLLATE NOCASE');
+        render_view('admin/opers', ['admin' => $admin, 'opers' => $opers, 'classes' => $classes]);
+    }
+
+    public static function operclasses(): void
+    {
+        $admin = self::require();
+        $classes = Database::all('SELECT * FROM operclasses ORDER BY is_default DESC, name COLLATE NOCASE');
+        render_view('admin/operclasses', ['admin' => $admin, 'classes' => $classes]);
+    }
+
     public static function motd(): void
     {
         $admin = self::require();
@@ -190,7 +207,7 @@ final class AdminController
 
         foreach ($rows as $r) {
             $time = date('g:i:s A', strtotime($r['created_at'] . ' UTC'));
-            $user = (string) $r['username'];
+            $user = (string) $r['username'] . ((int) ($r['guest'] ?? 0) === 1 ? ' (guest)' : '');
             $content = (string) $r['content'];
             switch ($r['kind']) {
                 case 'message':
@@ -228,7 +245,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'registration_enabled', 'oper_password', 'spamfilter_enabled', 'max_channels_per_user', 'motd'];
+        $keys = ['site_name', 'registration_enabled', 'spamfilter_enabled', 'max_channels_per_user', 'motd'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -418,6 +435,73 @@ final class AdminController
                 log_audit('user_set_role', 'user#' . $id, 'role#' . $roleId);
                 $message = 'Role assigned.';
                 break;
+            case 'oper_add':
+                $username = trim((string) ($_POST['username'] ?? ''));
+                $password = (string) ($_POST['password'] ?? '');
+                $classId = (int) ($_POST['operclass_id'] ?? 0);
+                if ($username === '' || strlen($password) < 8) {
+                    $ok = false;
+                    $message = 'A username and an 8+ char password are required.';
+                } elseif (Database::scalar('SELECT id FROM opers WHERE username = ? COLLATE NOCASE', [$username])) {
+                    $ok = false;
+                    $message = 'That o:line already exists.';
+                } elseif (!Database::scalar('SELECT id FROM operclasses WHERE id = ?', [$classId])) {
+                    $ok = false;
+                    $message = 'Invalid operator class.';
+                } else {
+                    Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES (?, ?, ?)', [$username, password_hash($password, PASSWORD_ARGON2ID), $classId]);
+                    log_audit('oper_add', $username);
+                    $message = "O:line added for $username.";
+                }
+                break;
+            case 'oper_del':
+                $id = (int) ($_POST['id'] ?? 0);
+                Database::query('DELETE FROM opers WHERE id = ?', [$id]);
+                log_audit('oper_del', 'oper#' . $id);
+                $message = 'O:line removed.';
+                break;
+            case 'oper_toggle':
+                $id = (int) ($_POST['id'] ?? 0);
+                Database::query('UPDATE opers SET enabled = 1 - enabled WHERE id = ?', [$id]);
+                $message = 'O:line toggled.';
+                break;
+            case 'operclass_save':
+                $id = (int) ($_POST['id'] ?? 0);
+                $name = trim((string) ($_POST['name'] ?? ''));
+                $color = trim((string) ($_POST['color'] ?? '#ffd700'));
+                $perms = array_values(array_intersect(
+                    ['oper', 'manage_users', 'manage_channels', 'manage_bans', 'manage_badwords', 'manage_roles', 'manage_opers', 'rehash'],
+                    array_map('strval', (array) ($_POST['perms'] ?? []))
+                ));
+                if ($name === '') {
+                    $ok = false;
+                    $message = 'A class name is required.';
+                } elseif ($id > 0) {
+                    Database::query('UPDATE operclasses SET name = ?, color = ?, perms = ? WHERE id = ?', [$name, $color, json_encode($perms), $id]);
+                    log_audit('operclass_update', $name);
+                    $message = 'Operator class updated.';
+                } else {
+                    Database::query('INSERT INTO operclasses (name, color, perms) VALUES (?, ?, ?)', [$name, $color, json_encode($perms)]);
+                    log_audit('operclass_add', $name);
+                    $message = "Operator class '$name' created.";
+                }
+                break;
+            case 'operclass_del':
+                $id = (int) ($_POST['id'] ?? 0);
+                $class = Database::row('SELECT * FROM operclasses WHERE id = ?', [$id]);
+                if (!$class) {
+                    $ok = false;
+                    $message = 'Class not found.';
+                } elseif ((int) $class['is_default'] === 1) {
+                    $ok = false;
+                    $message = 'Default operator classes cannot be deleted.';
+                } else {
+                    Database::query('DELETE FROM opers WHERE operclass_id = ?', [$id]);
+                    Database::query('DELETE FROM operclasses WHERE id = ?', [$id]);
+                    log_audit('operclass_del', $class['name']);
+                    $message = 'Operator class deleted.';
+                }
+                break;
             case 'motd_save':
                 config_set('motd', (string) ($_POST['motd'] ?? ''));
                 log_audit('motd_save');
@@ -426,10 +510,6 @@ final class AdminController
             case 'settings_save':
                 config_set('site_name', trim((string) ($_POST['site_name'] ?? 'LVChat')));
                 config_set('registration_enabled', ($_POST['registration_enabled'] ?? '0') === '1' ? '1' : '0');
-                $operPw = (string) ($_POST['oper_password'] ?? '');
-                if ($operPw !== '') {
-                    config_set('oper_password', $operPw);
-                }
                 config_set('spamfilter_enabled', ($_POST['spamfilter_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('max_channels_per_user', max(1, (int) ($_POST['max_channels_per_user'] ?? 100)));
                 log_audit('settings_save');

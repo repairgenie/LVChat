@@ -50,12 +50,25 @@ final class Database
         if (!in_array('roles', $tables, true)) {
             $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT "#5865f2", perms TEXT NOT NULL DEFAULT "[]")');
         }
+        if (!in_array('operclasses', $tables, true)) {
+            $pdo->exec('CREATE TABLE operclasses (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT "#ffd700", perms TEXT NOT NULL DEFAULT "[]", is_default INTEGER NOT NULL DEFAULT 0)');
+        }
+        if (!in_array('opers', $tables, true)) {
+            $pdo->exec('CREATE TABLE opers (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, operclass_id INTEGER NOT NULL REFERENCES operclasses(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+        }
         if (!in_array('chat_logs', $tables, true)) {
-            $pdo->exec('CREATE TABLE chat_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_name TEXT, user_id INTEGER, username TEXT, kind TEXT NOT NULL DEFAULT "message", content TEXT NOT NULL DEFAULT "", created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+            $pdo->exec('CREATE TABLE chat_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_name TEXT, user_id INTEGER, username TEXT, kind TEXT NOT NULL DEFAULT "message", content TEXT NOT NULL DEFAULT "", guest INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+        } else {
+            $logCols = array_column($pdo->query('PRAGMA table_info(chat_logs)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('guest', $logCols, true)) {
+                $pdo->exec('ALTER TABLE chat_logs ADD COLUMN guest INTEGER NOT NULL DEFAULT 0');
+            }
         }
 
         // Rename the default site name on installs created before the rebrand.
         $pdo->exec("UPDATE server_config SET value = 'LVChat' WHERE key = 'site_name' AND value = 'Chat Relay'");
+
+        self::seedOperclasses($pdo);
 
         if ($fresh) {
             self::seed();
@@ -102,7 +115,6 @@ final class Database
         $config = [
             'site_name' => 'LVChat',
             'registration_enabled' => '1',
-            'oper_password' => '',
             'motd' => "Welcome to LVChat!\n\nType /help for a list of slash commands.",
             'spamfilter_enabled' => '1',
             'max_channels_per_user' => '100',
@@ -119,5 +131,20 @@ final class Database
         $chan->execute(['#general', 'general', 'General discussion', 'Public chat for everyone on the server', 'public']);
         $chan->execute(['#help', 'help', 'Need help? Ask here.', 'Get help from the community and staff', 'public']);
         $chan->execute(['#staff', 'staff', 'Staff coordination', 'Admins and staff only', 'staff']);
+    }
+
+    /** Ensure the built-in operator classes exist (idempotent). */
+    private static function seedOperclasses(PDO $pdo): void
+    {
+        $defaults = [
+            'netadmin' => ['oper', 'manage_users', 'manage_channels', 'manage_bans', 'manage_badwords', 'manage_roles', 'manage_opers', 'rehash'],
+            'serveradmin' => ['oper', 'manage_channels', 'manage_bans', 'manage_badwords', 'manage_opers', 'rehash'],
+            'globalop' => ['oper', 'manage_bans'],
+            'localop' => ['oper'],
+        ];
+        $ins = $pdo->prepare('INSERT OR IGNORE INTO operclasses (name, perms, is_default) VALUES (?, ?, 1)');
+        foreach ($defaults as $name => $perms) {
+            $ins->execute([$name, json_encode($perms)]);
+        }
     }
 }

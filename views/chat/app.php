@@ -55,10 +55,11 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     if ($m['kind'] === 'action') {
         $isAdmin = ($m['role'] ?? '') === 'admin';
         $rc = (!$isAdmin && !empty($m['role_color'])) ? ' style="color:' . h($m['role_color']) . '"' : '';
+        $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
         $nameColor = $isAdmin ? 'text-red-400' : 'text-discord-100';
         return '<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="' . (int) $m['id'] . '" data-kind="action" data-author="' . h($m['username']) . '">
             <div class="w-10 shrink-0"></div>
-            <div class="text-sm ' . ($isAdmin ? 'text-red-400' : ($rc !== '' ? 'text-discord-200' : 'text-discord-200')) . '"' . $rc . '><span class="italic">* <span class="font-medium ' . $nameColor . '"' . $rc . '>' . h($m['username']) . '</span> ' . chat_markup($m['content']) . '</span></div>
+            <div class="text-sm ' . ($isAdmin ? 'text-red-400' : 'text-discord-200') . '"' . $rc . '><span class="italic">* <span class="font-medium ' . $nameColor . '"' . $rc . '>' . h($m['username']) . '</span>' . $guestTag . ' ' . chat_markup($m['content']) . '</span></div>
         </div>';
     }
 
@@ -100,7 +101,7 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
         <div class="w-10 h-10 shrink-0 rounded-full bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600">' . h($initial) . '</div>
         <div class="min-w-0 flex-1">
             <div class="flex items-baseline gap-2 h-[22px]">
-                <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . '</span>
+                <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . (!empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '') . '</span>
                 <span class="time text-[11px] text-discord-400 hidden group-hover:inline" data-ts="' . h($m['created_at']) . '">' . h(date('H:i', strtotime($m['created_at'] . ' UTC'))) . '</span>
                 ' . (!empty($m['edited_at']) ? '<span class="text-[10px] text-discord-400">(edited)</span>' : '') . '
             </div>
@@ -115,9 +116,10 @@ function member_html(array $m, bool $online): string {
         : ($m['role'] === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '');
     $color = $m['role'] === 'admin' ? 'text-red-400' : ($online ? level_color($m['level']) : 'text-discord-400');
     $roleStyle = ($m['role'] !== 'admin' && !empty($m['role_color'])) ? ' style="color:' . h($m['role_color']) . '"' : '';
+    $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
     return '<a href="/app?dm=' . h(rawurlencode($m['username'])) . '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ' . $color . '"' . $roleStyle . ' data-username="' . h($m['username']) . '" data-level="' . h($m['level']) . '">
         <span class="text-[10px] font-bold w-3">' . h(level_symbol($m['level'])) . '</span>
-        <span class="truncate">' . h($m['username']) . '</span>' . ($m['away'] ? '<span class="text-xs" title="' . h($m['away']) . '">💤</span>' : '') . $badge . '</a>';
+        <span class="truncate">' . h($m['username']) . $guestTag . '</span>' . ($m['away'] ? '<span class="text-xs" title="' . h($m['away']) . '">💤</span>' : '') . $badge . '</a>';
 }
 ?>
 <!DOCTYPE html>
@@ -141,7 +143,7 @@ function member_html(array $m, bool $online): string {
       data-commands="<?= h(json_encode($commands)) ?>">
 
   <!-- ── Left: channel sidebar ── -->
-  <aside class="w-60 md:w-64 bg-discord-800 flex flex-col shrink-0">
+  <aside id="sidebar" class="sidebar w-60 md:w-64 bg-discord-800 flex flex-col shrink-0">
     <div class="h-12 px-4 flex items-center justify-between border-b border-discord-700 shadow-sm shrink-0">
       <span class="font-bold text-white text-sm truncate"><?= h($site) ?></span>
       <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications">
@@ -156,6 +158,11 @@ function member_html(array $m, bool $online): string {
           <button id="create-channel" class="text-discord-400 hover:text-white text-sm" title="Create a channel">＋</button>
         </div>
         <div class="mt-1 space-y-0.5">
+          <?php if ($user['role'] === 'admin'): ?>
+          <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
+            <span class="text-discord-400">🛡</span> Admin dashboard
+          </a>
+          <?php endif; ?>
           <a href="/browse" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm">
             <span class="text-discord-400">🌐</span> Browse channels
           </a>
@@ -182,7 +189,7 @@ function member_html(array $m, bool $online): string {
              data-ctx-user="<?= h($d['username']) ?>"
              class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $dmName === $d['username'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?>">
             <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : 'bg-green-500' ?>"></span>
-            <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($d['username']) ?></span>
+            <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
             <?php if ($ucnt): ?><span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><?= $ucnt ?></span><?php endif; ?>
           </a>
           <?php endforeach; ?>
@@ -194,7 +201,7 @@ function member_html(array $m, bool $online): string {
         <div class="mt-1 space-y-0.5">
           <?php foreach ($onlineUsers as $ou): ?>
           <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
-            <span class="w-2 h-2 rounded-full bg-green-500"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?></span>
+            <span class="w-2 h-2 rounded-full bg-green-500"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
           </a>
           <?php endforeach; ?>
           <?php if (!$onlineUsers): ?><div class="px-2 py-1 text-xs text-discord-500">Nobody online</div><?php endif; ?>
@@ -228,7 +235,8 @@ function member_html(array $m, bool $online): string {
 
   <!-- ── Center: chat ── -->
   <section class="flex-1 flex flex-col min-w-0 min-h-0 bg-discord-750">
-    <header class="h-12 px-4 border-b border-discord-800 bg-discord-750 flex items-center gap-3 shadow-sm shrink-0">
+    <header class="h-12 pl-2 pr-4 border-b border-discord-800 bg-discord-750 flex items-center gap-3 shadow-sm shrink-0">
+      <button id="sidebar-toggle" class="btn-ghost !p-1.5 text-lg leading-none" title="Toggle channel list" aria-label="Toggle channel list">☰</button>
       <?php if ($channel): ?>
       <span class="font-bold text-white text-sm"><?= h($channel['name']) ?></span>
       <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= h($channel['topic']) ?></span>
@@ -310,6 +318,7 @@ function member_html(array $m, bool $online): string {
 
     <div class="px-4 pt-2 pb-4 shrink-0 bg-discord-750">
       <div id="autocomplete" class="hidden mb-2 card max-h-56 overflow-y-auto scrollbar-thin"></div>
+      <div id="emoji-panel" class="hidden mb-2 card p-2 grid grid-cols-8 gap-1 max-h-56 overflow-y-auto scrollbar-thin"></div>
       <form id="send-form" method="post" action="/api/send" class="relative">
         <?= Csrf::field() ?>
         <?php if ($dm): ?>
@@ -318,9 +327,10 @@ function member_html(array $m, bool $online): string {
         <input type="hidden" name="channel" value="<?= h($channel['slug']) ?>">
         <?php endif; ?>
         <input id="chat-input" name="content" type="text" autocomplete="off" spellcheck="false"
-               class="input pr-16 bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow"
+               class="input pr-28 bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow"
                placeholder="<?= h($channel ? "Message #" . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
                <?= ($channel || $dm) ? '' : 'disabled' ?>>
+        <button type="button" id="emoji-btn" class="absolute right-12 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji">😀</button>
         <button type="submit" class="absolute right-2 top-1/2 -translate-y-1/2 btn-primary !p-1.5 !rounded-md" title="Send">➤</button>
       </form>
       <div class="text-[11px] text-discord-400 mt-1.5 px-1">Type <span class="text-discord-200">/</span> for commands · <span class="text-discord-200">@nick</span> to mention · <span class="text-discord-200">Enter</span> to send</div>
@@ -401,7 +411,7 @@ function member_html(array $m, bool $online): string {
   <?php endif; ?>
 
   <!-- Notifications panel -->
-  <div id="notif-panel" class="hidden fixed top-14 right-4 w-80 card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin">
+  <div id="notif-panel" class="hidden fixed top-14 right-4 w-80 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin">
     <div class="px-3 py-2 border-b border-discord-700 text-sm font-semibold flex items-center justify-between">
       <span>Notifications</span>
       <button id="notif-clear" class="text-xs text-discord-400 hover:text-white">Mark all read</button>
@@ -417,6 +427,9 @@ function member_html(array $m, bool $online): string {
       <?php if (!$notifications): ?><div class="px-2 py-3 text-discord-500 text-center">Nothing new</div><?php endif; ?>
     </div>
   </div>
+
+  <!-- Mobile sidebar backdrop -->
+  <div id="sidebar-backdrop" class="hidden fixed inset-0 z-[55] bg-black/60 md:hidden"></div>
 
   <!-- Right-click context menu -->
   <div id="ctx-menu" class="hidden fixed z-[100] min-w-52 max-w-72 card p-1.5 shadow-2xl text-sm"></div>

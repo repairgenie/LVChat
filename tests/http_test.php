@@ -293,8 +293,9 @@ check('guest can open /app', $s === 200, (string) $s);
 check('guest cannot create a channel', $s === 400 && strpos($b, 'existing channels') !== false, "$s $b");
 [$s, , $b] = req('POST', '/api/join', ['csrf' => csrf(req('GET', '/app', [], $cjG)[2]), 'name' => '#nonexistent'], $cjG);
 check('guest cannot join-and-create via /api/join', $s === 400 && strpos($b, 'existing channels') !== false, "$s $b");
-$t = csrf(req('GET', '/login', [], $cjG)[2]);
-[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app'], $cjG);
+$cjG2 = '/tmp/opencode/httptest-g2.txt';
+$t = csrf(req('GET', '/login', [], $cjG2)[2]);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app'], $cjG2);
 check('duplicate guest nick rejected (back to login)', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
 
 // logout

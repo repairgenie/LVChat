@@ -1,11 +1,19 @@
 <?php $title = $user['username']; ?>
+<!-- X button: return to the chat -->
+<button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost fixed top-4 right-4 z-40 !p-2" title="Back to chat" aria-label="Close profile">✕</button>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
   <div class="card p-6 text-center md:col-span-1">
     <div class="mx-auto w-20 h-20 rounded-full bg-blurple flex items-center justify-center text-3xl font-bold text-white"><?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?></div>
     <h1 class="mt-3 text-xl font-bold text-white"><?= h($user['username']) ?></h1>
     <div class="mt-1 text-sm">
-      <?php if ($user['role'] === 'admin'): ?>
+      <?php if ((int) ($user['guest'] ?? 0)): ?>
+      <span class="text-green-400 font-medium">Guest</span>
+      <?php elseif ($user['role'] === 'admin'): ?>
       <span class="text-amber-400 font-medium">IRC Operator</span>
+      <?php elseif ($user['role'] === 'staff'): ?>
+      <span class="text-blurple font-medium">Staff</span>
+      <?php else: ?>
+      <span class="text-discord-400 font-medium">Registered</span>
       <?php endif; ?>
       <span class="text-discord-400"> · <?= $isOnline ? 'online' : 'offline' ?></span>
     </div>

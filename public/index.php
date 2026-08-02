@@ -49,6 +49,8 @@ $router->get('/admin/bans', [AdminController::class, 'bans']);
 $router->get('/admin/spamfilters', [AdminController::class, 'spamfilters']);
 $router->get('/admin/badwords', [AdminController::class, 'badwords']);
 $router->get('/admin/roles', [AdminController::class, 'roles']);
+$router->get('/admin/opers', [AdminController::class, 'opers']);
+$router->get('/admin/operclasses', [AdminController::class, 'operclasses']);
 $router->get('/admin/motd', [AdminController::class, 'motd']);
 $router->get('/admin/logs', [AdminController::class, 'logs']);
 $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
