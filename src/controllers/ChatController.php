@@ -269,18 +269,21 @@ final class ChatController
     {
         $user = self::requireUser();
         $since = max(0, (int) ($_GET['since'] ?? 0));
-        $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0];
+        $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => []];
 
         $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [$user['id']]);
         $out['notify_count'] = $notifyCount;
+        // Live DM sidebar data — returned on every poll regardless of which page
+        // the user is on, so a DM sent to someone sitting in a channel surfaces.
+        $out['dm_list'] = MessageService::dmSummaries((int) $user['id']);
 
         if (isset($_GET['dm'])) {
             $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$_GET['dm']]);
             if ($t) {
-            $out['messages'] = MessageService::forDm((int) $user['id'], (int) $t['id'], $since);
-            if (MessageService::hasUnreadDm((int) $user['id'], (int) $t['id'])) {
-                MessageService::markDmRead((int) $user['id'], (int) $t['id']);
-            }
+                $out['messages'] = MessageService::forDm((int) $user['id'], (int) $t['id'], $since);
+                if (MessageService::hasUnreadDm((int) $user['id'], (int) $t['id'])) {
+                    MessageService::markDmRead((int) $user['id'], (int) $t['id']);
+                }
                 $out['dm'] = $t['username'];
                 $out['presence'][] = [
                     'username' => $t['username'],

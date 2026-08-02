@@ -118,14 +118,19 @@ final class MessageService
 
     public static function forDm(int $me, int $other, int $since = 0, int $limit = 100): array
     {
+        // Polls (since > 0) want the new messages in ascending order; an initial
+        // history load (since = 0) wants the *most recent* messages, so fetch the
+        // newest `limit` by id and reverse them for display.
+        $order = $since > 0 ? 'ASC' : 'DESC';
         $rows = Database::all(
             'SELECT pm.*, u.username, u.bot, u.role, u.guest, NULL AS level
              FROM private_messages pm JOIN users u ON u.id = pm.sender_id
              WHERE pm.id > ? AND ((pm.sender_id = ? AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = ?))
-             ORDER BY pm.id ASC
+             ORDER BY pm.id ' . $order . '
              LIMIT ?',
             [$since, $me, $other, $other, $me, $limit]
         );
+        $rows = $since > 0 ? $rows : array_reverse($rows);
         $out = [];
         foreach ($rows as $r) {
             $out[] = [
@@ -199,6 +204,46 @@ final class MessageService
              LIMIT ?',
             [$userId, $userId, $userId, $userId, $limit]
         );
+    }
+
+    /** Live DM sidebar + toast data: partners, unread counts, latest message previews. */
+    public static function dmSummaries(int $userId, int $limit = 30): array
+    {
+        $rows = Database::all(
+            'SELECT u.id AS user_id, u.username, u.role, u.guest, u.last_seen, u.away,
+                    (SELECT COUNT(*) FROM private_messages pm
+                     WHERE pm.recipient_id = ? AND pm.sender_id = u.id AND pm.read_at IS NULL) AS unread,
+                    (SELECT pm.content FROM private_messages pm
+                     WHERE ((pm.sender_id = u.id AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = u.id))
+                     ORDER BY pm.id DESC LIMIT 1) AS last_content,
+                    (SELECT pm.id FROM private_messages pm
+                     WHERE ((pm.sender_id = u.id AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = u.id))
+                     ORDER BY pm.id DESC LIMIT 1) AS last_id
+             FROM users u
+             WHERE u.id IN (
+                SELECT sender_id FROM private_messages WHERE recipient_id = ?
+                UNION
+                SELECT recipient_id FROM private_messages WHERE sender_id = ?
+             )
+             ORDER BY u.username COLLATE NOCASE
+             LIMIT ?',
+            [$userId, $userId, $userId, $userId, $userId, $userId, $userId, $limit]
+        );
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'user_id' => (int) $r['user_id'],
+                'username' => $r['username'],
+                'role' => $r['role'],
+                'guest' => (int) ($r['guest'] ?? 0),
+                'away' => $r['away'],
+                'last_seen' => $r['last_seen'],
+                'unread' => (int) $r['unread'],
+                'last_content' => (string) ($r['last_content'] ?? ''),
+                'last_id' => (int) ($r['last_id'] ?? 0),
+            ];
+        }
+        return $out;
     }
 
     public static function notifyMentions(array $msg, int $channelId, int $senderId): void

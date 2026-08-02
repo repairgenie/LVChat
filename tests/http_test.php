@@ -145,6 +145,7 @@ $msgId = $j['message']['id'] ?? 0;
 [$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0', [], $cjA);
 $j = jsonDecode($b);
 check('poll returns messages', $s === 200 && count($j['messages'] ?? []) > 0, $b);
+check('poll always returns dm_list (live DM sidebar)', $s === 200 && isset($j['dm_list']) && is_array($j['dm_list']), $b);
 
 [$s, , $b] = req('POST', '/api/command', ['csrf' => $t, 'channel' => 'gaming', 'text' => '/topic #gaming cool chat'], $cjA);
 check('/topic command', $s === 200 && str_contains(jsonDecode($b)['replies'][0] ?? '', 'Topic set'), $b);
@@ -178,6 +179,15 @@ check('PM from alice to bob', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 [$s, , $b] = req('GET', '/api/poll?dm=bob&since=0', [], $cjA);
 $j = jsonDecode($b);
 check('bob DM appears in alice poll', $s === 200 && count($j['messages'] ?? []) === 1, $b);
+// A DM sent while the recipient is NOT on the DM page must still surface in
+// the recipient's poll via dm_list (this was the "DMs don't land" bug).
+[$s, , $b] = req('GET', '/api/poll?since=0', [], $cjB);
+$j = jsonDecode($b);
+$found = false;
+foreach (($j['dm_list'] ?? []) as $d) {
+    if ($d['username'] === 'alice' && (int) $d['unread'] >= 1) $found = true;
+}
+check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found, $b);
 
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
@@ -297,6 +307,18 @@ $cjG2 = '/tmp/opencode/httptest-g2.txt';
 $t = csrf(req('GET', '/login', [], $cjG2)[2]);
 [$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app'], $cjG2);
 check('duplicate guest nick rejected (back to login)', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
+
+// A guest who logs out frees the nick immediately; re-login reuses the row.
+$cjG3 = '/tmp/opencode/httptest-g3.txt';
+$t = csrf(req('GET', '/login', [], $cjG3)[2]);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app'], $cjG3);
+check('guest wanderer logs in', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
+[$s] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjG3)[2])], $cjG3);
+check('guest wanderer logs out', $s === 302, (string) $s);
+$cjG4 = '/tmp/opencode/httptest-g4.txt';
+$t = csrf(req('GET', '/login', [], $cjG4)[2]);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app'], $cjG4);
+check('guest nick free after logout (re-login ok)', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
 
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);

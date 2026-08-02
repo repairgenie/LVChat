@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '1';
+    private const SCHEMA_VERSION = '2';
 
     public static function init(): void
     {
@@ -50,6 +50,9 @@ final class Database
         }
         if (!in_array('guest', $userCols, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN guest INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!in_array('theme', $userCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT ''");
         }
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('censor', $chanCols, true)) {

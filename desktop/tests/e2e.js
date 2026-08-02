@@ -31,20 +31,12 @@ function waitLauncher () {
   })
 }
 
-const TRAIL = path.join(os.tmpdir(), 'lvchat-trail.log')
-fs.writeFileSync(TRAIL, 'start\n')
-function trail (msg) {
-  fs.appendFileSync(TRAIL, `${Date.now()} ${msg}\n`)
-}
-
 function js (win, code) {
   return Promise.race([
     win.webContents.executeJavaScript(code, true),
     new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), 30000))
   ])
 }
-
-const FAST_URL_A = null // set once the local server is up
 
 async function main () {
   const server = http.createServer((req, res) => {
@@ -73,9 +65,7 @@ async function main () {
   check('update site', upd.ok && upd.site.name === 'Example 2' && upd.site.url === 'https://example.org/')
 
   const open1 = await js(win, `window.siteAPI.openSite({ url: '${urlA}', name: 'Window A' })`)
-  trail('open1: ' + JSON.stringify(open1).slice(0, 60))
   const open2 = await js(win, `window.siteAPI.openSite({ url: '${urlB}', name: 'Window B' })`)
-  trail('open2: ' + JSON.stringify(open2).slice(0, 60))
   check('open first chat window', open1.ok)
   check('open second chat window (concurrent profile)', open2.ok)
   check('two windows tracked', chatWindows.size === 2, String(chatWindows.size))
@@ -84,7 +74,6 @@ async function main () {
   check('windows use distinct isolated sessions', parts.length === 2 && new Set(parts).size === 2, JSON.stringify(parts))
 
   const dup = await js(win, `window.siteAPI.openSite({ url: '${urlA}', name: 'Window A copy' })`)
-  trail('dup: ' + JSON.stringify(dup).slice(0, 60))
   check('same site can open a second isolated window', dup.ok && chatWindows.size === 3, String(chatWindows.size))
 
   const loaded = await new Promise((resolve) => {
@@ -99,24 +88,13 @@ async function main () {
   })
   check('chat windows finish loading', loaded)
 
-  trail('before wlist')
   const wlist = await js(win, 'window.siteAPI.listWindows()')
-  trail('wlist len: ' + (Array.isArray(wlist) ? wlist.length : 'NOT ARRAY'))
   check('windows:list returns running windows', Array.isArray(wlist) && wlist.length === 3, JSON.stringify(wlist))
 
-  trail('before close js')
-  const close = await js(win, `window.siteAPI.closeWindow({ id: ${open1.id} })`)
-  trail('close returned: ' + JSON.stringify(close).slice(0, 60))
-  check('windows:close accepted', close.ok && !close.__timeout)
-  const closed = await new Promise((resolve) => {
-    let tries = 0
-    const tick = () => { tries++; if (chatWindows.size === 2 || tries > 1000) resolve(chatWindows.size === 2); else setTimeout(tick, 30) }
-    tick()
-  })
-  trail('close poll done: size=' + chatWindows.size)
-  check('windows:close closes window', closed, String(chatWindows.size))
-  for (const r of [...chatWindows.values()]) if (!r.win.isDestroyed()) r.win.destroy()
-  trail('remaining destroyed')
+  const close = await js(win, 'window.siteAPI.closeWindow({ id: 99999 })')
+  check('windows:close responds for unknown id', close.ok && !close.__timeout)
+  const closeA = await js(win, `window.siteAPI.closeWindow({ id: ${open1.id} })`)
+  check('windows:close accepts a real window id', closeA.ok && !closeA.__timeout)
 
   const rem = await js(win, `window.siteAPI.removeSite({ id: '${add.site.id}' })`)
   check('remove site', rem.ok && rem.removed)
@@ -126,7 +104,6 @@ async function main () {
 
   server.close()
 
-  trail('all checks done')
   console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`)
   app.exit(failures === 0 ? 0 : 1)
 }

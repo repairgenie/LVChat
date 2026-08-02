@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "description": "LVChat Desktop - multi-site chat launcher",
   "main": "src/main.js",
-  "author": "LVChat",
+  "author": {
+    "name": "LVChat",
+    "email": "admin@lasvegasbestinternet.com"
+  },
+  "homepage": "https://lasvegasbestinternet.com",
+  "desktopName": "lvchat-desktop.desktop",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
@@ -45,7 +50,8 @@
         "AppImage",
         "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "syncDesktopName": true
     }
   },
   "devDependencies": {

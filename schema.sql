@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   bot INTEGER NOT NULL DEFAULT 0,
   banned INTEGER NOT NULL DEFAULT 0,
   ban_reason TEXT,
+  theme TEXT NOT NULL DEFAULT '',
   registered_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen TEXT,
   last_ip TEXT

@@ -193,13 +193,10 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin' && !isQuitting && chatWindows.size === 0) {
-    // keep running in the tray
-  }
+  // Keep running in the tray; the app only quits via the tray/menu Quit,
+  // or when the launcher is closed with no chat windows open.
 })
 
 app.on('before-quit', () => { isQuitting = true })
-
-app.on('second-instance', () => createLauncherWindow())
 
 module.exports = { createLauncherWindow, openChatWindow, chatWindows, registerIpc, sameSite }

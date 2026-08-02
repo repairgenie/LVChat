@@ -56,14 +56,23 @@ final class UserController
     {
         $user = Auth::require();
         Csrf::verify();
-        $vhost = trim((string) ($_POST['vhost'] ?? ''));
-        if ($vhost !== '' && !preg_match('/^[A-Za-z0-9.\-]{3,60}$/', $vhost)) {
-            json_out(['error' => 'Invalid vhost.'], 400);
+        $fields = [];
+        if (isset($_POST['vhost'])) {
+            $vhost = trim((string) $_POST['vhost']);
+            if ($vhost !== '' && !preg_match('/^[A-Za-z0-9.\-]{3,60}$/', $vhost)) {
+                json_out(['error' => 'Invalid vhost.'], 400);
+            }
+            $fields['vhost'] = $vhost !== '' ? $vhost : null;
         }
-        $fields = ['vhost' => $vhost !== '' ? $vhost : null];
         if (isset($_POST['away'])) {
             $fields['away'] = $_POST['away'] !== '' ? mb_substr((string) $_POST['away'], 0, 200) : null;
             $fields['away_at'] = $_POST['away'] !== '' ? now() : null;
+        }
+        if (isset($_POST['theme'])) {
+            $fields['theme'] = $_POST['theme'] === 'light' ? 'light' : 'dark';
+        }
+        if (!$fields) {
+            json_out(['ok' => true]);
         }
         $set = [];
         $vals = [];

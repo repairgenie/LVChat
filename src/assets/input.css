@@ -3,7 +3,42 @@
 @tailwind utilities;
 
 @layer base {
+  /* Dark is the default; html.light overrides the palette. Values are the
+     red/green/blue triplets used by rgb(var(--x) / <alpha-value>). */
+  :root {
+    --c-blurple: 88 101 242;
+    --c-blurple-dark: 71 82 196;
+    --c-d-100: 242 243 245;
+    --c-d-200: 219 222 225;
+    --c-d-300: 181 186 193;
+    --c-d-400: 128 132 142;
+    --c-d-500: 78 80 88;
+    --c-d-600: 63 65 71;
+    --c-d-700: 56 58 64;
+    --c-d-750: 49 51 56;
+    --c-d-800: 43 45 49;
+    --c-d-850: 41 43 47;
+    --c-d-900: 30 31 34;
+    --c-d-950: 17 18 20;
+  }
   html { color-scheme: dark; }
+  html.light {
+    --c-blurple: 88 101 242;
+    --c-blurple-dark: 71 82 196;
+    --c-d-100: 25 27 31;
+    --c-d-200: 47 50 56;
+    --c-d-300: 78 82 90;
+    --c-d-400: 106 111 120;
+    --c-d-500: 190 194 201;
+    --c-d-600: 205 208 214;
+    --c-d-700: 219 222 228;
+    --c-d-750: 237 238 242;
+    --c-d-800: 255 255 255;
+    --c-d-850: 244 245 248;
+    --c-d-900: 243 244 248;
+    --c-d-950: 233 234 239;
+  }
+  html.light { color-scheme: light; }
   body { font-feature-settings: "cv01", "cv03"; }
   html, body { height: 100%; }
 }
@@ -11,6 +46,7 @@
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar { width: 8px; }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: #3f4147; border-radius: 4px; }
+  html.light .scrollbar-thin::-webkit-scrollbar-thumb { background: #c9ccd3; }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 }
 
@@ -44,3 +80,18 @@ body.chat-app { position: fixed; inset: 0; overflow: hidden; }
   }
   body.sidebar-open .sidebar { transform: translateX(0); box-shadow: 0 0 28px rgba(0,0,0,.55); }
 }
+
+/* A handful of hardcoded `text-white` usages sit on plain panels (not colored
+   chips/avatars) and need dark text in light mode. */
+html.light .text-white { color: var(--c-d-100); }
+html.light .hover\:text-white:hover { color: var(--c-d-100); }
+html.light .hover\:bg-white\/\[0\.03\]:hover { background-color: rgba(0, 0, 0, .045); }
+/* …but white text stays white on solid colored chips/avatars/badges. */
+html.light .bg-blurple.text-white,
+html.light .bg-blurple .text-white,
+html.light .bg-blurple-dark.text-white,
+html.light .bg-blurple-dark .text-white,
+html.light .bg-discord-500.text-white,
+html.light .bg-discord-500 .text-white,
+html.light .bg-red-500.text-white,
+html.light .bg-red-500 .text-white { color: #fff; }

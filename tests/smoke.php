@@ -546,6 +546,24 @@ $guest = Auth::loginGuest('anoncat');
 check('guest login creates guest row', $guest !== null && (int) $guest['guest'] === 1, json_encode($guest));
 check('guest nick is unique (duplicate rejected)', Auth::loginGuest('anoncat') === null);
 check('guest cannot take a registered nick', Auth::loginGuest('alice') === null);
+
+// ── Guest nick release (guests are never permanently "registered") ──────────
+$g1 = Auth::loginGuest('guestnick');
+check('guest login creates a guest row', $g1 !== null && (int) $g1['guest'] === 1, json_encode($g1));
+Auth::logout(); // guest logout stamps last_seen = NULL -> nick frees instantly
+$g2 = Auth::loginGuest('guestnick');
+check('guest logout frees nick (re-login reuses same row)', $g2 !== null && (int) $g2['id'] === (int) $g1['id'], json_encode($g2));
+check('active guest still blocks a duplicate nick', Auth::loginGuest('guestnick') === null);
+Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g2['id']]);
+$g3 = Auth::loginGuest('guestnick');
+check('stale guest row reclaimed (same id keeps DM history)', $g3 !== null && (int) $g3['id'] === (int) $g1['id'], json_encode($g3));
+Auth::logout();
+$g4 = Auth::loginGuest('claimme');
+Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g4['id']]);
+$rc = Auth::register('claimme', 'claimme@example.com', 'password123');
+check('register converts a stale guest row into a real account', $rc['ok'] === true && (int) $rc['id'] === (int) $g4['id'], json_encode($rc));
+$claimed = Auth::attempt('claimme', 'password123');
+check('converted guest is a real (non-guest) account', $claimed !== null && (int) $claimed['guest'] === 0 && (int) $claimed['id'] === (int) $g4['id'], json_encode($claimed));
 check('guest can join an existing channel', ChannelService::joinStatus(ChannelService::find('#test'), $guest)['ok'] === true);
 ChannelService::join(ChannelService::find('#test'), $guest);
 $gm = MessageService::send((int) ChannelService::find('#test')['id'], (int) $guest['id'], 'guest says hi');

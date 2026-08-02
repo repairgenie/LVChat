@@ -209,6 +209,7 @@
   }
 
   // ── Polling ────────────────────────────────────────────────────────────────
+  let pollFails = 0;
   function poll() {
     const q = new URLSearchParams({ since: lastId });
     if (CHANNEL) q.set('channel', CHANNEL);
@@ -216,6 +217,7 @@
     fetch('/api/poll?' + q.toString())
       .then((r) => r.json())
       .then((j) => {
+        pollFails = 0;
         if (j.redirect) { window.location = j.redirect; return; }
         if (j.error) return;
         if (j.messages && j.messages.length) {
@@ -225,9 +227,88 @@
         }
         if (j.presence && CHANNEL) applyPresence(j.presence);
         if (typeof j.notify_count === 'number') setBell(j.notify_count);
+        if (j.dm_list) handleDmList(j.dm_list);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Never silently drop a poll forever: keep retrying, but log once and
+        // back off the scheduler so a dead server doesn't hammer the worker pool.
+        pollFails++;
+        if (pollFails === 1 || pollFails % 5 === 0) {
+          console.warn('poll failed (' + pollFails + ' consecutive) — will keep retrying');
+        }
+      });
   }
+
+  // ── Direct messages: live sidebar + arrival toast ─────────────────────────
+  const dmSection = document.getElementById('dm-section');
+  let dmSig = '';
+  let dmSeen = {};
+  let dmInit = false;
+  let dmToastTimer = null;
+
+  function dmItemHtml(d) {
+    const cur = DM && d.username && d.username.toLowerCase() === DM.toLowerCase();
+    const isAdmin = d.role === 'admin';
+    const guestTag = d.guest ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
+    const dot = d.away ? 'bg-amber-400' : 'bg-green-500';
+    const nameCls = isAdmin ? 'text-red-400' : '';
+    return `<a href="/app?dm=${encodeURIComponent(d.username)}"
+         data-ctx-user="${esc(d.username)}"
+         class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'}">
+      <span class="w-2 h-2 rounded-full ${dot}"></span>
+      <span class="truncate ${nameCls}">${esc(d.username)}${guestTag}</span>
+      ${d.unread ? `<span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">${d.unread > 99 ? '99+' : d.unread}</span>` : ''}
+    </a>`;
+  }
+
+  function renderDmSidebar(list) {
+    if (!dmSection) return;
+    const sig = JSON.stringify(list.map((d) => [d.user_id, d.username, d.unread, d.last_id]));
+    if (sig === dmSig) return;
+    dmSig = sig;
+    dmSection.innerHTML = list.length
+      ? list.map(dmItemHtml).join('')
+      : '<div class="px-2 py-1 text-xs text-discord-500">No conversations yet</div>';
+  }
+
+  function handleDmList(list) {
+    if (!dmInit) {
+      // Seed toast-dedupe state without toasting for pre-existing unread mail.
+      list.forEach((d) => { dmSeen[d.user_id] = d.last_id; });
+      dmInit = true;
+    } else {
+      list.forEach((d) => {
+        const prev = dmSeen[d.user_id] || 0;
+        if (d.last_id > prev && d.unread > 0 && DM !== d.username) {
+          showDmToast(d);
+        }
+        dmSeen[d.user_id] = d.last_id;
+      });
+      Object.keys(dmSeen).forEach((id) => {
+        if (!list.some((d) => String(d.user_id) === id)) delete dmSeen[id];
+      });
+    }
+    renderDmSidebar(list);
+  }
+
+  function showDmToast(d) {
+    const t = document.getElementById('dm-toast');
+    if (!t) return;
+    const raw = d.last_content || '';
+    const preview = raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
+    t.innerHTML = `<a href="/app?dm=${encodeURIComponent(d.username)}" class="flex items-start gap-3 px-4 py-3 hover:bg-discord-750 transition-colors">
+      <span class="text-lg leading-none">💬</span>
+      <span class="min-w-0">
+        <span class="block text-sm font-semibold text-white truncate">New message from ${esc(d.username)}</span>
+        ${preview ? `<span class="block text-xs text-discord-300 truncate">${esc(preview)}</span>` : ''}
+      </span>
+    </a>`;
+    t.classList.remove('hidden');
+    clearTimeout(dmToastTimer);
+    dmToastTimer = setTimeout(() => t.classList.add('hidden'), 5000);
+  }
+  const dmToastEl = document.getElementById('dm-toast');
+  if (dmToastEl) dmToastEl.addEventListener('click', () => dmToastEl.classList.add('hidden'));
 
   function applyPresence(list) {
     const el = document.getElementById('member-list');
@@ -266,12 +347,18 @@
           list.innerHTML = '<div class="px-2 py-3 text-discord-500 text-center">Nothing new</div>';
           return;
         }
-        list.innerHTML = j.notifications.map((n) =>
-          `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
+        list.innerHTML = j.notifications.map((n) => {
+          if (n.kind === 'dm') {
+            return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
+              <span class="text-discord-400">dm</span> from <a class="text-blurple hover:underline" href="/app?dm=${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'system')}</a>
+            </div>`;
+          }
+          return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
             <span class="text-discord-400">${esc(n.kind)}</span>
             ${n.channel_name ? `→ <a class="text-blurple hover:underline" href="/app?channel=${encodeURIComponent(n.channel_name.replace(/^#/, ''))}">${esc(n.channel_name)}</a>` : ''}
             <span class="text-discord-400">from</span> ${esc(n.sender || 'system')}
-          </div>`).join('');
+          </div>`;
+        }).join('');
       });
     }
   });
@@ -670,6 +757,22 @@
     if (m) { e.preventDefault(); msgMenu(e.clientX, e.clientY, m); }
   });
 
+  // ── Theme toggle (light/dark, sticky per browser + per account) ────────────
+  const themeBtn = document.getElementById('theme-toggle');
+  function setThemeIcon() {
+    if (!themeBtn) return;
+    themeBtn.textContent = document.documentElement.classList.contains('light') ? '☀️' : '🌙';
+    themeBtn.title = document.documentElement.classList.contains('light') ? 'Switch to dark mode' : 'Switch to light mode';
+  }
+  if (themeBtn) themeBtn.addEventListener('click', () => {
+    const light = document.documentElement.classList.toggle('light');
+    const theme = light ? 'light' : 'dark';
+    try { localStorage.setItem('lvc.theme', theme); } catch (e) {}
+    setThemeIcon();
+    post('/api/profile', { theme }, () => {});
+  });
+  setThemeIcon();
+
   // ── Boot ───────────────────────────────────────────────────────────────────
   scrollBottom();
   bindMessageActions();
@@ -685,7 +788,9 @@
   const pollMs = Math.max(1000, parseInt(body.dataset.pollMs || '2000', 10));
   const jitter = (base) => base + Math.floor(Math.random() * base * 0.25);
   function schedulePoll() {
-    setTimeout(() => { poll(); schedulePoll(); }, jitter(pollMs));
+    // Back off when the server keeps failing, then recover automatically.
+    const base = pollFails >= 8 ? pollMs * 5 : pollFails >= 3 ? pollMs * 2 : pollMs;
+    setTimeout(() => { poll(); schedulePoll(); }, jitter(base));
   }
   setTimeout(poll, Math.floor(Math.random() * pollMs));
   schedulePoll();

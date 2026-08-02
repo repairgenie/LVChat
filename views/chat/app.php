@@ -3,6 +3,7 @@ $site = config_get('site_name', 'LVChat');
 $csrf = Csrf::token();
 $channelSlug = $channel['slug'] ?? '';
 $dmName = $dm['username'] ?? '';
+$theme = (string) ($user['theme'] ?? '') === 'light' ? 'light' : '';
 $currentLevel = $channel ? AccessService::effectiveLevel($channel['id'], (int) $user['id']) : 'normal';
 $myLevelWeight = level_weight($currentLevel);
 $lastMsg = null;
@@ -123,11 +124,22 @@ function member_html(array $m, bool $online): string {
 }
 ?>
 <!DOCTYPE html>
-<html lang="en" class="dark h-full">
+<html lang="en" class="dark h-full" data-theme="<?= h($theme) ?>">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= h($channel ? $channel['name'] : ($dm ? 'DM: ' . $dm['username'] : $site)) ?> · <?= h($site) ?></title>
+  <script>
+  (function () {
+    // Apply the theme before CSS paints (no flash). Priority: this browser's
+    // choice, then the account's saved choice, then the system preference.
+    try {
+      var t = localStorage.getItem('lvc.theme') || document.documentElement.getAttribute('data-theme') || '';
+      if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      if (t === 'light') document.documentElement.classList.add('light');
+    } catch (e) {}
+  })();
+  </script>
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
 </head>
 <body class="chat-app bg-discord-800 text-discord-200 antialiased flex"
@@ -147,9 +159,12 @@ function member_html(array $m, bool $online): string {
   <aside id="sidebar" class="sidebar w-60 md:w-64 bg-discord-800 flex flex-col shrink-0">
     <div class="h-12 px-4 flex items-center justify-between border-b border-discord-700 shadow-sm shrink-0">
       <span class="font-bold text-white text-sm truncate"><?= h($site) ?></span>
-      <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications">
-        🔔<span id="bell-dot" class="hidden absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center"></span>
-      </button>
+      <div class="flex items-center gap-1.5">
+        <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1" title="Switch theme">🌙</button>
+        <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications">
+          🔔<span id="bell-dot" class="hidden absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center"></span>
+        </button>
+      </div>
     </div>
 
     <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
@@ -181,7 +196,7 @@ function member_html(array $m, bool $online): string {
 
       <nav class="px-2 pt-3">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400">Direct messages</div>
-        <div class="mt-1 space-y-0.5">
+        <div id="dm-section" class="mt-1 space-y-0.5">
           <?php if (!$dmPartners): ?>
           <div class="px-2 py-1 text-xs text-discord-500">No conversations yet</div>
           <?php endif; ?>
@@ -420,9 +435,13 @@ function member_html(array $m, bool $online): string {
     <div id="notif-list" class="p-1.5 text-sm">
       <?php foreach ($notifications as $n): ?>
       <div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
+        <?php if ($n['kind'] === 'dm' && !empty($n['sender'])): ?>
+        <span class="text-discord-400">dm</span> from <a class="text-blurple hover:underline" href="/app?dm=<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a>
+        <?php else: ?>
         <span class="text-discord-400"><?= h($n['kind']) ?></span>
         <?php if ($n['channel_name']): ?>→ <a class="text-blurple hover:underline" href="/app?channel=<?= h(rawurlencode(ChannelService::nameToSlug($n['channel_name']))) ?>"><?= h($n['channel_name']) ?></a><?php endif; ?>
         <span class="text-discord-400">from</span> <?= h($n['sender'] ?? 'system') ?>
+        <?php endif; ?>
       </div>
       <?php endforeach; ?>
       <?php if (!$notifications): ?><div class="px-2 py-3 text-discord-500 text-center">Nothing new</div><?php endif; ?>
@@ -437,6 +456,9 @@ function member_html(array $m, bool $online): string {
 
   <!-- JS-health watchdog: shows if the chat scripts failed to load (stale/broken deploy) -->
   <div id="js-warning" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] card px-4 py-2.5 text-xs text-amber-300 border border-amber-500/40 shadow-2xl max-w-md"></div>
+
+  <!-- DM arrival toast (shown when a DM lands while you are elsewhere) -->
+  <div id="dm-toast" class="hidden fixed bottom-4 right-4 z-[150] w-80 max-w-[calc(100vw-2rem)] card border border-blurple/40 shadow-2xl"></div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
   <script src="/assets/js/app.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/app.js') ?>"></script>
