@@ -6,6 +6,9 @@ final class Database
 {
     private static ?PDO $pdo = null;
 
+    /** Bump whenever schema.sql or the migration block below changes. */
+    private const SCHEMA_VERSION = '1';
+
     public static function init(): void
     {
         if (self::$pdo !== null) {
@@ -25,8 +28,17 @@ final class Database
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA foreign_keys = ON');
         $pdo->exec('PRAGMA journal_mode = WAL');
-        $pdo->exec(file_get_contents(ROOT . '/schema.sql'));
         self::$pdo = $pdo;
+
+        // Fast path: schema already applied at the current version — skip all DDL.
+        // (Fresh DBs have no tables yet, so skip straight to the slow path.)
+        $schemaVersion = $fresh ? null : self::scalar('SELECT value FROM server_config WHERE key = "schema_version"');
+        if ($schemaVersion === self::SCHEMA_VERSION) {
+            return;
+        }
+
+        // Slow path (fresh install or schema upgrade): apply schema + migrations.
+        $pdo->exec(file_get_contents(ROOT . '/schema.sql'));
 
         // Migrations for databases created before newer columns/tables existed.
         $userCols = array_column($pdo->query('PRAGMA table_info(users)')->fetchAll(PDO::FETCH_ASSOC), 'name');
@@ -69,6 +81,8 @@ final class Database
         $pdo->exec("UPDATE server_config SET value = 'LVChat' WHERE key = 'site_name' AND value = 'Chat Relay'");
 
         self::seedOperclasses($pdo);
+
+        $pdo->exec("INSERT OR REPLACE INTO server_config (key, value) VALUES ('schema_version', '" . self::SCHEMA_VERSION . "')");
 
         if ($fresh) {
             self::seed();
@@ -118,6 +132,8 @@ final class Database
             'motd' => "Welcome to LVChat!\n\nType /help for a list of slash commands.",
             'spamfilter_enabled' => '1',
             'max_channels_per_user' => '100',
+            'presence_throttle' => '30',
+            'poll_interval' => '2',
         ];
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');
         foreach ($config as $k => $v) {

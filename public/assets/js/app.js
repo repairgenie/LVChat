@@ -680,6 +680,13 @@
     document.body.dataset.bodyRect = Math.round(r.width) + 'x' + Math.round(r.height);
   })();
   document.body.dataset.jsok = '1';
-  setInterval(poll, 2000);
-  poll();
+  // Jittered scheduling spreads client requests so they don't burst together
+  // (protects the shared-hosting PHP worker pool). Interval comes from config.
+  const pollMs = Math.max(1000, parseInt(body.dataset.pollMs || '2000', 10));
+  const jitter = (base) => base + Math.floor(Math.random() * base * 0.25);
+  function schedulePoll() {
+    setTimeout(() => { poll(); schedulePoll(); }, jitter(pollMs));
+  }
+  setTimeout(poll, Math.floor(Math.random() * pollMs));
+  schedulePoll();
 })();

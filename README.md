@@ -126,6 +126,27 @@ against their own nick and gain that class's permissions. Default classes: `neta
 no shared operator password. (You can also set the `users.role` column directly in SQLite
 if you ever need to recover admin access.)
 
+## Scaling on shared hosting
+
+With PHP + SQLite + polling, the ceiling on shared hosting is the **PHP worker pool** and
+**SQLite write serialization**, not the database size. Realistically that's ~25–75 concurrent
+users out of the box, and ~100–250 with the two tuning knobs below:
+
+- **`poll_interval`** (seconds, default 2) — how often each client fetches new messages.
+  Raising it to 3–5s cuts requests proportionally.
+- **`presence_throttle`** (seconds, default 30) — how often the server writes "last seen"
+  per user. With it, ~28 of every 30 polls become pure reads instead of a write each time.
+
+Both are settable under **Admin → Settings**. The deciding factor is the host's PHP worker
+count (Litespeed/higher tiers give more). Measure your own server with:
+
+```bash
+php tests/load_check.php 10 10   # concurrent requests × rounds → req/s
+```
+
+Beyond a few hundred concurrent users, move to a VPS (php-fpm with more workers) and/or
+switch realtime from polling to SSE or WebSockets.
+
 ## Testing
 
 ```bash

@@ -219,12 +219,20 @@ On a fresh database the following channels are created automatically:
 |---|---|---|
 | `#general` | public | everyone |
 | `#help` | public | everyone |
+| `#general` | public | everyone |
+| `#help` | public | everyone |
 | `#staff` | staff | admins and `staff`-role users only |
 
 The first registered account becomes the server admin — the second and later
 accounts are regular users. After that, admins can promote other users from
-**Admin → Users**, or set an operator password in **Admin → Settings** so that
-any user can run `/oper <their nick> <password>` to become an IRCop.
+**Admin → Users**, or create an **o:line** in **Admin → O-lines** (username +
+password + operator class) so a user can run `/oper <their nick> <password>` to
+operate with that class's permissions. There is **no shared operator password.**
+
+Anyone — including people who don't want an account — can also **Join as
+guest** from the login page with just a nickname (see the User Guide).
+Guests are labeled `(guest)`, can chat in existing channels but cannot create
+channels, and are purged after a day of inactivity.
 
 There are **no hardcoded default credentials.**
 
@@ -245,9 +253,10 @@ Upgrades are the same procedure as a fresh install:
 - re-creates `.htaccess`.
 - backs the database up automatically on every run.
 - migrations are applied on app boot (`Database::init()` adds missing columns
-  like `last_ip`, `role_id`, and `censor` and creates missing tables such as
-  `badwords`, `roles`, and `chat_logs` automatically), so old databases gain new
-  features without manual SQL.
+  like `last_ip`, `role_id`, `guest`, and `censor` and creates missing tables
+  such as `badwords`, `roles`, `operclasses`, `opers`, and `chat_logs`
+  automatically), so old databases gain new features without manual SQL. The
+  four built-in operator classes are seeded idempotently on every boot.
 - older installs that stored the DB one level above the project are migrated
   back into `data/` automatically.
 
@@ -296,8 +305,10 @@ after an upload.
   `` `code` ``, `@mention`, and link-highlighting.
 - Sending is rate-limited (per user, 12 messages/DMs per 5 seconds); global spam
   filters, shuns, and `*line` bans are enforced server-side, not just in the UI.
-- `oper_password` in **Admin → Settings** is a shared secret that grants admin
-  rights to anyone who enters it. Set it strong, or leave it empty.
+- Operators authenticate with per-user **o:lines** (**Admin → O-lines** — username
+  + password + operator class). There is no shared operator password: `/oper`
+  only works for the account matching the o:line's nickname. Guest accounts are
+  ephemeral and auto-purged after a day of inactivity.
 - There is an append-only `chat_logs` archive of every channel message and PM;
   nothing is ever removed from it. Admins have full visibility into this log.
 

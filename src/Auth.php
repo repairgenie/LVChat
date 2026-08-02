@@ -22,7 +22,21 @@ final class Auth
             [$token]
         );
         if ($u) {
-            Database::query('UPDATE users SET last_seen = datetime("now"), last_ip = ? WHERE id = ?', [client_ip(), $u['id']]);
+            // Throttle the presence write so most polls are pure reads (SQLite WAL
+            // handles many readers + one writer). The in-memory row is patched so
+            // the rest of the request still sees fresh data.
+            $throttle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+            $lastWrite = (int) ($_SESSION['presence_ts'] ?? 0);
+            if (time() - $lastWrite >= $throttle) {
+                Database::query('UPDATE users SET last_seen = datetime("now"), last_ip = ? WHERE id = ?', [client_ip(), $u['id']]);
+                $_SESSION['presence_ts'] = time();
+            }
+            if (empty($u['last_seen']) || time() - strtotime($u['last_seen'] . ' UTC') > $throttle) {
+                $u['last_seen'] = now();
+            }
+            if (empty($u['last_ip'])) {
+                $u['last_ip'] = client_ip();
+            }
         }
         return $u;
     }

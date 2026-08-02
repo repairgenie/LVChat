@@ -22,18 +22,32 @@ messaging, private messages, your profile, and the complete command reference.
 
 Log in with your username and password. Sessions last 30 days.
 
-### 1.2 First visit
+### 1.2 Join as a guest
+
+Don't want an account? The login page has a **Join as guest** box: pick a free
+nickname and you're in immediately — no email, no password.
+
+- Guests can chat in any existing channel and send private messages, and their
+  nick is shown with a `(guest)` tag.
+- **Guests cannot create channels** — when you try, you're told to make an
+  account instead.
+- Guest sessions are ephemeral: accounts with a day of inactivity are purged,
+  so a guest nick can free up for reuse.
+
+### 1.3 First visit
 
 On the top of your first chat window you may see the server **MOTD** (Message
 of the Day) set by the admins. Typing **`/help`** lists every available command;
 `/info` shows server statistics. The site automatically creates a few default
 channels (`#general`, `#help`, `#staff`) on a new server.
 
-### 1.3 Who is the admin?
+### 1.4 Who is the admin?
 
 Server administrators ("IRC Operators") are shown in **red** in message lists,
 the member list, and the online list, and get extra buttons. Custom role names
-may appear in their assigned colour.
+may appear in their assigned colour. Users operating through an **o:line**
+(`/oper`) gain that operator class's permissions for the session — see the
+[Admin Guide](admin-guide.md).
 
 ---
 
@@ -45,8 +59,13 @@ may appear in their assigned colour.
 | Centre | The channel header (name, topic, **Share** / **Leave**), the mode bar, the message timeline, and the message composer |
 | Right sidebar | The member list for the current channel — Online and Offline groups, with access-level symbols (`~ & @ % +`) |
 
+- **Hide the chat list** with the ☰ button in the top-left of the message area:
+  on desktop it collapses the sidebar (your choice is remembered), on mobile it
+  opens a drawer over the chat.
 - The message composer supports **slash commands** with autocomplete (type `/`
   to see suggestions, arrow keys to move, `Tab` to accept).
+- Open the **😀 emoji picker** next to the composer to drop an emoji at the
+  cursor.
 - Type **`@nick`** to mention a user — they get a notification bell.
 - `Enter` sends. Messages are limited to 2000 characters.
 
@@ -72,9 +91,13 @@ your notification bell stay fresh without reloading.
 
 ### 3.1 Browsing and joining
 
-- **browse** the list of public channels from the **Browse channels** link (or
-  type `/list` or `/channels`).
-- Click **Join** on a channel card, or type `/join #channel`.
+- **Browse** the list of public channels from the **Browse channels** link (or
+  type `/list` or `/channels`). The browser is now a **table** you can:
+  - **filter** by name or topic with the search box;
+  - **narrow** to `Not joined` / `Joined` via the select,
+  - **sort** by Channel, Topic, or Users by clicking the column headers —
+    everything updates instantly with a live channel count.
+- Click **Join** on a channel row, or type `/join #channel`.
 - Channels may require any of the following — you will see a clear reason if you
   are denied:
   - a **key** (password) — you will be asked for it;
@@ -99,7 +122,8 @@ Every channel has a shareable link of the form `/c/<slug>` (e.g. `/c/gaming`):
 ### 3.3 Creating and registering channels
 
 - Create a channel with the **＋** button next to "Text channels", or `/join
-  #name` of a channel that doesn't exist.
+  #name` of a channel that doesn't exist. **Guests can't create channels** — join
+  an existing one, or register an account to found your own.
 - New channels are **temporary**: they disappear when the last person leaves.
   The channel's own warning banner tells you this and — if you are the founder —
   asks you to run `/register #channel`.
@@ -190,7 +214,9 @@ Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
 
 ## 6. Your profile & settings
 
-From the `⚙` menu next to your name in the sidebar, open **Profile & settings**.
+From the `⚙` menu next to your name in the sidebar, open **Profile & settings**
+(guests see their profile but no account forms — they have no password/vhost to
+edit).
 
 - **Change password** — must verify your current password; new password 8+ chars.
 - **Virtual host (vhost)** — a hostname that identifies your connection/status.
@@ -206,8 +232,9 @@ From the `⚙` menu next to your name in the sidebar, open **Profile & settings*
 ### 6.2 Your public profile
 
 Every user has a profile at `/u/<username>` (click any nick, or right-click →
-**View profile**). It shows your avatar initial, status (online/away/bot),
-registration date, and the channels you're in.
+**View profile**). It shows your avatar initial, status (Guest / IRC Operator /
+Staff / Registered + online/away/bot), registration date, and the channels
+you're in. A ✕ button in the corner returns you to the chat.
 
 ---
 
@@ -337,13 +364,20 @@ anything.
 | `/vhost status` | Show your current vhost |
 | `/hs <command>` | Alias of `/vhost` |
 
-### 8.6 OperServ (server administrators only)
+### 8.6 OperServ & o:lines
 
-Oper commands (globals, `kline` etc.) are private to IRC Operators — they are
-impossible to run by a regular user and gated server-side. As a normal user you
-just need to know that `/whois` and the admin can see your IP and history; if
-you think you were banned in error, contact the server owner. See the **Admin
-Guide**.
+Operating (`/oper`) is **per-user** on this server. An administrator issues an
+**o:line** in **Admin → O-lines** (your nick + a private password + an operator
+class). If you have one:
+
+```
+/oper <your nickname> <your o:line password>
+```
+
+You then operate with that class's permissions until you log out or run
+**`/deoper`**. Your nick must exactly match the o:line — there is no shared
+operator password. If you think you were banned in error, contact the server
+owner. See the **Admin Guide**.
 
 ---
 

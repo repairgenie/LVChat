@@ -140,6 +140,7 @@ function member_html(array $m, bool $online): string {
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
       data-my-nick="<?= h($user['username']) ?>"
       data-version="<?= LVC_VERSION ?>"
+      data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-commands="<?= h(json_encode($commands)) ?>">
 
   <!-- ── Left: channel sidebar ── -->

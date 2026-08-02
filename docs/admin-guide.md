@@ -15,9 +15,11 @@ Related guides: see `installation.md` for deploying/upgrading the server; see
 
 - **First account on a fresh server** is automatically the admin.
 - **Promoting others:** on **Admin → Users**, use *Make admin* / *Make staff*.
-- **Operator password (`/oper`):** set one on **Admin → Settings**. Any user can
-  then run `/oper <their nick> <password>` and instantly gain full administrator
-  rights. **Use a strong password or leave it blank.**
+- **O:lines (`/oper`):** instead of a shared password, create a per-user
+  **o:line** on **Admin → O-lines** (username + password + operator class). The
+  user logs in, then runs `/oper <their nick> <password>` to operate with that
+  class's permissions until they log out or `/deoper`. **There is no shared
+  operator password.**
 - **Escalation safety net:** if you ever lock yourself out, you can set the
   `users.role` column directly in SQLite (`UPDATE users SET role='admin' WHERE
   username='you';`).
@@ -29,7 +31,9 @@ Related guides: see `installation.md` for deploying/upgrading the server; see
 ## 2. The admin dashboard (`/admin`)
 
 The navigation bar links to **Overview, Users, Channels, Bans, Spam filters,
-Bad words, Roles, MOTD, Chat logs, Settings** — described per-page below.
+Bad words, Roles, O-lines, Operclasses, MOTD, Chat logs, Settings** — described
+per-page below. A **🛡 Admin dashboard** link also appears at the top of the
+sidebar in the chat app for admins.
 
 ### 2.1 Overview
 
@@ -46,6 +50,11 @@ Bad words, Roles, MOTD, Chat logs, Settings** — described per-page below.
 
 Search by username or email, then act. Columns show the user's role, channel
 count, registration date, last seen, **last IP**, and a BANNED badge.
+
+**Guests** (anonymous `Join as guest` users) appear too — they have no email
+(an `@guest.invalid` placeholder), no usable password, and their nickname
+carries the `(guest)` tag in chat. Punishable like any user; they are also
+auto-purged after a day of inactivity (so they can be short-lived).
 
 Per-user actions (all confirm via CSRF-protected POSTs, all logged to audit):
 
@@ -161,22 +170,82 @@ to `chat_logs` at send-time with a denormalized channel name — **so logs survi
 even when a channel is deleted or unregistered**. Nothing is ever removed from
 this table.
 
-- Filter by **channel** or **user** and free-text search of message content.
-- Selecting a channel shows its **Participants** panel (usernames + message
-  counts + last activity) derived from the archive.
-- This is your forensics tool for moderation disputes.
+**Chat Logs now lists one row per channel + day** (channel, date, entry count).
+Pick a channel from the select to narrow it, then **click a day** to open a
+full-width modal with that day's entire log in IRC format
+(`HH:MM:SS AM - nick - message`, quoted topic changes, `-nick banned by op`
+lines, PMs rendered as `sendername -> recipient`). Guests are marked `(guest)`.
 
-### 2.10 Settings
+- **Refresh** reloads the day from the archive.
+- **Export** downloads the day as a `.log` file named `<channel>-<date>.log`
+  (`/admin/logs/export?channel=…&date=…`).
+- This is your forensics tool for moderation disputes — every day of every
+  channel (public, private, staff, even long-deleted) is recoverable here.
+
+### 2.10 O-lines (`/admin/opers`)
+
+Per-user operator lines. Each row ties a **nickname** to an **operator class**
+and an enable flag. **Add o:line** takes:
+
+- **Nickname** — the account that may oper (must match the user's own nick).
+- **Password** — 8+ chars, argon2id-hashed, shown to the user, cannot be read back.
+- **Operator class** — one of your classes (default or custom).
+
+Once issued, the user runs `/oper <their nick> <password>` from the chat to
+operate as that class (lasts until logout or `/deoper`). Use **Enable/Disable**
+to temporarily suspend an o:line, **Delete** to revoke it permanently. All
+changes are audited (`oper_add`, `oper_del`, `oper_toggle`).
+
+> There is **no shared operator password** on this server — `/oper` only works
+> for the account matching an enabled o:line.
+
+### 2.11 Operclasses
+
+Permission bundles that define *what* an o:line can actually do. Each class has
+a **name**, a **colour**, and a set of **permissions**. Four are created and
+seeded automatically (defaults, delete-protected):
+
+| Default class | Permissions |
+|---|---|
+| **netadmin** | oper, manage_users, manage_channels, manage_bans, manage_badwords, manage_roles, **manage_opers**, **rehash** |
+| **serveradmin** | oper, manage_channels, manage_bans, manage_badwords, **manage_opers**, **rehash** |
+| **globalop** | oper, manage_bans |
+| **localop** | oper |
+
+The permission set matches the role system plus two extras:
+
+| Permission | Grants |
+|---|---|
+| `oper` | IRCop commands and viewing user IPs |
+| `manage_users` | Promote / demote / ban users |
+| `manage_channels` | Force topics, drop channels, change visibility |
+| `manage_bans` | Add / remove global bans |
+| `manage_badwords` | Manage the bad-word filter |
+| `manage_roles` | Manage custom roles |
+| `manage_opers` | **Create/edit o:lines and operator classes** (guard this) |
+| `rehash` | Run `/rehash` |
+
+Custom classes: **＋ New class**, edit name/colour/permissions, or delete
+(non-default classes only — deleting a class also deletes its o:lines). A user's
+active permissions while operating are their **role permissions + their
+operclass permissions**.
+
+> Permission checks combine the user's custom **role** permissions *and* the
+> **operclass** of any active `/oper` session (`Auth::can`), so a user can
+> operate with a class *and* keep role-granted powers.
+
+### 2.12 Settings
 
 | Setting | Meaning |
 |---|---|
 | **Site name** | Shown in the header, chat titles, and `/api/version` |
-| **Registration** | Whether new accounts can be created (`/register` closed when off) |
+| **Registration** | Whether new accounts can be created (`/register` closed when off; the **Join as guest** option on the login page is unaffected and stays available) |
 | **Spam filters** | Master switch for all active spam filters |
 | **Max channels per user** | Per-user owned-channel cap (affects + create/`/register`) |
-| **Operator password** | The shared secret for `/oper`; blanks keep the current value |
 
-Settings writes appear in the audit log (`settings_save`).
+(The old shared **operator password** field was removed — operator access is now
+managed exclusively via **O-lines**.) Settings writes appear in the audit log
+(`settings_save`).
 
 ---
 
@@ -188,7 +257,8 @@ the parser gates them server-side.
 
 | Command | Description |
 |---|---|
-| `/oper <nick> <password>` | Oper up against the operator password (admin) |
+| `/oper <nick> <password>` | Oper up against **your o:line** and gain its operator class's permissions (session-scoped) |
+| `/deoper` | Drop operator status (clears the active operclass) |
 | `/kline <mask-nick-ip-cidr> <duration> <reason>` | Add an IP/account-wide kill ban |
 | `/gline <mask-nick-ip-cidr> <duration> <reason>` | Add a global ban |
 | `/zline <mask-nick-ip-cidr> <duration> <reason>` | Add a severe (IP) ban |
@@ -250,9 +320,11 @@ Every dashboard POST and the important chat actions append a row. Common
 `channel_drop`, `channel_register`, `channel_auto_delete`, `channel_forbid`,
 `channel_topic_admin`, `channel_visibility`, `topic`, `kick`, `kill`,
 `global`, `spamfilter_add/del`, `badword_add/del`, `role_add/update/del`,
-`user_set_role`, `motd_save`, `settings_save`, `oper`, `message_delete`,
-`password_change`, `rehash`, `kline_add`, `gline_add`, `zline_add`,
-`shun_add`, `unkline`, `ungline`, `unzline`, `unshun`, etc.
+`user_set_role`, `oper_add`, `oper_del`, `oper_toggle`,
+`operclass_add/update/del`, `guest_join`, `oper`, `motd_save`,
+`settings_save`, `message_delete`, `password_change`, `rehash`,
+`kline_add`, `gline_add`, `zline_add`, `shun_add`, `unkline`, `ungline`,
+`unzline`, `unshun`, etc.
 
 The overview page shows the 15 most recent; the full table is behind any admin's
 SQLite access (`sqlite3 data/chat.db "SELECT * FROM audit_log ORDER BY id
@@ -266,10 +338,13 @@ DESC LIMIT 100;"`).
 |---|---|---|
 | `site_name` | `LVChat` | UI brand name |
 | `registration_enabled` | `1` | `0` closes registration |
-| `oper_password` | `""` | Shared secret for `/oper`; blank = feature off |
 | `motd` | *welcome text* | Shown in chat |
 | `spamfilter_enabled` | `1` | Master switch for spam filters |
 | `max_channels_per_user` | `100` | Owned-channel cap |
+
+There is **no `oper_password` key anymore** — operator access lives in the
+`opers` / `operclasses` tables (see §2.10–2.11). The four default operator
+classes are maintained in code and re-seeded on boot if removed.
 
 Override file-level values by setting `CHAT_DB` to relocate the database (see
 installation guide); all else is managed from the dashboard.
@@ -281,16 +356,19 @@ installation guide); all else is managed from the dashboard.
 Drawn from the code (src/controllers/AdminController.php, views/admin/*):
 
 - Users page: ban/unban, zline-IP, admin/staff promote+demote, password reset,
-  custom-role assignment.
+  custom-role assignment (guests appear too).
 - Channels page: force topic, visibility, forbid, drop.
 - Bans page: add global ban (kind/duration/mask/reason), remove any ban.
 - Spam filters page: add (simple match + reason), enable/disable, delete.
 - Bad words: add (word + censor/block), enable/disable, delete.
 - Roles: create/rename/colour/permissions, delete (unassigns members).
+- **O-lines: add (nick/password/class), enable/disable, delete.**
+- **Operclasses: create/rename/colour/permissions, delete (non-default only).**
 - MOTD: save free-text.
-- Logs: filter + view archive.
-- Settings: site name, registration, spamfilter master switch, channel cap,
-  operator password.
+- Logs: per-channel-per-day table, click a day for the IRC-format view, Refresh
+  + Export.
+- Settings: site name, registration, spamfilter master switch, channel cap.
+  (No operator-password field — that moved to O-lines.)
 
 Every POST action goes through `/admin/action` with a CSRF token and writes an
 audit entry before redirecting back.

@@ -158,6 +158,14 @@ final class MessageService
         );
     }
 
+    public static function hasUnreadDm(int $me, int $other): bool
+    {
+        return (bool) Database::scalar(
+            'SELECT 1 FROM private_messages WHERE recipient_id = ? AND sender_id = ? AND read_at IS NULL LIMIT 1',
+            [$me, $other]
+        );
+    }
+
     public static function unreadDmCounts(int $userId): array
     {
         $rows = Database::all(

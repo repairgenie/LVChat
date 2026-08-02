@@ -245,7 +245,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'registration_enabled', 'spamfilter_enabled', 'max_channels_per_user', 'motd'];
+        $keys = ['site_name', 'registration_enabled', 'spamfilter_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'motd'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -512,6 +512,8 @@ final class AdminController
                 config_set('registration_enabled', ($_POST['registration_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('spamfilter_enabled', ($_POST['spamfilter_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('max_channels_per_user', max(1, (int) ($_POST['max_channels_per_user'] ?? 100)));
+                config_set('presence_throttle', max(5, (int) ($_POST['presence_throttle'] ?? 30)));
+                config_set('poll_interval', max(1, (int) ($_POST['poll_interval'] ?? 2)));
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 break;

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>Site Manager — LVChat Desktop</title>
+  <link rel="stylesheet" href="launcher.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">LV</div>
+      <div>
+        <h1>LVChat Desktop</h1>
+        <p class="tagline">Open any chat site in its own isolated window.</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="quick-open" class="card">
+      <h2>Open a site</h2>
+      <p class="hint">Paste any chat URL to open it in a new window. Unknown sites are not saved.</p>
+      <form id="quick-form">
+        <input id="quick-url" type="text" inputmode="url" spellcheck="false"
+               placeholder="https://chat.lasvegasbestinternet.com" aria-label="Site URL" />
+        <button type="submit" class="primary" id="quick-open-btn">Open</button>
+      </form>
+      <p id="quick-error" class="error" hidden></p>
+    </section>
+
+    <section id="sites" class="card">
+      <div class="card-head">
+        <h2>Your sites</h2>
+        <button id="add-site-toggle" class="ghost">+ Add site</button>
+      </div>
+
+      <form id="site-form" class="site-form" hidden>
+        <input id="site-name" type="text" placeholder="Name (e.g. LVChat)" aria-label="Site name" />
+        <input id="site-url" type="text" inputmode="url" spellcheck="false"
+               placeholder="https://…" aria-label="Site URL" />
+        <div class="row-actions">
+          <button type="submit" id="site-save" class="primary">Save</button>
+          <button type="button" id="site-cancel" class="ghost">Cancel</button>
+        </div>
+        <p id="site-error" class="error" hidden></p>
+      </form>
+
+      <ul id="site-list" class="site-list"></ul>
+      <p id="site-empty" class="empty" hidden>No sites yet. Add one above.</p>
+    </section>
+
+    <section id="windows" class="card">
+      <div class="card-head">
+        <h2>Active windows</h2>
+        <button id="windows-refresh" class="ghost">Refresh</button>
+      </div>
+      <ul id="window-list" class="site-list"></ul>
+      <p id="window-empty" class="empty" hidden>No chat windows open.</p>
+    </section>
+  </main>
+
+  <footer class="footer">LVChat Desktop <span id="version"></span></footer>
+
+  <script src="launcher.js"></script>
+</body>
+</html>

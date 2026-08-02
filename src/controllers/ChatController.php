@@ -277,8 +277,10 @@ final class ChatController
         if (isset($_GET['dm'])) {
             $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$_GET['dm']]);
             if ($t) {
-                $out['messages'] = MessageService::forDm((int) $user['id'], (int) $t['id'], $since);
+            $out['messages'] = MessageService::forDm((int) $user['id'], (int) $t['id'], $since);
+            if (MessageService::hasUnreadDm((int) $user['id'], (int) $t['id'])) {
                 MessageService::markDmRead((int) $user['id'], (int) $t['id']);
+            }
                 $out['dm'] = $t['username'];
                 $out['presence'][] = [
                     'username' => $t['username'],

@@ -1,0 +1,55 @@
+{
+  "name": "lvchat-desktop",
+  "version": "1.0.0",
+  "description": "LVChat Desktop - multi-site chat launcher",
+  "main": "src/main.js",
+  "author": "LVChat",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "bash tests/run.sh",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "icon": "node build/generate-icon.js"
+  },
+  "build": {
+    "appId": "com.lasvegasbestinternet.lvchat",
+    "productName": "LVChat Desktop",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.social-networking"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network"
+    }
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

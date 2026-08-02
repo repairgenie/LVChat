@@ -28,5 +28,17 @@
     <label class="label">Max channels per user</label>
     <input class="input" type="number" min="1" name="max_channels_per_user" value="<?= (int) $settings['max_channels_per_user'] ?>">
   </div>
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <label class="label">Poll interval (seconds)</label>
+      <input class="input" type="number" min="1" name="poll_interval" value="<?= (int) $settings['poll_interval'] ?>">
+      <p class="text-xs text-discord-400 mt-1">How often clients fetch new messages. Higher = far fewer requests on shared hosting.</p>
+    </div>
+    <div>
+      <label class="label">Presence throttle (seconds)</label>
+      <input class="input" type="number" min="5" name="presence_throttle" value="<?= (int) $settings['presence_throttle'] ?>">
+      <p class="text-xs text-discord-400 mt-1">How often the server writes "last seen" per user. Most polls become pure reads.</p>
+    </div>
+  </div>
   <button name="action" value="settings_save" class="btn-primary">Save settings</button>
 </form>
