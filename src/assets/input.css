@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { color-scheme: dark; }
+  body { font-feature-settings: "cv01", "cv03"; }
+  html, body { height: 100%; }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #3f4147; border-radius: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  .mention { background: rgba(88, 101, 242, .18); border-radius: 3px; padding: 0 2px; }
+  .btn { @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors; }
+  .btn-primary { @apply btn bg-blurple hover:bg-blurple-dark text-white; }
+  .btn-ghost { @apply btn hover:bg-discord-750 text-discord-200; }
+  .input { @apply w-full rounded-md bg-discord-750 border border-discord-600 px-3 py-2 text-sm placeholder-discord-400 focus:outline-none focus:ring-1 focus:ring-blurple; }
+  .card { @apply rounded-lg bg-discord-800 border border-discord-700; }
+  .label { @apply block text-xs font-semibold uppercase tracking-wide text-discord-400 mb-1.5; }
+}
+
+/* The chat app is always a full-viewport fixed layer. */
+body.chat-app { position: fixed; inset: 0; overflow: hidden; }

@@ -1,0 +1,13 @@
+{
+  "name": "lvchat",
+  "version": "1.5.1",
+  "description": "LVChat — Discord-style IRC web chat (PHP + SQLite)",
+  "private": true,
+  "scripts": {
+    "build": "tailwindcss -i ./src/assets/input.css -o ./public/assets/css/app.css --minify",
+    "watch": "tailwindcss -i ./src/assets/input.css -o ./public/assets/css/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

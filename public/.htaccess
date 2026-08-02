@@ -1,0 +1,11 @@
+# LVChat — front-controller rewrite.
+# Routes clean URLs (/login, /register, /app, /c/..., /admin/...) to index.php.
+# Existing files and directories (assets, js, etc.) are served directly.
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>

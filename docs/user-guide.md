@@ -1,0 +1,367 @@
+# LVChat — User Guide
+
+LVChat is a Discord-style chat that speaks fluent IRC. Channels use `#name`
+names, users run `/slash` commands, and the familiar IRC concepts (channel
+operator levels, keyed/invite-only/moderation modes, ChanServ/NickServ/MemoServ
+/HostServ services) are all here — wrapped in a modern web interface.
+
+This guide covers everything you need as a regular user: your account, channels,
+messaging, private messages, your profile, and the complete command reference.
+
+---
+
+## 1. Your account
+
+### 1.1 Registration and login
+
+- Visit the site and click **Register**.
+- **Username:** 2–32 characters using letters, numbers, and IRC-safe symbols
+  `- _ [ ] { } ^ \` |` — this is your nick on the server.
+- **Email:** a valid address (used only for account recovery / admin tools).
+- **Password:** at least 8 characters.
+
+Log in with your username and password. Sessions last 30 days.
+
+### 1.2 First visit
+
+On the top of your first chat window you may see the server **MOTD** (Message
+of the Day) set by the admins. Typing **`/help`** lists every available command;
+`/info` shows server statistics. The site automatically creates a few default
+channels (`#general`, `#help`, `#staff`) on a new server.
+
+### 1.3 Who is the admin?
+
+Server administrators ("IRC Operators") are shown in **red** in message lists,
+the member list, and the online list, and get extra buttons. Custom role names
+may appear in their assigned colour.
+
+---
+
+## 2. The chat window layout
+
+| Region | What it shows |
+|---|---|
+| Left sidebar | Server name + notification bell; your joined channels; direct-message conversations; a list of who is online; your user card (⚙ menu) |
+| Centre | The channel header (name, topic, **Share** / **Leave**), the mode bar, the message timeline, and the message composer |
+| Right sidebar | The member list for the current channel — Online and Offline groups, with access-level symbols (`~ & @ % +`) |
+
+- The message composer supports **slash commands** with autocomplete (type `/`
+  to see suggestions, arrow keys to move, `Tab` to accept).
+- Type **`@nick`** to mention a user — they get a notification bell.
+- `Enter` sends. Messages are limited to 2000 characters.
+
+### 2.1 Text formatting
+
+In any message you can use light formatting:
+
+| You type | You see |
+|---|---|
+| `**bold**` | **bold** |
+| `\`code\`` | `code` |
+| `@nick` | highlighted mention |
+| `https://example.com` | clickable link |
+
+### 2.2 Real-time updates
+
+The chat polls the server every 2 seconds, so new messages, the member list, and
+your notification bell stay fresh without reloading.
+
+---
+
+## 3. Channels
+
+### 3.1 Browsing and joining
+
+- **browse** the list of public channels from the **Browse channels** link (or
+  type `/list` or `/channels`).
+- Click **Join** on a channel card, or type `/join #channel`.
+- Channels may require any of the following — you will see a clear reason if you
+  are denied:
+  - a **key** (password) — you will be asked for it;
+  - an **invite** from a member (`+i` invite-only);
+  - **secret** channels (`+s`) — hidden entirely and joinable by invitation only;
+  - **staff-only** channels — restricted to admins and Staff.
+- If a channel requires a key, LVChat shows a dedicated "enter key" page.
+- If you're denied access to an invite-only channel, the page offers a
+  **Request access (knock)** button.
+
+### 3.2 Shareable links
+
+Every channel has a shareable link of the form `/c/<slug>` (e.g. `/c/gaming`):
+
+- Send it to a friend who isn't logged in — they land on login/register and are
+  returned straight into the channel.
+- Logged-in users who click the link are auto-joined.
+- Private (`+p`) channels are hidden from `/list` but still joinable via their
+  share link.
+- Get the link for the current channel with **Share** (top-right) or `/share`.
+
+### 3.3 Creating and registering channels
+
+- Create a channel with the **＋** button next to "Text channels", or `/join
+  #name` of a channel that doesn't exist.
+- New channels are **temporary**: they disappear when the last person leaves.
+  The channel's own warning banner tells you this and — if you are the founder —
+  asks you to run `/register #channel`.
+
+**`/register #channel`** makes the channel (and you, its **founder**) permanent:
+
+- A registered channel persists even when empty.
+- If the founder of an *unregistered* channel leaves while others remain, the
+  founder title passes to the member who has been there the longest.
+- Dropping / unregistering removes the founder's protections (see ChanServ).
+
+### 3.4 Leaving channels
+
+Click **✕ Leave** in the channel header, or run `/part [#channel] [reason]`.
+If you `/part` an empty **unregistered** channel, the channel is deleted.
+
+### 3.5 Channel modes (the "mode bar")
+
+Above every channel's messages, a bar shows the active channel modes as
+clickable chips, each with a mouseover tooltip. Operators can toggle them;
+everyone can read them. The same settings are managed with `/mode`.
+
+| Mode | Meaning |
+|---|---|
+| `+i` (invite) | Only users you invite may join |
+| `+m` (moderated) | Only voiced users (`+v`) may speak |
+| `+C` (filter) | Applies the server's bad-word list (censor or full-message block) |
+| `+k` (key) | A password is required to join; `/mode +k <key>` / `-k` to remove |
+| `+l` (limit) | Caps the number of members; `/mode +l <n>` / `-l` |
+| `+t` (topic lock) | Only operators may change the topic (usually on) |
+| `+p` (private) | Hidden from `/list`, joinable via share link |
+| `+s` (secret) | Hidden entirely, join by invitation only |
+| `+b` `/ -b` (ban) | Ban / unban a mask |
+
+Run `/mode` in a channel with no arguments for a full inline explanation of
+every mode, plus the channel's current mode string.
+
+### 3.6 Access levels
+
+Members have one of these levels, shown next to their nick:
+
+| Level | Symbol | Typical powers |
+|---|---|---|
+| Founder | `~` | Everything; owner of a registered channel |
+| Admin | `&` | Everything except founder actions |
+| Op | `@` | Kick/ban, mode changes (`+l`, `+C`, `+p`, `+s`, `+o`), voice/halfop grants |
+| Halfop | `%` | Voice/kick/ban/`+imtk`, but not op-level modes |
+| Voice | `+` | Can speak in moderated (`+m`) channels |
+| Normal | *(none)* | Standard member |
+
+Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
+**Channel ops commands** below.
+
+---
+
+## 4. Messaging
+
+- Send a message by typing in the composer and pressing **Enter**. A message
+  posts instantly (AJAX) with a native no-JS fallback that still delivers.
+- **Edit:** hover your message and click ✏️, or right-click it and choose *Edit*.
+  Only your own messages can be edited. Edited messages show "(edited)".
+- **Delete:** hover and click 🗑, or right-click → **Delete** (normal users can
+  delete their own; admins can delete any).
+- **Actions:** `/me does something` renders as an italic *action* line.
+- **Reply (quote):** right-click somebody's message → **Reply** prefills `@nick `
+  in the composer.
+- **Mentions:** mention a member of the current channel with `@nick`; they get a
+  notification bell. There is no personal mute in a channel — an operator can
+  mute someone with `/quiet`.
+
+---
+
+## 5. Private messages (DMs)
+
+- Start a DM by clicking a user's name in the member/online list, or with
+  `/msg <nick> <message>` (aliases: `/pm`, `/query`).
+- DM conversations stay open in the **Direct messages** sidebar with unread
+  counts and green "online" dots; read **receipts** quietly mark a conversation
+  as all-read when you open it.
+- **Messaging yourself** is allowed (an IRC hallmark) — handy for notes.
+- **Notices** (`/notice <nick> <message>`) are PMs that create no notification.
+- **Ignore** someone with `/ignore <nick>` — their DMs are dropped; `/unignore`
+  to reverse it. If you ignore someone, `/msg` to them tells you so.
+- The **notification bell** (top-left) aggregates mentions, DMs, invites, and
+  knocks; **Mark all read** clears them.
+
+---
+
+## 6. Your profile & settings
+
+From the `⚙` menu next to your name in the sidebar, open **Profile & settings**.
+
+- **Change password** — must verify your current password; new password 8+ chars.
+- **Virtual host (vhost)** — a hostname that identifies your connection/status.
+  Also manageable with HostServ commands (below).
+- **Away** — use `/away [message]`, or the **Set away** sidebar menu item; you
+  rejoin with `/back`. While away, you appear offline to "online" lists and get the
+  💤 symbol in member lists and profile.
+
+### 6.1 Hide your online status
+
+`/set hide on` hides you from the online list; `/set hide off` unhides.
+
+### 6.2 Your public profile
+
+Every user has a profile at `/u/<username>` (click any nick, or right-click →
+**View profile**). It shows your avatar initial, status (online/away/bot),
+registration date, and the channels you're in.
+
+---
+
+## 7. Right-click context menus
+
+Right-click anywhere on:
+
+- a **message** — Reply, Copy text, Edit (your own), Delete, Message author,
+  Copy username;
+- a **user / member / nick** — Message, View profile, Whois, Copy username, plus
+  (if you're a channel op) Voice / Half-op / Op / Mute / Kick / Ban, and
+  Ignore;
+- a **channel name** — Open channel, Copy share link, Channel info, Set topic
+  (op), Invite (op), Leave.
+
+---
+
+## 8. Command reference
+
+Every command can be typed into the chat input, prefixed with `/`. Commands are
+grouped below exactly as `/help` groups them. For one command's details run
+`/help <command>`.
+
+> **Notation:** `<>` = required, `[]` = optional. Durations read like `30m`,
+> `2h`, `1d`, `1w`, `1mo`, `1y` (a bare number is minutes).
+
+### 8.1 Core commands
+
+| Command | Description |
+|---|---|
+| `/help [command]` | List all commands, or help for one command |
+| `/join <#channel> [key]` | Join a channel (creates it if it doesn't exist) |
+| `/part [#channel] [reason]` | Leave a channel |
+| `/quit [reason]` | Disconnect (log out) from the chat |
+| `/me <action>` | Send an action message (`* nick acts`) |
+| `/msg <nick> <message>` | Private message a user (aliases `/pm`, `/query`) |
+| `/notice <nick> <message>` | Send a notice — no notification created |
+| `/nick <newnick>` | Change your username (2–32 IRC-safe chars) |
+| `/away [message]` | Mark yourself away |
+| `/back` | Return from being away |
+| `/whois <nick>` | Show user info (registration, last seen, channels; IP for ops) |
+| `/list` / `/channels` | Open the public channel browser |
+| `/topic [#channel] [new topic]` | View or set the channel topic |
+| `/ping` | Ping the server — replies "Pong!" |
+| `/invite <nick> [#channel]` | Invite a user to a channel (op) |
+| `/knock <#channel>` | Ask operators to let you into an invite-only channel |
+| `/ignore <nick>` | Stop receiving private messages from a user |
+| `/unignore <nick>` | Reverse `/ignore` |
+| `/share [#channel]` | Show the shareable link for a channel (and copy it) |
+
+### 8.2 Channel operator commands
+
+*Apply to the current channel (or the one you name). Levels gate each command.*
+Use them from the member right-click menu or by typing:
+
+| Command | Who | Description |
+|---|---|---|
+| `/kick <nick> [reason]` | halfop+ | Remove a user from the channel |
+| `/kickban <nick> [reason]` | halfop+ | Kick and ban them at once |
+| `/ban <mask-nick> [duration] [reason]` | halfop+ | Ban a nick or mask (e.g. `*!*@1.2.3.4`) |
+| `/unban <mask-nick>` | halfop+ | Remove a ban |
+| `/quiet <nick> [duration]` | halfop+ | Mute a user (cannot speak; shows `+q`) |
+| `/op <nick>` / `/deop <nick>` | op+ | Grant / remove channel operator |
+| `/halfop <nick>` / `/dehalfop <nick>` | op | Grant / remove half-operator |
+| `/voice <nick>` / `/devoice <nick>` | halfop+ | Grant / remove voice (speaks in `+m`) |
+| `/mode [+/-modes] [args]` | halfop+ | Change channel modes and bans (see §3.5) |
+| `/topiclock <on-off>` | halfop+ | Lock / unlock topic to ops |
+| `/clear <users-bans-ops-voices-topic-modes>` | founder/op | Clear channel state (bare `/clear` clears your window) |
+
+**Operator rules:** you may only change users *below* your own level, and may
+only grant up to your own level (half-op grants voice; op grants voice/half-op/
+op; admin grants to admin; founder grants to admin). Server admins may do
+anything.
+
+### 8.3 NickServ / ChanServ commands (serv)
+
+| Command | Description |
+|---|---|
+| `/register <#channel>` | Register a channel as founder; keeps it after empty. If no channel, confirms your account |
+| `/identify <password>` | Verify your password; or `/identify #channel <key>` to join a keyed channel |
+| `/logout` | Log out |
+| `/set <option> <value>` | Account: `/set email|password|hide`. Channel: `/set #chan founder|password|key desc|topic|private|secret|visibility|successor|mlock ...` |
+| `/ns <command>` | Prefix a NickServ command |
+| `/cs <command>` | Prefix a ChanServ command |
+| `/ghost`, `/release`, `/recover` | Terminate your other sessions (reclaim your nick) |
+| `/status [nick]` | Show if a nick is registered and offline/online |
+| `/info [nick]` | Server info, or your account info (you + admins) |
+| `/group` | Nicks and accounts are unified here — nothing to do |
+| `/rename <nick>` | Same as `/nick` |
+
+**ChanServ details:**
+
+- `/drop <#channel>` — founder only, deletes the channel permanently.
+- `/unregister <#channel>` — founder only; channel becomes temporary and
+  vanishes when empty.
+- `/access <#channel> list|add <nick> <admin|op|halfop|voice>|del <nick>|clear`
+  — the persistent access list (works even for users not currently in the
+  channel).
+- `/akick <#channel> add|del|list|clear` — auto-kick-ban list; anyone on it is
+  refused entry / immediately removed.
+- `/transfer <#channel> <newfounder>` / `/set <#channel> founder <nick>` —
+  hand founder to another member.
+- `/getkey <#channel>` — check whether a key is set.
+- `/senak <#channel> <message>` — message all channel ops.
+- `/chaninfo <#channel>` — channel facts (founder, members, visibility, reg).
+- `/forbid <#channel> [off]` — forbid the channel entirely (nobody may join).
+
+### 8.4 MemoServ
+
+| Command | Description |
+|---|---|
+| `/memo send <nick> <message>` | Send an offline memo |
+| `/memo read [id]` | Read unread memos, or one by id |
+| `/memo list` | List your memos (with read/unread flags) |
+| `/memo del <id>` | Delete a memo |
+| `/memo summary` | Unread vs. total counts |
+| `/memo set <notify\|silent>` | Preferred notification mode |
+| `/ms ...` | Alias of `/memo` |
+
+### 8.5 HostServ
+
+| Command | Description |
+|---|---|
+| `vhost set <host>` | Set a virtual hostname |
+| `/vhost on` | Activate your vhost |
+| `/vhost off` | Deactivate it |
+| `/vhost status` | Show your current vhost |
+| `/hs <command>` | Alias of `/vhost` |
+
+### 8.6 OperServ (server administrators only)
+
+Oper commands (globals, `kline` etc.) are private to IRC Operators — they are
+impossible to run by a regular user and gated server-side. As a normal user you
+just need to know that `/whois` and the admin can see your IP and history; if
+you think you were banned in error, contact the server owner. See the **Admin
+Guide**.
+
+---
+
+## 9. Moderation & etiquette tips
+
+- Follow the channel's MOTD, topic and listed rules.
+- Keep private-channel share links to people you trust — anyone with one can join
+  your private channel.
+- Use `@mention` sparingly; mentions generate notifications for the target.
+- If a channel is misbehaving, `/knock` won't help — talk to an operator or the
+  admin, who can be seen in `/whois` / `/info` and by their red names.
+
+---
+
+## 10. Performance notes
+
+- Messages are capped at 2000 characters.
+- Sends are rate-limited: more than ~12 messages/DMs in 5 seconds will get a
+  "sending too quickly" message — pause and retry.
+- The channel history shown when you open a channel is the most recent 60
+  messages; older text is in the (admin-only) chat logs.

@@ -1,0 +1,72 @@
+<?php $title = 'Channels'; $active = 'channels'; ?>
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-bold text-white">Channels</h1>
+  <form method="get" action="/admin/channels" class="flex gap-2">
+    <input class="input w-56" name="q" placeholder="Search channels…" value="<?= h($term) ?>">
+    <button class="btn-primary">Search</button>
+  </form>
+</div>
+<?php require ROOT . '/views/admin/_nav.php'; ?>
+
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
+        <th class="px-4 py-2">Channel</th>
+        <th class="px-4 py-2">Topic</th>
+        <th class="px-4 py-2">Founder</th>
+        <th class="px-4 py-2">Members</th>
+        <th class="px-4 py-2">Visibility</th>
+        <th class="px-4 py-2 text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php foreach ($channels as $c): ?>
+      <tr class="border-b border-discord-800 align-top">
+        <td class="px-4 py-2">
+          <a href="/c/<?= h(rawurlencode($c['slug'])) ?>" class="font-medium text-white hover:underline"><?= h($c['name']) ?></a>
+          <a href="/admin/logs?channel=<?= h(rawurlencode($c['name'])) ?>" class="ml-1 text-[10px] text-blurple hover:underline">logs</a>
+          <?php if ($c['forbidden']): ?><span class="ml-1 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">FORBIDDEN</span><?php endif; ?>
+        </td>
+        <td class="px-4 py-2 text-discord-300 max-w-60 truncate"><?= h($c['topic'] ?: '(none)') ?></td>
+        <td class="px-4 py-2 text-discord-300"><?= h($c['owner'] ?? 'none') ?></td>
+        <td class="px-4 py-2"><?= (int) $c['members'] ?></td>
+        <td class="px-4 py-2 text-discord-300"><?= h($c['visibility']) ?><?= $c['invite_only'] ? ' +i' : '' ?><?= $c['moderated'] ? ' +m' : '' ?></td>
+        <td class="px-4 py-2">
+          <details class="text-right">
+            <summary class="btn-ghost text-xs !py-1 inline-flex cursor-pointer">Actions</summary>
+            <div class="absolute right-0 mt-1 w-72 card p-3 space-y-2 z-20">
+              <form method="post" action="/admin/action" class="flex gap-2">
+                <?= Csrf::field() ?>
+                <input type="hidden" name="back" value="/admin/channels">
+                <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
+                <input class="input !py-1 text-xs flex-1" name="topic" placeholder="Force topic…">
+                <button name="action" value="channel_topic" class="btn-primary text-xs !py-1">Set</button>
+              </form>
+              <form method="post" action="/admin/action" class="flex gap-2 items-center">
+                <?= Csrf::field() ?>
+                <input type="hidden" name="back" value="/admin/channels">
+                <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
+                <select name="visibility" class="input !py-1 text-xs flex-1">
+                  <?php foreach (['public', 'private', 'secret', 'staff'] as $v): ?>
+                  <option value="<?= $v ?>" <?= $c['visibility'] === $v ? 'selected' : '' ?>><?= $v ?></option>
+                  <?php endforeach; ?>
+                </select>
+                <button name="action" value="channel_visibility" class="btn-primary text-xs !py-1">Set</button>
+              </form>
+              <form method="post" action="/admin/action" class="flex gap-2">
+                <?= Csrf::field() ?>
+                <input type="hidden" name="back" value="/admin/channels">
+                <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
+                <input type="hidden" name="forbid" value="<?= $c['forbidden'] ? 0 : 1 ?>">
+                <button name="action" value="channel_forbid" class="btn-ghost text-xs !py-1"><?= $c['forbidden'] ? 'Un-forbid' : 'Forbid' ?></button>
+                <button name="action" value="channel_drop" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Drop this channel permanently?')">Drop</button>
+              </form>
+            </div>
+          </details>
+        </td>
+      </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
