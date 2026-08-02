@@ -6,6 +6,23 @@
   </div>
 </div>
 
+<div class="flex flex-wrap gap-3 mb-4">
+  <div class="card px-4 py-3 flex items-center gap-3">
+    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+    <div>
+      <div class="text-lg font-bold text-white leading-tight"><?= (int) $online ?></div>
+      <div class="text-xs text-discord-400">Online now</div>
+    </div>
+  </div>
+  <div class="card px-4 py-3 flex items-center gap-3">
+    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+    <div>
+      <div class="text-lg font-bold text-white leading-tight"><?= (int) $peak ?></div>
+      <div class="text-xs text-discord-400">Peak users ever</div>
+    </div>
+  </div>
+</div>
+
 <div class="card overflow-hidden">
   <div class="p-3 border-b border-discord-700 flex flex-wrap gap-2 items-center">
     <input id="ch-search" class="input w-64 !py-1.5" placeholder="Search by name or topic…" autocomplete="off">

@@ -167,6 +167,41 @@ function config_set(string $key, string $value): void
     Database::query('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)', [$key, $value]);
 }
 
+/** URL of the configured site logo, or null when none is set. */
+function site_logo(): ?string
+{
+    $url = trim((string) (config_get('logo_url', '') ?? ''));
+    return $url !== '' ? $url : null;
+}
+
+/** Number of people currently connected (registered users + guests, last 30s). */
+function online_count(): int
+{
+    $users = (int) Database::scalar("SELECT COUNT(*) FROM users WHERE away IS NULL AND last_seen >= datetime('now', '-30 seconds')");
+    $guests = (int) Database::scalar("SELECT COUNT(*) FROM guests WHERE last_seen >= datetime('now', '-30 seconds')");
+    return $users + $guests;
+}
+
+/** Opportunistically record the all-time concurrent peak (runs off the presence write). */
+function record_peak(): void
+{
+    $n = online_count();
+    $peak = (int) (config_get('peak_online', '0') ?? 0);
+    if ($n > $peak) {
+        config_set('peak_online', (string) $n);
+    }
+}
+
+/** Render the site logo image, or the default blurple "#" mark when none is set. */
+function logo_mark(string $size = 'w-12 h-12 rounded-2xl text-2xl'): string
+{
+    $url = site_logo();
+    if ($url !== null) {
+        return '<img src="' . h($url) . '" alt="" class="' . h($size) . ' object-contain">';
+    }
+    return '<div class="' . h($size) . ' bg-blurple flex items-center justify-center font-bold text-white">#</div>';
+}
+
 function render_view(string $name, array $vars = [], ?string $layout = 'layout'): never
 {
     extract($vars, EXTR_SKIP);

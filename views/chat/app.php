@@ -153,6 +153,7 @@ function member_html(array $m, bool $online): string {
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
       data-my-nick="<?= h($user['username']) ?>"
+      data-site-name="<?= h($site) ?>"
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-commands="<?= h(json_encode($commands)) ?>">
@@ -160,7 +161,11 @@ function member_html(array $m, bool $online): string {
   <!-- ── Left: channel sidebar ── -->
   <aside id="sidebar" class="sidebar w-60 md:w-64 bg-discord-800 flex flex-col shrink-0">
     <div class="h-12 px-4 flex items-center justify-between border-b border-discord-700 shadow-sm shrink-0">
+      <?php if ($logo = site_logo()): ?>
+      <img src="<?= h($logo) ?>" alt="<?= h($site) ?>" class="max-h-8 max-w-[160px] w-auto object-contain">
+      <?php else: ?>
       <span class="font-bold text-white text-sm truncate"><?= h($site) ?></span>
+      <?php endif; ?>
       <div class="flex items-center gap-1.5">
         <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1" title="Switch theme">🌙</button>
         <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications">
@@ -205,11 +210,11 @@ function member_html(array $m, bool $online): string {
           <?php if (!$dmPartners): ?>
           <div class="px-2 py-1 text-xs text-discord-500">No conversations yet</div>
           <?php endif; ?>
-          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; ?>
+          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = $d['away'] === null && !empty($d['last_seen']) && (time() - strtotime($d['last_seen'] . ' UTC')) <= 90; ?>
           <a href="/app?dm=<?= h(rawurlencode($d['username'])) ?>"
              data-ctx-user="<?= h($d['username']) ?>"
-             class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $dmName === $d['username'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?>">
-            <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : 'bg-green-500' ?>"></span>
+             class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $dmName === $d['username'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?> <?= $dOnline ? '' : 'italic opacity-70' ?>">
+            <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : ($dOnline ? 'bg-green-500' : 'bg-discord-500') ?>"></span>
             <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
             <?php if ($ucnt): ?><span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><?= $ucnt ?></span><?php endif; ?>
           </a>
@@ -247,6 +252,7 @@ function member_html(array $m, bool $online): string {
             <?php if ($user['role'] === 'admin'): ?>
             <a href="/admin" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm text-amber-400">Admin dashboard</a>
             <?php endif; ?>
+            <button type="button" data-embed class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Get embed code</button>
             <form method="post" action="/logout"><?= Csrf::field() ?><button class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm text-red-400">Log out</button></form>
           </div>
         </div>
@@ -263,6 +269,7 @@ function member_html(array $m, bool $online): string {
       <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= h($channel['topic']) ?></span>
       <div class="ml-auto flex items-center gap-2">
         <button id="share-btn" class="btn-ghost text-xs" title="Copy shareable link">🔗 Share</button>
+        <button type="button" data-embed class="btn-ghost text-xs" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
         <button id="part-btn" class="btn-ghost text-xs text-red-400" title="Leave channel">✕ Leave</button>
       </div>
       <?php elseif ($dm): ?>
@@ -361,7 +368,7 @@ function member_html(array $m, bool $online): string {
   <!-- ── Right: member list ── -->
   <aside class="hidden md:flex w-60 bg-discord-800 flex-col shrink-0 min-h-0">
     <?php if ($channel): ?>
-    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members — <span id="member-count"><?= count($members) ?></span></div>
+    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members — <span id="member-count"><?= ChannelService::memberCount((int) $channel['id']) ?></span></div>
     <div id="member-list" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       <?php
       $online = array_filter($members, fn ($m) => !empty($m['is_online']));
@@ -465,6 +472,20 @@ function member_html(array $m, bool $online): string {
 
   <!-- DM arrival toast (shown when a DM lands while you are elsewhere) -->
   <div id="dm-toast" class="hidden fixed bottom-4 right-4 z-[150] w-80 max-w-[calc(100vw-2rem)] card border border-blurple/40 shadow-2xl"></div>
+
+  <!-- Embed code modal -->
+  <div id="embed-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-embed-close></div>
+    <div class="relative card p-6 w-[min(92vw,560px)] shadow-2xl">
+      <h2 class="text-lg font-bold text-white">Embed this chat</h2>
+      <p class="text-xs text-discord-400 mt-1 mb-4">Copy this snippet into your site. Visitors are prompted to sign in, register, or join as a guest.</p>
+      <textarea id="embed-code" readonly class="input font-mono text-xs" rows="5"></textarea>
+      <div class="flex gap-2 mt-4">
+        <button id="embed-copy" class="btn-primary flex-1 justify-center">Copy code</button>
+        <button data-embed-close class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
   <script src="/assets/js/app.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/app.js') ?>"></script>

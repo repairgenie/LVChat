@@ -267,6 +267,7 @@ final class Database
             'max_channels_per_user' => '100',
             'presence_throttle' => '30',
             'poll_interval' => '2',
+            'peak_online' => '0',
         ];
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');
         foreach ($config as $k => $v) {

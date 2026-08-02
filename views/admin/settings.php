@@ -10,6 +10,11 @@
     <label class="label">Site name</label>
     <input class="input" name="site_name" value="<?= h($settings['site_name']) ?>">
   </div>
+  <div>
+    <label class="label">Site logo URL</label>
+    <input class="input" name="logo_url" value="<?= h($settings['logo_url']) ?>" placeholder="https://example.com/logo.png">
+    <p class="text-xs text-discord-400 mt-1">Shown in place of the site name in the header and login pages. Leave empty to use the default mark.</p>
+  </div>
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Registration</div>

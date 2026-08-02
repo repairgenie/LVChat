@@ -25,6 +25,8 @@ final class BrowseController
             'user' => $user,
             'channels' => $channels,
             'joinedMap' => $joinedMap,
+            'online' => online_count(),
+            'peak' => (int) (config_get('peak_online', '0') ?? 0),
         ]);
     }
 }

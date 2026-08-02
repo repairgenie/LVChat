@@ -34,6 +34,26 @@ final class ChannelController
         redirect('/app?channel=' . rawurlencode($channel['slug']));
     }
 
+    /** GET /embed/{slug} — public embeddable page: gate on sign-in/register/guest, then open the channel. */
+    public static function embed(array $params): void
+    {
+        $channel = ChannelService::findBySlug((string) $params['slug']);
+        if (!$channel) {
+            render_view('errors/notfound', [], null);
+        }
+        $user = Auth::user();
+        if ($user) {
+            // Signed in: reuse the share-link auto-join flow (the iframe follows the redirect).
+            redirect('/c/' . rawurlencode($channel['slug']));
+        }
+        render_view('embed/landing', [
+            'title' => 'Join ' . $channel['name'],
+            'channel' => $channel,
+            'next' => '/c/' . rawurlencode($channel['slug']),
+            'error' => flash(),
+        ]);
+    }
+
     public static function joinForm(array $params): void
     {
         $user = Auth::require();

@@ -19,7 +19,11 @@
   <header class="bg-discord-950/60 border-b border-discord-800">
     <div class="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
+        <?php if (site_logo()): ?>
+        <img src="<?= h(site_logo()) ?>" alt="" class="w-8 h-8 rounded-xl object-contain">
+        <?php else: ?>
         <div class="w-8 h-8 rounded-xl bg-blurple flex items-center justify-center font-bold text-white">#</div>
+        <?php endif; ?>
         <div>
           <div class="font-semibold leading-tight"><?= h(config_get('site_name', 'LVChat')) ?></div>
           <div class="text-xs text-discord-400 leading-tight">IRC-style web chat</div>

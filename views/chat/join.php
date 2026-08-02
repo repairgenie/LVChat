@@ -1,7 +1,7 @@
 <?php $title = 'Join ' . $channel['name']; ?>
 <div class="max-w-md mx-auto">
   <div class="card p-8 text-center">
-    <div class="mx-auto mb-4 w-14 h-14 rounded-2xl bg-blurple flex items-center justify-center text-2xl font-bold text-white">#</div>
+    <?= logo_mark('mx-auto mb-4 w-14 h-14 rounded-2xl text-2xl') ?>
     <h1 class="text-xl font-bold text-white"><?= h($channel['name']) ?></h1>
     <p class="text-sm text-discord-400 mt-1 mb-6">This channel requires a key to join.</p>
     <?php if ($error): ?>

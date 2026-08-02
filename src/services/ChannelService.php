@@ -214,9 +214,16 @@ final class ChannelService
         );
     }
 
+    /** Count of registered members who are currently present (not guests, not offline). */
     public static function memberCount(int|string $channelId): int
     {
-        return (int) Database::scalar('SELECT COUNT(*) FROM channel_members WHERE channel_id = ?', [$channelId]);
+        return (int) Database::scalar(
+            "SELECT COUNT(*) FROM channel_members cm
+             JOIN users u ON u.id = cm.user_id
+             WHERE cm.channel_id = ? AND u.away IS NULL
+               AND u.last_seen >= datetime('now', '-30 seconds')",
+            [$channelId]
+        );
     }
 
     public static function joinedChannelNames(array $actor): array
@@ -269,7 +276,10 @@ final class ChannelService
 
     public static function publicChannels(string $term = ''): array
     {
-        $sql = "SELECT c.*, (SELECT COUNT(*) FROM channel_members cm WHERE cm.channel_id = c.id) AS members
+        $sql = "SELECT c.*,
+                    (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id
+                     WHERE cm.channel_id = c.id AND u.away IS NULL
+                       AND u.last_seen >= datetime('now', '-30 seconds')) AS members
                 FROM channels c
                 WHERE c.visibility = 'public'
                 AND c.forbidden = 0";

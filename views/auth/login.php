@@ -1,7 +1,7 @@
 <div class="max-w-md mx-auto">
   <div class="card p-8">
     <div class="flex items-center gap-3 mb-8">
-      <div class="w-12 h-12 rounded-2xl bg-blurple flex items-center justify-center text-2xl font-bold text-white">#</div>
+      <?= logo_mark() ?>
       <div>
         <h1 class="text-xl font-bold text-white">Welcome back</h1>
         <p class="text-sm text-discord-400"><?= h(config_get('site_name', 'LVChat')) ?></p>

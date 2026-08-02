@@ -581,6 +581,21 @@ Database::query('UPDATE guests SET last_seen = datetime("now", "-2 days") WHERE 
 Auth::purgeGuests();
 check('inactive guest purged', Database::scalar('SELECT id FROM guests WHERE nick = "anoncat"') === false);
 
+// ── Member counts reflect only registered users who are present ─────────────
+$testCh = ChannelService::find('#test');
+Database::query('UPDATE users SET last_seen = datetime("now"), away = NULL WHERE id = ?', [$alice['id']]);
+Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$bob['id']]);
+check('member count counts present registered users', ChannelService::memberCount((int) $testCh['id']) === 1);
+Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$alice['id']]);
+check('member count ignores offline users', ChannelService::memberCount((int) $testCh['id']) === 0);
+
+// ── Online / peak stats ──────────────────────────────────────────────────────
+Database::query('UPDATE users SET last_seen = datetime("now"), away = NULL WHERE id = ?', [$alice['id']]);
+Database::query('UPDATE users SET last_seen = datetime("now"), away = NULL WHERE id = ?', [$bob['id']]);
+check('online_count counts connected users', online_count() >= 2);
+record_peak();
+check('peak_online tracks concurrent users', (int) config_get('peak_online', '0') >= 2);
+
 // ── O:lines / operclasses ───────────────────────────────────────────────────
 echo "== o-lines ==\n";
 $netadmin = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "netadmin"');

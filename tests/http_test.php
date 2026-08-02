@@ -205,6 +205,23 @@ check('ban action with bad id handled', $s === 302, (string) $s);
 [$s, , $b] = req('GET', '/admin/logs?q=hello', [], $cjA);
 check('admin log search', $s === 200, (string) $s);
 
+// Site logo: save a logo URL, verify it renders in place of the site name.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'site_name' => 'LVChat', 'logo_url' => 'https://example.com/logo.png', 'registration_enabled' => '1', 'back' => '/admin/settings'], $cjA);
+check('save site logo setting', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/login');
+check('logo renders on login page', $s === 200 && strpos($b, 'https://example.com/logo.png') !== false, $b);
+
+// Embeddable channel page: gates on auth, offers guest/login/register.
+[$s, , $b] = req('GET', '/embed/general');
+check('embed page prompts sign-in (guest form)', $s === 200 && strpos($b, 'Chat as guest') !== false && strpos($b, '/guest') !== false, $b);
+[$s, $h] = req('GET', '/embed/general', [], $cjA);
+check('logged-in embed redirects into the channel', $s === 302 && str_contains($h['location'] ?? '', '/c/general'), "$s " . ($h['location'] ?? ''));
+
+// Browse page shows live + peak concurrency stats.
+[$s, , $b] = req('GET', '/browse', [], $cjA);
+check('browse page shows online + peak stats', $s === 200 && strpos($b, 'Online now') !== false && strpos($b, 'Peak users ever') !== false, $b);
+
 // ── Day log (modal text + export) ────────────────────────────────────────────
 $today = gmdate('Y-m-d');
 [$s, , $b] = req('GET', '/admin/logs/day?channel=%23gaming&date=' . $today, [], $cjA);

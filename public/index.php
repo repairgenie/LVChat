@@ -21,6 +21,7 @@ $router->get('/browse', [BrowseController::class, 'browse']);
 $router->get('/c/{slug}', [ChannelController::class, 'channelLink']);
 $router->get('/c/{slug}/join', [ChannelController::class, 'joinForm']);
 $router->post('/c/{slug}/join', [ChannelController::class, 'joinWithKey']);
+$router->get('/embed/{slug}', [ChannelController::class, 'embed']);
 
 // Chat API
 $router->get('/api/version', [ChatController::class, 'version']);

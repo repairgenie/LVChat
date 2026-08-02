@@ -30,6 +30,7 @@ final class Auth
             if (time() - $lastWrite >= $throttle) {
                 Database::query('UPDATE users SET last_seen = datetime("now"), last_ip = ? WHERE id = ?', [client_ip(), $u['id']]);
                 $_SESSION['presence_ts'] = time();
+                record_peak();
             }
             if (empty($u['last_seen']) || time() - strtotime($u['last_seen'] . ' UTC') > $throttle) {
                 $u['last_seen'] = now();
@@ -51,6 +52,7 @@ final class Auth
             if (time() - $lastWrite >= $throttle) {
                 Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $g['id']]);
                 $_SESSION['presence_ts'] = time();
+                record_peak();
             }
             if (empty($g['last_seen']) || time() - strtotime($g['last_seen'] . ' UTC') > $throttle) {
                 $g['last_seen'] = now();

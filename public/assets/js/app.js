@@ -251,11 +251,12 @@
     const cur = DM && d.username && d.username.toLowerCase() === DM.toLowerCase();
     const isAdmin = d.role === 'admin';
     const guestTag = d.guest ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
-    const dot = d.away ? 'bg-amber-400' : 'bg-green-500';
+    const online = !!d.last_seen && !d.away && (Date.now() - timeTs(d.last_seen)) < 90000;
+    const dot = d.away ? 'bg-amber-400' : (online ? 'bg-green-500' : 'bg-discord-500');
     const nameCls = isAdmin ? 'text-red-400' : '';
     return `<a href="/app?dm=${encodeURIComponent(d.username)}"
          data-ctx-user="${esc(d.username)}"
-         class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'}">
+         class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'} ${online ? '' : 'italic opacity-70'}">
       <span class="w-2 h-2 rounded-full ${dot}"></span>
       <span class="truncate ${nameCls}">${esc(d.username)}${guestTag}</span>
       ${d.unread ? `<span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">${d.unread > 99 ? '99+' : d.unread}</span>` : ''}
@@ -328,7 +329,7 @@
       `<div class="px-2 py-2"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — ${online.length}</div>${mk(online, true)}</div>` +
       `<div class="px-2 pb-2"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — ${offline.length}</div>${mk(offline, false)}</div>`;
     const count = document.getElementById('member-count');
-    if (count) count.textContent = String(list.length);
+    if (count) count.textContent = String(list.filter((m) => m.is_online && !m.guest).length);
   }
 
   // ── Bell / notifications ───────────────────────────────────────────────────
@@ -668,6 +669,7 @@
     const items = [
       { label: 'Open channel', onClick: () => { window.location = '/c/' + encodeURIComponent(slug); } },
       { label: 'Copy share link', onClick: () => copyText(window.location.origin + '/c/' + encodeURIComponent(slug)) },
+      { label: 'Get embed code', onClick: () => openEmbed(slug) },
       { label: 'Channel info', onClick: () => runCommand('/chaninfo ' + name) },
     ];
     if (CHANNEL === slug && (CAN_OP || CAN_ADMIN)) {
@@ -774,6 +776,32 @@
     post('/api/profile', { theme }, () => {});
   });
   setThemeIcon();
+
+  // ── Embed code ──────────────────────────────────────────────────────────────
+  const embedModal = document.getElementById('embed-modal');
+  const embedCode = document.getElementById('embed-code');
+  function openEmbed(slug) {
+    if (!embedModal || !embedCode) return;
+    const s = slug || CHANNEL || 'general';
+    const url = window.location.origin + '/embed/' + encodeURIComponent(s);
+    const site = body.dataset.siteName || 'LVChat';
+    embedCode.value = '<iframe src="' + url + '" style="width:100%;height:600px;border:0;border-radius:8px" title="' + esc(site) + '" allowfullscreen></iframe>';
+    embedModal.classList.remove('hidden');
+  }
+  document.querySelectorAll('[data-embed]').forEach((el) => {
+    el.addEventListener('click', (e) => { e.preventDefault(); openEmbed(el.dataset.embed); });
+  });
+  if (embedModal) {
+    embedModal.querySelectorAll('[data-embed-close]').forEach((el) => el.addEventListener('click', () => embedModal.classList.add('hidden')));
+    const embedCopy = document.getElementById('embed-copy');
+    if (embedCopy) embedCopy.addEventListener('click', () => {
+      copyText(embedCode.value, (ok) => {
+        embedCopy.textContent = ok ? '✓ Copied' : 'Copy failed';
+        embedCopy.classList.toggle('text-red-400', !ok);
+        setTimeout(() => { embedCopy.textContent = 'Copy code'; embedCopy.classList.remove('text-red-400'); }, 1500);
+      });
+    });
+  }
 
   // ── Boot ───────────────────────────────────────────────────────────────────
   scrollBottom();
