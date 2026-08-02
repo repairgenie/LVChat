@@ -104,10 +104,11 @@
       </div>`;
     }
     let actions = '';
-    if (String(m.sender_id) === String(MY_ID)) {
+    const mine = String(m.sender_id) === String(MY_ID) || (m.username && m.username.toLowerCase() === MY_NICK);
+    if (CAN_ADMIN) {
       actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
         + '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
-    } else if (CAN_ADMIN) {
+    } else if (mine) {
       actions = '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
     return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="message" data-author="${esc(m.username)}">
@@ -314,7 +315,8 @@
     const el = document.getElementById('member-list');
     if (!el) return;
     const online = list.filter((m) => m.is_online);
-    const offline = list.filter((m) => !m.is_online);
+    // Offline list only shows registered users — anonymous guests aren't listed when away.
+    const offline = list.filter((m) => !m.is_online && !m.guest);
     const mk = (arr, on) => arr.map((m) => {
       const rs = (m.role !== 'admin' && m.role_color) ? ' style="color:' + esc(m.role_color) + '"' : '';
       const cc = m.role === 'admin' ? 'text-red-400' : (on ? (COLORS[m.level] || COLORS.normal) : 'text-discord-400');
@@ -727,7 +729,7 @@
     }
     if (content) items.push({ label: 'Copy text', onClick: () => copyText(content) });
     const mine = author && author.toLowerCase() === MY_NICK;
-    if (mine) {
+    if (CAN_ADMIN) {
       items.push({ label: 'Edit', onClick: () => {
         const next = prompt('Edit message:', content);
         if (next === null || next === content) return;
@@ -735,8 +737,8 @@
           if (contentEl) contentEl.innerHTML = linkify(next);
         });
       } });
-      items.push({ label: 'Delete', danger: true, onClick: () => post('/api/message/delete', { id }, () => el.remove()) });
-    } else if (CAN_ADMIN || CAN_OP) {
+    }
+    if (mine || CAN_ADMIN || CAN_OP) {
       items.push({ label: 'Delete', danger: true, onClick: () => post('/api/message/delete', { id }, () => el.remove()) });
     }
     if (author && author.toLowerCase() !== MY_NICK) {

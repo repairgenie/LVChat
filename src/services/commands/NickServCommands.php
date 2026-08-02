@@ -162,7 +162,7 @@ CommandRegistry::register('info', [
             if (strtolower($nick) !== strtolower($user['username']) && $user['role'] !== 'admin') {
                 return ['replies' => ['Account info is only visible to yourself (and admins).']];
             }
-            $channels = count(ChannelService::joinedChannelNames((int) $t['id']));
+            $channels = count(ChannelService::joinedChannelNames($t));
             $memos = (int) Database::scalar('SELECT COUNT(*) FROM memos WHERE recipient_id = ? AND read_at IS NULL', [$t['id']]);
             return ['replies' => [
                 'Nick: ' . h($t['username']) . '  |  Email: ' . h($t['email']),

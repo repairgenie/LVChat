@@ -68,7 +68,7 @@ final class ChannelService
     public static function joinStatus(array $channel, array $user, ?string $key = null): array
     {
         $channel = Database::row('SELECT * FROM channels WHERE id = ?', [$channel['id']]) ?: $channel;
-        $member = AccessService::member($channel['id'], (int) $user['id']);
+        $member = AccessService::member($channel['id'], $user);
         if ($member) {
             return ['ok' => true, 'reason' => 'already_member', 'needsKey' => false];
         }
@@ -125,17 +125,28 @@ final class ChannelService
         if ($access) {
             $level = $access['level'];
         }
-        Database::query(
-            'INSERT OR IGNORE INTO channel_members (channel_id, user_id, level) VALUES (?, ?, ?)',
-            [$channel['id'], $user['id'], $level]
-        );
-        Database::query('DELETE FROM invites WHERE channel_id = ? AND user_id = ?', [$channel['id'], $user['id']]);
+        if (Auth::isGuest($user)) {
+            Database::query(
+                'INSERT OR IGNORE INTO channel_members (channel_id, guest_id, level) VALUES (?, ?, ?)',
+                [$channel['id'], $user['id'], $level]
+            );
+        } else {
+            Database::query(
+                'INSERT OR IGNORE INTO channel_members (channel_id, user_id, level) VALUES (?, ?, ?)',
+                [$channel['id'], $user['id'], $level]
+            );
+            Database::query('DELETE FROM invites WHERE channel_id = ? AND user_id = ?', [$channel['id'], $user['id']]);
+        }
         MessageService::system($channel['id'], 'join', $user['username'] . ' has joined ' . $channel['name']);
     }
 
     public static function part(array $channel, array $user, ?string $reason): void
     {
-        Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$channel['id'], $user['id']]);
+        if (Auth::isGuest($user)) {
+            Database::query('DELETE FROM channel_members WHERE channel_id = ? AND guest_id = ?', [$channel['id'], $user['id']]);
+        } else {
+            Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$channel['id'], $user['id']]);
+        }
         $msg = $user['username'] . ' has left ' . $channel['name'];
         if ($reason) {
             $msg .= ' (' . $reason . ')';
@@ -164,9 +175,10 @@ final class ChannelService
             }
             return;
         }
-        if (empty($ch['registered_at']) && $ch['owner_id'] !== null && !AccessService::member($channelId, (int) $ch['owner_id'])) {
+        if (empty($ch['registered_at']) && $ch['owner_id'] !== null && !AccessService::member($channelId, ['id' => (int) $ch['owner_id'], 'guest' => 0])) {
+            // Founder only ever passes to a registered user, never to a guest.
             $heir = Database::row(
-                'SELECT user_id FROM channel_members WHERE channel_id = ? ORDER BY joined_at ASC, user_id ASC LIMIT 1',
+                'SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id IS NOT NULL ORDER BY joined_at ASC, user_id ASC LIMIT 1',
                 [$channelId]
             );
             if ($heir) {
@@ -187,12 +199,17 @@ final class ChannelService
     public static function members(int|string $channelId): array
     {
         return Database::all(
-            'SELECT u.id, u.username, u.away, u.away_at, u.last_seen, u.role, u.bot, u.guest, cm.level,
+            "SELECT COALESCE(u.id, g.id) AS id, COALESCE(u.username, g.nick) AS username,
+                    u.away, u.away_at, COALESCE(u.last_seen, g.last_seen) AS last_seen,
+                    COALESCE(u.role, 'user') AS role, COALESCE(u.bot, 0) AS bot,
+                    CASE WHEN g.id IS NOT NULL THEN 1 ELSE 0 END AS guest,
+                    cm.level,
                     (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
              FROM channel_members cm
-             JOIN users u ON u.id = cm.user_id
+             LEFT JOIN users u ON u.id = cm.user_id
+             LEFT JOIN guests g ON g.id = cm.guest_id
              WHERE cm.channel_id = ?
-             ORDER BY cm.level DESC, u.username ASC',
+             ORDER BY cm.level DESC, COALESCE(u.username, g.nick) ASC",
             [$channelId]
         );
     }
@@ -202,14 +219,23 @@ final class ChannelService
         return (int) Database::scalar('SELECT COUNT(*) FROM channel_members WHERE channel_id = ?', [$channelId]);
     }
 
-    public static function joinedChannelNames(int $userId): array
+    public static function joinedChannelNames(array $actor): array
     {
+        if (Auth::isGuest($actor)) {
+            return Database::all(
+                'SELECT c.id, c.name, c.slug, c.topic, c.visibility, c.moderated
+                 FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+                 WHERE cm.guest_id = ?
+                 ORDER BY c.name COLLATE NOCASE',
+                [$actor['id']]
+            );
+        }
         return Database::all(
             'SELECT c.id, c.name, c.slug, c.topic, c.visibility, c.moderated
              FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
              WHERE cm.user_id = ?
              ORDER BY c.name COLLATE NOCASE',
-            [$userId]
+            [$actor['id']]
         );
     }
 

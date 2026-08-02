@@ -84,7 +84,7 @@ CommandRegistry::register('quit', [
     'usage' => '/quit [reason]',
     'run' => function (array $args, array $user, ?array $channel) {
         $reason = implode(' ', $args);
-        foreach (ChannelService::joinedChannelNames((int) $user['id']) as $c) {
+        foreach (ChannelService::joinedChannelNames($user) as $c) {
             $msg = $user['username'] . ' has quit';
             if ($reason) {
                 $msg .= ' (' . $reason . ')';
@@ -108,11 +108,11 @@ CommandRegistry::register('me', [
         if ($text === '') {
             return ['replies' => ['Usage: /me <action>']];
         }
-        $blocked = BanService::canPost($channel, $user, AccessService::member($channel['id'], (int) $user['id']));
+        $blocked = BanService::canPost($channel, $user, AccessService::member($channel['id'], $user));
         if ($blocked) {
             return ['replies' => [$blocked]];
         }
-        MessageService::send($channel['id'], (int) $user['id'], $text, 'action');
+        MessageService::send($channel['id'], $user, $text, 'action');
         return null;
     },
 ]);
@@ -143,19 +143,16 @@ CommandRegistry::register('notice', [
         if (!$nick || $text === '') {
             return ['replies' => ['Usage: /notice <nick> <message>']];
         }
-        $target = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+        $target = Auth::findActor($nick);
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
-        if ((int) $target['id'] === (int) $user['id']) {
+        if (MessageService::sameActor($target, $user)) {
             return ['replies' => ['You cannot send a notice to yourself.']];
         }
         $prefix = $user['role'] === 'admin' ? '[Server] ' : '';
-        Database::query(
-            'INSERT INTO private_messages (sender_id, recipient_id, content) VALUES (?, ?, ?)',
-            [$user['id'], $target['id'], mb_substr($prefix . $text, 0, 2000)]
-        );
-        MessageService::logPm((int) $user['id'], $user['username'], $target['username'], mb_substr($prefix . $text, 0, 2000));
+        MessageService::insertPm($user, $target, mb_substr($prefix . $text, 0, 2000));
+        MessageService::logPm((int) $user['id'], $user['username'], $target['username'], mb_substr($prefix . $text, 0, 2000), MessageService::isGuest($user) ? 1 : 0);
         return ['replies' => ["Notice sent to $nick."]];
     },
 ]);
@@ -184,7 +181,7 @@ CommandRegistry::register('nick', [
             return ['replies' => ['That nickname is reserved (' . ($ban['reason'] ?: 'q-lined') . ').']];
         }
         Database::query('UPDATE users SET username = ? WHERE id = ?', [$newnick, $user['id']]);
-        foreach (ChannelService::joinedChannelNames((int) $user['id']) as $c) {
+        foreach (ChannelService::joinedChannelNames($user) as $c) {
             MessageService::system($c['id'], 'nick', $user['username'] . ' is now known as ' . $newnick);
         }
         return ['replies' => ["You are now known as $newnick."]];
@@ -242,7 +239,7 @@ CommandRegistry::register('whois', [
         if ($t['away']) {
             $lines[] = 'Away: ' . h($t['away']);
         }
-        $chans = ChannelService::joinedChannelNames((int) $t['id']);
+        $chans = ChannelService::joinedChannelNames($t);
         if ($chans) {
             $lines[] = 'Channels: ' . implode(' ', array_column($chans, 'name'));
         }
@@ -409,7 +406,7 @@ final class UserCommands
 {
     public static function privateMessage(array $user, string $nick, string $text): ?array
     {
-        $target = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+        $target = Auth::findActor($nick);
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
@@ -431,16 +428,9 @@ final class UserCommands
         if ($blocked) {
             return ['replies' => [$blocked]];
         }
-        Database::query(
-            'INSERT INTO private_messages (sender_id, recipient_id, content) VALUES (?, ?, ?)',
-            [$user['id'], $target['id'], mb_substr($text, 0, 2000)]
-        );
-        $pmId = (int) Database::lastId();
-        MessageService::logPm((int) $user['id'], $user['username'], $target['username'], mb_substr($text, 0, 2000));
-        Database::query(
-            'INSERT INTO notifications (user_id, kind, sender_id, message_id) VALUES (?, "dm", ?, ?)',
-            [$target['id'], $user['id'], $pmId]
-        );
+        $pmId = MessageService::insertPm($user, $target, mb_substr($text, 0, 2000));
+        MessageService::logPm((int) $user['id'], $user['username'], $target['username'], mb_substr($text, 0, 2000), MessageService::isGuest($user) ? 1 : 0);
+        MessageService::notifyDm($target, $user, $pmId);
         return null;
     }
 }

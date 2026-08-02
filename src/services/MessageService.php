@@ -6,30 +6,88 @@ final class MessageService
 {
     public const SYSTEM_KINDS = ['join', 'part', 'quit', 'kick', 'ban', 'topic', 'mode', 'nick', 'system', 'notice'];
 
-    public static function send(int $channelId, int $senderId, string $content, string $kind = 'message', ?int $replyTo = null): array
+    /** True if the actor is an anonymous guest (guests live in `guests`, not `users`). */
+    public static function isGuest(array $a): bool
     {
+        return (int) ($a['guest'] ?? 0) === 1;
+    }
+
+    /** Are two actors the same person (same identity kind + id)? */
+    public static function sameActor(array $a, array $b): bool
+    {
+        return self::isGuest($a) === self::isGuest($b) && (int) $a['id'] === (int) $b['id'];
+    }
+
+    /** Insert a private message between two actors (users and/or guests). Returns the new id. */
+    public static function insertPm(array $sender, array $recipient, string $content): int
+    {
+        $sc = self::isGuest($sender) ? 'sender_guest_id' : 'sender_id';
+        $rc = self::isGuest($recipient) ? 'recipient_guest_id' : 'recipient_id';
         Database::query(
-            'INSERT INTO messages (channel_id, sender_id, kind, content, reply_to_id) VALUES (?, ?, ?, ?, ?)',
-            [$channelId, $senderId, $kind, $content, $replyTo]
+            "INSERT INTO private_messages ($sc, $rc, content) VALUES (?, ?, ?)",
+            [$sender['id'], $recipient['id'], $content]
+        );
+        return (int) Database::lastId();
+    }
+
+    /** Create a DM notification for a recipient actor (skips self-DMs). */
+    public static function notifyDm(array $recipient, array $sender, int $pmId): void
+    {
+        if (self::sameActor($recipient, $sender)) {
+            return;
+        }
+        $rc = self::isGuest($recipient) ? 'guest_user_id' : 'user_id';
+        $sc = self::isGuest($sender) ? 'sender_guest_id' : 'sender_id';
+        Database::query(
+            "INSERT INTO notifications ($rc, kind, $sc, message_id) VALUES (?, 'dm', ?, ?)",
+            [$recipient['id'], $sender['id'], $pmId]
+        );
+    }
+
+    /** [userColValue, guestColValue] — the side not in play is 0 so it never matches a real id. */
+    private static function actorPair(array $a): array
+    {
+        if (self::isGuest($a)) {
+            return [0, (int) $a['id']];
+        }
+        return [(int) $a['id'], 0];
+    }
+
+    /** Shared sender-resolution fragment for channel messages (senders may be users or guests). */
+    private static function msgSelect(): string
+    {
+        return 'SELECT m.*,
+                    COALESCE((SELECT u.username FROM users u WHERE u.id = m.sender_id),
+                             (SELECT g.nick FROM guests g WHERE g.id = m.sender_guest_id)) AS username,
+                    (SELECT u.role FROM users u WHERE u.id = m.sender_id) AS role,
+                    CASE WHEN m.sender_guest_id IS NOT NULL THEN 1 ELSE 0 END AS guest,
+                    CASE WHEN m.sender_guest_id IS NOT NULL THEN 0 ELSE COALESCE((SELECT u.bot FROM users u WHERE u.id = m.sender_id), 0) END AS bot,
+                    CASE WHEN m.sender_guest_id IS NOT NULL THEN \'normal\'
+                         ELSE (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id)
+                    END AS level,
+                    (SELECT r.color FROM roles r WHERE r.id = (SELECT u.role_id FROM users u WHERE u.id = m.sender_id)) AS role_color
+             FROM messages m';
+    }
+
+    public static function send(int $channelId, array $sender, string $content, string $kind = 'message', ?int $replyTo = null): array
+    {
+        $isGuest = self::isGuest($sender);
+        $senderCol = $isGuest ? 'sender_guest_id' : 'sender_id';
+        Database::query(
+            "INSERT INTO messages (channel_id, $senderCol, kind, content, reply_to_id) VALUES (?, ?, ?, ?, ?)",
+            [$channelId, $sender['id'], $kind, $content, $replyTo]
         );
         $id = (int) Database::lastId();
-        $msg = Database::row(
-            'SELECT m.*, u.username, u.bot, u.role, u.guest,
-                    (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id) AS level,
-                    (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
-             FROM messages m LEFT JOIN users u ON u.id = m.sender_id
-             WHERE m.id = ?',
-            [$id]
-        );
+        $msg = Database::row(self::msgSelect() . ' WHERE m.id = ?', [$id]);
         self::logRow(
             (string) (Database::scalar('SELECT name FROM channels WHERE id = ?', [$channelId]) ?? $channelId),
-            $senderId,
+            $isGuest ? null : (int) $sender['id'],
             $msg['username'] ?? null,
             $kind,
             $content,
-            (int) ($msg['guest'] ?? 0)
+            $isGuest ? 1 : 0
         );
-        self::notifyMentions($msg, $channelId, $senderId);
+        self::notifyMentions($msg, $channelId, $sender);
         return $msg;
     }
 
@@ -89,10 +147,7 @@ final class MessageService
     public static function forChannel(int $channelId, int $since = 0, int $limit = 100): array
     {
         $rows = Database::all(
-            'SELECT m.*, u.username, u.bot, u.role, u.guest,
-                    (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id) AS level,
-                    (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
-             FROM messages m LEFT JOIN users u ON u.id = m.sender_id
+            self::msgSelect() . '
              WHERE m.channel_id = ? AND m.id > ? AND m.deleted = 0
              ORDER BY m.id ASC
              LIMIT ?',
@@ -104,10 +159,7 @@ final class MessageService
     public static function history(int $channelId, int $limit = 60): array
     {
         $rows = Database::all(
-            'SELECT m.*, u.username, u.bot, u.role, u.guest,
-                    (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id) AS level,
-                    (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
-             FROM messages m LEFT JOIN users u ON u.id = m.sender_id
+            self::msgSelect() . '
              WHERE m.channel_id = ? AND m.deleted = 0
              ORDER BY m.id DESC
              LIMIT ?',
@@ -116,19 +168,27 @@ final class MessageService
         return array_map([self::class, 'present'], array_reverse($rows));
     }
 
-    public static function forDm(int $me, int $other, int $since = 0, int $limit = 100): array
+    public static function forDm(array $me, array $other, int $since = 0, int $limit = 100): array
     {
-        // Polls (since > 0) want the new messages in ascending order; an initial
-        // history load (since = 0) wants the *most recent* messages, so fetch the
-        // newest `limit` by id and reverse them for display.
+        [$meU, $meG] = self::actorPair($me);
+        [$oU, $oG] = self::actorPair($other);
         $order = $since > 0 ? 'ASC' : 'DESC';
         $rows = Database::all(
-            'SELECT pm.*, u.username, u.bot, u.role, u.guest, NULL AS level
-             FROM private_messages pm JOIN users u ON u.id = pm.sender_id
-             WHERE pm.id > ? AND ((pm.sender_id = ? AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = ?))
-             ORDER BY pm.id ' . $order . '
-             LIMIT ?',
-            [$since, $me, $other, $other, $me, $limit]
+            "SELECT pm.*,
+                    COALESCE((SELECT u.username FROM users u WHERE u.id = pm.sender_id),
+                             (SELECT g.nick FROM guests g WHERE g.id = pm.sender_guest_id)) AS username,
+                    (SELECT u.role FROM users u WHERE u.id = pm.sender_id) AS role,
+                    CASE WHEN pm.sender_guest_id IS NOT NULL THEN 1 ELSE 0 END AS guest,
+                    NULL AS bot, NULL AS level
+             FROM private_messages pm
+             WHERE pm.id > ? AND (
+                ((pm.sender_id = ? OR pm.sender_guest_id = ?) AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?))
+                OR
+                ((pm.sender_id = ? OR pm.sender_guest_id = ?) AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?))
+             )
+             ORDER BY pm.id $order
+             LIMIT ?",
+            [$since, $meU, $meG, $oU, $oG, $oU, $oG, $meU, $meG, $limit]
         );
         $rows = $since > 0 ? $rows : array_reverse($rows);
         $out = [];
@@ -139,9 +199,9 @@ final class MessageService
                 'content' => $r['content'],
                 'created_at' => $r['created_at'],
                 'username' => $r['username'],
-                'sender_id' => (int) $r['sender_id'],
-                'bot' => (int) $r['bot'],
-                'role' => $r['role'],
+                'sender_id' => $r['sender_id'] === null ? null : (int) $r['sender_id'],
+                'bot' => (int) ($r['bot'] ?? 0),
+                'role' => $r['role'] ?? 'user',
                 'role_color' => null,
                 'guest' => (int) ($r['guest'] ?? 0),
                 'level' => 'normal',
@@ -154,80 +214,133 @@ final class MessageService
         return $out;
     }
 
-    public static function markDmRead(int $me, int $other): void
+    public static function markDmRead(array $me, array $other): void
     {
+        [$meU, $meG] = self::actorPair($me);
+        [$oU, $oG] = self::actorPair($other);
         Database::query(
             'UPDATE private_messages SET read_at = datetime("now")
-             WHERE recipient_id = ? AND sender_id = ? AND read_at IS NULL',
-            [$me, $other]
+             WHERE read_at IS NULL
+               AND (recipient_id = ? OR recipient_guest_id = ?)
+               AND (sender_id = ? OR sender_guest_id = ?)',
+            [$meU, $meG, $oU, $oG]
         );
     }
 
-    public static function hasUnreadDm(int $me, int $other): bool
+    public static function hasUnreadDm(array $me, array $other): bool
     {
+        [$meU, $meG] = self::actorPair($me);
+        [$oU, $oG] = self::actorPair($other);
         return (bool) Database::scalar(
-            'SELECT 1 FROM private_messages WHERE recipient_id = ? AND sender_id = ? AND read_at IS NULL LIMIT 1',
-            [$me, $other]
+            'SELECT 1 FROM private_messages
+             WHERE read_at IS NULL
+               AND (recipient_id = ? OR recipient_guest_id = ?)
+               AND (sender_id = ? OR sender_guest_id = ?) LIMIT 1',
+            [$meU, $meG, $oU, $oG]
         );
     }
 
-    public static function unreadDmCounts(int $userId): array
+    public static function unreadDmCounts(array $me): array
     {
+        [$meU, $meG] = self::actorPair($me);
         $rows = Database::all(
-            'SELECT pm.sender_id, u.username, COUNT(*) AS cnt, MAX(pm.id) AS last_id
-             FROM private_messages pm JOIN users u ON u.id = pm.sender_id
-             WHERE pm.recipient_id = ? AND pm.read_at IS NULL
-             GROUP BY pm.sender_id',
-            [$userId]
+            'SELECT pm.sender_id, pm.sender_guest_id, COUNT(*) AS cnt, MAX(pm.id) AS last_id,
+                    COALESCE((SELECT u.username FROM users u WHERE u.id = pm.sender_id),
+                             (SELECT g.nick FROM guests g WHERE g.id = pm.sender_guest_id)) AS username
+             FROM private_messages pm
+             WHERE (pm.recipient_id = ? OR pm.recipient_guest_id = ?) AND pm.read_at IS NULL
+             GROUP BY pm.sender_id, pm.sender_guest_id',
+            [$meU, $meG]
         );
         $out = [];
         foreach ($rows as $r) {
-            $out[] = ['user_id' => (int) $r['sender_id'], 'username' => $r['username'], 'count' => (int) $r['cnt']];
+            $out[] = [
+                'user_id' => (int) ($r['sender_id'] ?? $r['sender_guest_id']),
+                'username' => $r['username'],
+                'count' => (int) $r['cnt'],
+            ];
         }
         return $out;
     }
 
-    public static function recentDmPartners(int $userId, int $limit = 30): array
+    public static function recentDmPartners(array $me, int $limit = 30): array
     {
+        [$meU, $meG] = self::actorPair($me);
         return Database::all(
-            'SELECT u.id, u.username, u.role, u.guest, u.last_seen, u.away,
-                    (SELECT pm.read_at FROM private_messages pm
-                     WHERE ((pm.sender_id = u.id AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = u.id))
-                     ORDER BY pm.id DESC LIMIT 1) IS NOT NULL AS all_read
-             FROM users u
-             WHERE u.id IN (
-                SELECT sender_id FROM private_messages WHERE recipient_id = ?
-                UNION
-                SELECT recipient_id FROM private_messages WHERE sender_id = ?
-             )
-             ORDER BY u.username COLLATE NOCASE
-             LIMIT ?',
-            [$userId, $userId, $userId, $userId, $limit]
+            "SELECT p.id, p.username, p.role, p.guest, p.last_seen, p.away, 1 AS all_read
+             FROM (
+               SELECT 'user' AS ptype, u.id AS id, u.username, u.role, u.guest, u.last_seen, u.away
+               FROM users u WHERE u.id IN (
+                 SELECT recipient_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
+                 UNION SELECT sender_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
+               )
+               UNION ALL
+               SELECT 'guest', g.id, g.nick, 'user', 1, g.last_seen, NULL
+               FROM guests g WHERE g.id IN (
+                 SELECT recipient_guest_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
+                 UNION SELECT sender_guest_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
+               )
+             ) p
+             ORDER BY p.username COLLATE NOCASE
+             LIMIT ?",
+            [$meU, $meG, $meU, $meG, $meU, $meG, $meU, $meG, $limit]
         );
     }
 
     /** Live DM sidebar + toast data: partners, unread counts, latest message previews. */
-    public static function dmSummaries(int $userId, int $limit = 30): array
+    public static function dmSummaries(array $me, int $limit = 30): array
     {
+        [$meU, $meG] = self::actorPair($me);
         $rows = Database::all(
-            'SELECT u.id AS user_id, u.username, u.role, u.guest, u.last_seen, u.away,
+            "SELECT p.user_id, p.username, p.role, p.guest, p.last_seen, p.away,
                     (SELECT COUNT(*) FROM private_messages pm
-                     WHERE pm.recipient_id = ? AND pm.sender_id = u.id AND pm.read_at IS NULL) AS unread,
+                     WHERE pm.read_at IS NULL
+                       AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?)
+                       AND (pm.sender_id = CASE WHEN p.ptype = 'user' THEN p.id ELSE NULL END
+                            OR pm.sender_guest_id = CASE WHEN p.ptype = 'guest' THEN p.id ELSE NULL END)) AS unread,
                     (SELECT pm.content FROM private_messages pm
-                     WHERE ((pm.sender_id = u.id AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = u.id))
+                     WHERE (
+                       (pm.sender_id = ? OR pm.sender_guest_id = ?)
+                       AND (pm.recipient_id = CASE WHEN p.ptype = 'user' THEN p.id ELSE NULL END
+                            OR pm.recipient_guest_id = CASE WHEN p.ptype = 'guest' THEN p.id ELSE NULL END)
+                     ) OR (
+                       (pm.sender_id = CASE WHEN p.ptype = 'user' THEN p.id ELSE NULL END
+                        OR pm.sender_guest_id = CASE WHEN p.ptype = 'guest' THEN p.id ELSE NULL END)
+                       AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?)
+                     )
                      ORDER BY pm.id DESC LIMIT 1) AS last_content,
                     (SELECT pm.id FROM private_messages pm
-                     WHERE ((pm.sender_id = u.id AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = u.id))
+                     WHERE (
+                       (pm.sender_id = ? OR pm.sender_guest_id = ?)
+                       AND (pm.recipient_id = CASE WHEN p.ptype = 'user' THEN p.id ELSE NULL END
+                            OR pm.recipient_guest_id = CASE WHEN p.ptype = 'guest' THEN p.id ELSE NULL END)
+                     ) OR (
+                       (pm.sender_id = CASE WHEN p.ptype = 'user' THEN p.id ELSE NULL END
+                        OR pm.sender_guest_id = CASE WHEN p.ptype = 'guest' THEN p.id ELSE NULL END)
+                       AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?)
+                     )
                      ORDER BY pm.id DESC LIMIT 1) AS last_id
-             FROM users u
-             WHERE u.id IN (
-                SELECT sender_id FROM private_messages WHERE recipient_id = ?
-                UNION
-                SELECT recipient_id FROM private_messages WHERE sender_id = ?
-             )
-             ORDER BY u.username COLLATE NOCASE
-             LIMIT ?',
-            [$userId, $userId, $userId, $userId, $userId, $userId, $userId, $limit]
+             FROM (
+               SELECT 'user' AS ptype, u.id AS id, u.id AS user_id, u.username, u.role, u.guest, u.last_seen, u.away
+               FROM users u WHERE u.id IN (
+                 SELECT recipient_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
+                 UNION SELECT sender_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
+               )
+               UNION ALL
+               SELECT 'guest', g.id, g.id, g.nick, 'user', 1, g.last_seen, NULL
+               FROM guests g WHERE g.id IN (
+                 SELECT recipient_guest_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
+                 UNION SELECT sender_guest_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
+               )
+             ) p
+             ORDER BY p.username COLLATE NOCASE
+             LIMIT ?",
+            [
+                $meU, $meG, $meU, $meG, $meU, $meG, $meU, $meG,
+                $meU, $meG, $meU, $meG, $meU, $meG, $meU, $meG,
+                $meU, $meG,
+                $limit,
+            ]
         );
         $out = [];
         foreach ($rows as $r) {
@@ -246,7 +359,7 @@ final class MessageService
         return $out;
     }
 
-    public static function notifyMentions(array $msg, int $channelId, int $senderId): void
+    public static function notifyMentions(array $msg, int $channelId, array $sender): void
     {
         if (in_array($msg['kind'], self::SYSTEM_KINDS, true)) {
             return;
@@ -254,17 +367,30 @@ final class MessageService
         if (preg_match_all('/@([A-Za-z0-9_\-\[\]\\`^{}|]+)/', $msg['content'] ?? '', $m)) {
             foreach (array_unique($m[1]) as $nick) {
                 $target = Database::row(
-                    'SELECT cm.user_id, cm.channel_id FROM channel_members cm JOIN users u ON u.id = cm.user_id
-                     WHERE cm.channel_id = ? AND u.username = ? COLLATE NOCASE AND cm.user_id != ?',
-                    [$channelId, $nick, $senderId]
+                    "SELECT cm.user_id, cm.guest_id, cm.channel_id
+                     FROM channel_members cm
+                     LEFT JOIN users u ON u.id = cm.user_id
+                     LEFT JOIN guests g ON g.id = cm.guest_id
+                     WHERE cm.channel_id = ? AND (u.username = ? COLLATE NOCASE OR g.nick = ? COLLATE NOCASE)",
+                    [$channelId, $nick, $nick]
                 );
-                if ($target) {
-                    Database::query(
-                        'INSERT INTO notifications (user_id, kind, channel_id, sender_id, message_id)
-                         VALUES (?, "mention", ?, ?, ?)',
-                        [$target['user_id'], $channelId, $senderId, $msg['id']]
-                    );
+                if (!$target) {
+                    continue;
                 }
+                $senderIsGuest = self::isGuest($sender);
+                if ($senderIsGuest && (int) $target['guest_id'] === (int) $sender['id']) {
+                    continue;
+                }
+                if (!$senderIsGuest && (int) $target['user_id'] === (int) $sender['id']) {
+                    continue;
+                }
+                $targetCol = $target['guest_id'] !== null ? 'guest_user_id' : 'user_id';
+                $senderCol = $senderIsGuest ? 'sender_guest_id' : 'sender_id';
+                Database::query(
+                    "INSERT INTO notifications ($targetCol, kind, channel_id, $senderCol, message_id)
+                     VALUES (?, 'mention', ?, ?, ?)",
+                    [(int) ($target['guest_id'] ?? $target['user_id']), $channelId, (int) $sender['id'], $msg['id']]
+                );
             }
         }
     }
@@ -283,7 +409,10 @@ final class MessageService
         if (!$msg) {
             return 'Message not found.';
         }
-        if ($actor['role'] !== 'admin' && (int) $msg['sender_id'] !== (int) $actor['id']) {
+        $isOwner = self::isGuest($actor)
+            ? ($msg['sender_guest_id'] !== null && (int) $msg['sender_guest_id'] === (int) $actor['id'])
+            : ($msg['sender_id'] !== null && (int) $msg['sender_id'] === (int) $actor['id']);
+        if ($actor['role'] !== 'admin' && !$isOwner) {
             return 'You can only delete your own messages.';
         }
         Database::query('UPDATE messages SET deleted = 1, content = "" WHERE id = ?', [$messageId]);
@@ -292,12 +421,12 @@ final class MessageService
 
     public static function edit(int $messageId, string $content, array $actor): bool|string
     {
+        if ($actor['role'] !== 'admin') {
+            return 'Only server administrators can edit messages.';
+        }
         $msg = Database::row('SELECT * FROM messages WHERE id = ?', [$messageId]);
         if (!$msg) {
             return 'Message not found.';
-        }
-        if ((int) $msg['sender_id'] !== (int) $actor['id']) {
-            return 'You can only edit your own messages.';
         }
         Database::query(
             'UPDATE messages SET content = ?, edited_at = datetime("now") WHERE id = ?',

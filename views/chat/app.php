@@ -91,10 +91,12 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     }
 
     $actions = '';
-    if ((int) $m['sender_id'] === (int) $viewer['id']) {
+    $mine = ((int) $m['sender_id'] === (int) $viewer['id'])
+        || (!empty($m['username']) && strcasecmp((string) $m['username'], (string) $viewer['username']) === 0);
+    if ($viewer['role'] === 'admin') {
         $actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
             . '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
-    } elseif ($viewer['role'] === 'admin') {
+    } elseif ($mine) {
         $actions = '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
 
@@ -168,17 +170,20 @@ function member_html(array $m, bool $online): string {
     </div>
 
     <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-      <nav class="px-2 pt-4 pb-2">
+      <?php if ($user['role'] === 'admin'): ?>
+      <nav class="px-2 pt-3">
+        <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
+          <span class="text-discord-400">🛡</span> Admin dashboard
+        </a>
+      </nav>
+      <?php endif; ?>
+
+      <nav class="px-2 pt-2 pb-2">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400 flex items-center justify-between">
           <span>Text channels</span>
           <button id="create-channel" class="text-discord-400 hover:text-white text-sm" title="Create a channel">＋</button>
         </div>
         <div class="mt-1 space-y-0.5">
-          <?php if ($user['role'] === 'admin'): ?>
-          <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
-            <span class="text-discord-400">🛡</span> Admin dashboard
-          </a>
-          <?php endif; ?>
           <a href="/browse" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm">
             <span class="text-discord-400">🌐</span> Browse channels
           </a>
@@ -360,7 +365,8 @@ function member_html(array $m, bool $online): string {
     <div id="member-list" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       <?php
       $online = array_filter($members, fn ($m) => !empty($m['is_online']));
-      $offline = array_filter($members, fn ($m) => empty($m['is_online']));
+      // Offline list only shows registered users — anonymous guests aren't listed when away.
+      $offline = array_filter($members, fn ($m) => empty($m['is_online']) && empty($m['guest']));
       ?>
       <div class="px-2 py-2">
         <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — <?= count($online) ?></div>

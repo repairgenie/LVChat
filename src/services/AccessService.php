@@ -4,25 +4,38 @@ declare(strict_types=1);
 
 final class AccessService
 {
-    public static function member(int|string $channelId, int $userId): ?array
+    public static function member(int|string $channelId, int|array $actor): ?array
     {
+        if (is_array($actor)) {
+            if (Auth::isGuest($actor)) {
+                return Database::row(
+                    'SELECT * FROM channel_members WHERE channel_id = ? AND guest_id = ?',
+                    [$channelId, $actor['id']]
+                );
+            }
+            return Database::row(
+                'SELECT * FROM channel_members WHERE channel_id = ? AND user_id = ?',
+                [$channelId, $actor['id']]
+            );
+        }
         return Database::row(
             'SELECT * FROM channel_members WHERE channel_id = ? AND user_id = ?',
-            [$channelId, $userId]
+            [$channelId, $actor]
         );
     }
 
-    /** Effective level of a user in a channel: access-list first, then membership, else 'normal'. */
-    public static function effectiveLevel(int|string $channelId, int $userId): string
+    /** Effective level of an actor in a channel: access-list first, then membership, else 'normal'. */
+    public static function effectiveLevel(int|string $channelId, int|array $actor): string
     {
+        $id = is_array($actor) ? (int) $actor['id'] : (int) $actor;
         $access = Database::row(
             'SELECT level FROM channel_access WHERE channel_id = ? AND user_id = ?',
-            [$channelId, $userId]
+            [$channelId, $id]
         );
         if ($access) {
             return $access['level'];
         }
-        $m = self::member($channelId, $userId);
+        $m = self::member($channelId, $actor);
         if (!$m) {
             return 'normal';
         }
@@ -37,7 +50,7 @@ final class AccessService
         Database::query(
             'INSERT INTO channel_members (channel_id, user_id, level)
              VALUES (?, ?, ?)
-             ON CONFLICT(channel_id, user_id) DO UPDATE SET level = excluded.level',
+             ON CONFLICT DO UPDATE SET level = excluded.level',
             [$channelId, $userId, $level]
         );
         Database::query('DELETE FROM channel_access WHERE channel_id = ? AND user_id = ?', [$channelId, $userId]);

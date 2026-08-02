@@ -267,7 +267,13 @@ check('notifications endpoint', $s === 200 && isset(jsonDecode($b)['notification
 [$s] = req('POST', '/api/notifications/read', ['csrf' => $tB], $cjB);
 check('mark notifications read', $s === 200, (string) $s);
 [$s, , $b] = req('POST', '/api/message/edit', ['csrf' => $tA, 'id' => $msgId, 'content' => 'edited'], $cjA);
-check('edit own message', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+check('admin can edit a message', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+// Only admins may edit messages — a regular user gets 403.
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $b] = req('POST', '/api/message/edit', ['csrf' => $tB, 'id' => $msgId, 'content' => 'hacked'], $cjB);
+check('non-admin cannot edit a message', $s === 403, "$s $b");
+[$s, , $b] = req('GET', '/admin', [], $cjA);
+check('message edit is audited in admin logs', $s === 200 && strpos($b, 'message_edit') !== false, $b);
 [$s] = req('POST', '/api/message/delete', ['csrf' => $tA, 'id' => $msgId], $cjA);
 check('delete own message', $s === 200, (string) $s);
 [$s] = req('POST', '/api/message/delete', ['csrf' => $tA, 'id' => '999999'], $cjA);

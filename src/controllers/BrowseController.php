@@ -16,7 +16,7 @@ final class BrowseController
     {
         $user = Auth::require();
         $channels = ChannelService::publicChannels(''); // full set; search/filter/sort is client-side
-        $joined = ChannelService::joinedChannelNames((int) $user['id']);
+        $joined = ChannelService::joinedChannelNames($user);
         $joinedMap = [];
         foreach ($joined as $c) {
             $joinedMap[$c['id']] = true;

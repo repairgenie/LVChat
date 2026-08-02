@@ -15,14 +15,14 @@ final class ChatController
     public static function app(): void
     {
         $user = Auth::require();
-        $dm = isset($_GET['dm']) ? Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$_GET['dm']]) : null;
+        $dm = isset($_GET['dm']) ? Auth::findActor((string) $_GET['dm']) : null;
         $channel = null;
         if (isset($_GET['channel']) && $_GET['channel'] !== '') {
             $channel = ChannelService::findBySlug((string) $_GET['channel']);
             if (!$channel) {
                 redirect('/browse');
             }
-            if (!AccessService::member($channel['id'], (int) $user['id'])) {
+            if (!AccessService::member($channel['id'], $user)) {
                 redirect('/c/' . rawurlencode($channel['slug']));
             }
         }
@@ -33,7 +33,7 @@ final class ChatController
         $joinModal = null;
         if (isset($_GET['join']) && $_GET['join'] !== '') {
             $jc = ChannelService::findBySlug((string) $_GET['join']);
-            if ($jc && !AccessService::member($jc['id'], (int) $user['id'])) {
+            if ($jc && !AccessService::member($jc['id'], $user)) {
                 $jst = ChannelService::joinStatus($jc, $user);
                 if (($jst['reason'] ?? '') === 'need_key') {
                     $joinModal = $jc;
@@ -41,18 +41,22 @@ final class ChatController
             }
         }
 
-        $channels = ChannelService::joinedChannelNames((int) $user['id']);
-        $dmPartners = MessageService::recentDmPartners((int) $user['id']);
-        $unreadDms = MessageService::unreadDmCounts((int) $user['id']);
+        $channels = ChannelService::joinedChannelNames($user);
+        $dmPartners = MessageService::recentDmPartners($user);
+        $unreadDms = MessageService::unreadDmCounts($user);
         $notifications = Database::all(
-            'SELECT n.*, s.username AS sender, c.name AS channel_name FROM notifications n
+            'SELECT n.*, COALESCE(s.username, gs.nick) AS sender, c.name AS channel_name FROM notifications n
              LEFT JOIN users s ON s.id = n.sender_id
+             LEFT JOIN guests gs ON gs.id = n.sender_guest_id
              LEFT JOIN channels c ON c.id = n.channel_id
-             WHERE n.user_id = ? AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
-            [$user['id']]
+             WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
+            [$user['id'], $user['id']]
         );
         $onlineUsers = Database::all(
-            'SELECT username, role, guest FROM users WHERE last_seen >= datetime("now", "-30 seconds") AND away IS NULL ORDER BY username'
+            "SELECT username, role, guest FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND away IS NULL
+             UNION ALL
+             SELECT nick, 'user', 1 FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
+             ORDER BY username"
         );
         $motd = (string) config_get('motd', '');
 
@@ -66,8 +70,8 @@ final class ChatController
             }
             unset($m);
         } elseif ($dm) {
-            $messages = MessageService::forDm((int) $user['id'], (int) $dm['id']);
-            MessageService::markDmRead((int) $user['id'], (int) $dm['id']);
+            $messages = MessageService::forDm($user, $dm);
+            MessageService::markDmRead($user, $dm);
         }
 
         render_view('chat/app', [
@@ -120,15 +124,16 @@ final class ChatController
         redirect($back);
     }
 
-    private static function rateLimited(int $userId): bool
+    private static function rateLimited(array $user): bool
     {
+        $col = MessageService::isGuest($user) ? 'sender_guest_id' : 'sender_id';
         $count = (int) Database::scalar(
-            'SELECT COUNT(*) FROM messages WHERE sender_id = ? AND created_at >= datetime("now", "-5 seconds")',
-            [$userId]
+            "SELECT COUNT(*) FROM messages WHERE $col = ? AND created_at >= datetime('now', '-5 seconds')",
+            [$user['id']]
         );
         $pmCount = (int) Database::scalar(
-            'SELECT COUNT(*) FROM private_messages WHERE sender_id = ? AND created_at >= datetime("now", "-5 seconds")',
-            [$userId]
+            "SELECT COUNT(*) FROM private_messages WHERE $col = ? AND created_at >= datetime('now', '-5 seconds')",
+            [$user['id']]
         );
         return ($count + $pmCount) > 12;
     }
@@ -154,12 +159,12 @@ final class ChatController
             redirect($result['redirect'] ?? ($channel ? '/app?channel=' . rawurlencode($channel['slug']) : '/app'));
         }
 
-        if (self::rateLimited((int) $user['id'])) {
+        if (self::rateLimited($user)) {
             self::finish(['error' => 'You are sending messages too quickly. Slow down.'], '/app', 429);
         }
 
         if (isset($_POST['recipient'])) {
-            $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$_POST['recipient']]);
+            $t = Auth::findActor((string) $_POST['recipient']);
             if (!$t) {
                 self::finish(['error' => 'No such user.'], '/app', 404);
             }
@@ -182,18 +187,9 @@ final class ChatController
                     self::finish(['ok' => true, 'blocked' => true, 'notice' => $notice], $backPm);
                 }
             }
-            Database::query(
-                'INSERT INTO private_messages (sender_id, recipient_id, content) VALUES (?, ?, ?)',
-                [$user['id'], $t['id'], $content]
-            );
-            $pmId = (int) Database::lastId();
-            if ((int) $t['id'] !== (int) $user['id']) {
-                Database::query(
-                    'INSERT INTO notifications (user_id, kind, sender_id, message_id) VALUES (?, "dm", ?, ?)',
-                    [$t['id'], $user['id'], $pmId]
-                );
-            }
-            MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content);
+            $pmId = MessageService::insertPm($user, $t, $content);
+            MessageService::notifyDm($t, $user, $pmId);
+            MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
             $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
             self::finish([
                 'ok' => true,
@@ -204,6 +200,9 @@ final class ChatController
                     'created_at' => $row['created_at'],
                     'username' => $user['username'],
                     'sender_id' => (int) $user['id'],
+                    'role' => $user['role'],
+                    'guest' => MessageService::isGuest($user) ? 1 : 0,
+                    'level' => 'normal',
                     'is_pm' => true,
                 ],
             ], $backPm);
@@ -214,7 +213,7 @@ final class ChatController
             self::finish(['error' => 'Channel not found.'], '/app', 404);
         }
         $back = '/app?channel=' . rawurlencode($channel['slug']);
-        $member = AccessService::member($channel['id'], (int) $user['id']);
+        $member = AccessService::member($channel['id'], $user);
         if (!$member) {
             self::finish(['error' => 'You are not a member of this channel.'], $back, 403);
         }
@@ -232,7 +231,7 @@ final class ChatController
             if ($censor['action'] === 'censor') {
                 $content = $censor['censored'];
             } else {
-                $msg = MessageService::send((int) $channel['id'], (int) $user['id'], $content, 'message');
+                $msg = MessageService::send((int) $channel['id'], $user, $content, 'message');
                 Database::query('UPDATE messages SET deleted = 1 WHERE id = ?', [$msg['id']]);
                 $notice = 'Chanserv removed message from ' . $user['username'] . ' due to prohibited words';
                 MessageService::system((int) $channel['id'], 'system', $notice);
@@ -240,7 +239,7 @@ final class ChatController
                 self::finish(['ok' => true, 'message' => $msg, 'blocked' => true, 'notice' => $notice], $back);
             }
         }
-        $msg = MessageService::send((int) $channel['id'], (int) $user['id'], $content, 'message');
+        $msg = MessageService::send((int) $channel['id'], $user, $content, 'message');
         $msg['channel'] = $channel['slug'];
         self::finish(['ok' => true, 'message' => $msg], $back);
     }
@@ -271,18 +270,18 @@ final class ChatController
         $since = max(0, (int) ($_GET['since'] ?? 0));
         $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => []];
 
-        $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [$user['id']]);
+        $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? OR guest_user_id = ?', [$user['id'], $user['id']]);
         $out['notify_count'] = $notifyCount;
         // Live DM sidebar data — returned on every poll regardless of which page
         // the user is on, so a DM sent to someone sitting in a channel surfaces.
-        $out['dm_list'] = MessageService::dmSummaries((int) $user['id']);
+        $out['dm_list'] = MessageService::dmSummaries($user);
 
         if (isset($_GET['dm'])) {
-            $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$_GET['dm']]);
+            $t = Auth::findActor((string) $_GET['dm']);
             if ($t) {
-                $out['messages'] = MessageService::forDm((int) $user['id'], (int) $t['id'], $since);
-                if (MessageService::hasUnreadDm((int) $user['id'], (int) $t['id'])) {
-                    MessageService::markDmRead((int) $user['id'], (int) $t['id']);
+                $out['messages'] = MessageService::forDm($user, $t, $since);
+                if (MessageService::hasUnreadDm($user, $t)) {
+                    MessageService::markDmRead($user, $t);
                 }
                 $out['dm'] = $t['username'];
                 $out['presence'][] = [
@@ -291,6 +290,7 @@ final class ChatController
                     'away' => $t['away'] ?: null,
                     'level' => 'normal',
                     'role' => $t['role'],
+                    'guest' => MessageService::isGuest($t) ? 1 : 0,
                 ];
             }
             json_out($out);
@@ -301,7 +301,7 @@ final class ChatController
             if (!$channel) {
                 json_out(['error' => 'Channel not found.'], 404);
             }
-            $member = AccessService::member($channel['id'], (int) $user['id']);
+            $member = AccessService::member($channel['id'], $user);
             if (!$member) {
                 json_out(['ok' => true, 'redirect' => '/app', 'reason' => 'You are no longer in this channel.']);
             }
@@ -322,10 +322,11 @@ final class ChatController
             }
             // Recent notifications for this channel to surface mentions/invites in a toast.
             $out['mentions'] = Database::all(
-                'SELECT n.kind, s.username AS sender, n.message_id FROM notifications n
+                'SELECT n.kind, COALESCE(s.username, gs.nick) AS sender, n.message_id FROM notifications n
                  LEFT JOIN users s ON s.id = n.sender_id
-                 WHERE n.user_id = ? AND n.channel_id = ? AND n.read = 0',
-                [$user['id'], $channel['id']]
+                 LEFT JOIN guests gs ON gs.id = n.sender_guest_id
+                 WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.channel_id = ? AND n.read = 0',
+                [$user['id'], $user['id'], $channel['id']]
             );
             json_out($out);
         }
@@ -337,11 +338,12 @@ final class ChatController
     {
         $user = self::requireUser();
         $rows = Database::all(
-            'SELECT n.*, s.username AS sender, c.name AS channel_name FROM notifications n
+            'SELECT n.*, COALESCE(s.username, gs.nick) AS sender, c.name AS channel_name FROM notifications n
              LEFT JOIN users s ON s.id = n.sender_id
+             LEFT JOIN guests gs ON gs.id = n.sender_guest_id
              LEFT JOIN channels c ON c.id = n.channel_id
-             WHERE n.user_id = ? AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
-            [$user['id']]
+             WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
+            [$user['id'], $user['id']]
         );
         foreach ($rows as &$r) {
             $r['created_at'] = relative_time($r['created_at']);
@@ -353,7 +355,7 @@ final class ChatController
     {
         $user = self::requireUser();
         self::requireCsrf();
-        Database::query('UPDATE notifications SET read = 1 WHERE user_id = ?', [$user['id']]);
+        Database::query('UPDATE notifications SET read = 1 WHERE user_id = ? OR guest_user_id = ?', [$user['id'], $user['id']]);
         json_out(['ok' => true]);
     }
 
@@ -378,8 +380,10 @@ final class ChatController
         $content = mb_substr(trim((string) ($_POST['content'] ?? '')), 0, 2000);
         $r = MessageService::edit($id, $content, $user);
         if ($r !== true) {
+            log_audit('message_edit_denied', 'msg#' . $id, $r);
             json_out(['error' => $r], 403);
         }
+        log_audit('message_edit', 'msg#' . $id, $user['username']);
         json_out(['ok' => true, 'content' => $content]);
     }
 }

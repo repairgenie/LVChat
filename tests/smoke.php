@@ -67,7 +67,7 @@ check('bob is member', AccessService::member($ch['id'], (int) $bob['id']) !== nu
 
 // --- Messaging ---
 echo "== messaging ==\n";
-$msg = MessageService::send((int) $ch['id'], (int) $alice['id'], 'hello world');
+$msg = MessageService::send((int) $ch['id'], $alice, 'hello world');
 check('message inserted', $msg['id'] > 0 && $msg['content'] === 'hello world');
 $hist = MessageService::history((int) $ch['id']);
 check('history has message', in_array('hello world', array_column($hist, 'content'), true));
@@ -75,6 +75,10 @@ $before = count($hist);
 MessageService::system((int) $ch['id'], 'join', 'alice has joined #test');
 $hist2 = MessageService::history((int) $ch['id']);
 check('system message appended', count($hist2) === $before + 1 && $hist2[count($hist2) - 1]['kind'] === 'join');
+// Only admins may edit messages.
+check('admin can edit a message', MessageService::edit((int) $msg['id'], 'hello edited', $alice) === true);
+$msg2 = MessageService::send((int) $ch['id'], $bob, 'bob message');
+check('non-admin cannot edit a message', is_string(MessageService::edit((int) $msg2['id'], 'hacked', $bob)));
 
 // --- Slash commands ---
 echo "== slash commands ==\n";
@@ -110,7 +114,7 @@ check('unknown command error', str_contains($res['replies'][0] ?? '', 'Unknown c
 echo "== PMs ==\n";
 $pm = CommandParser::run('/msg alice hey bob here', $bob, $ch);
 check('/msg returns null (silent)', $pm['replies'] === []);
-$dms = MessageService::forDm((int) $alice['id'], (int) $bob['id']);
+$dms = MessageService::forDm($alice, $bob);
 check('alice sees bob PM', count($dms) === 1 && $dms[0]['content'] === 'hey bob here');
 $res = CommandParser::run('/ignore alice', $bob, $ch);
 check('/ignore alice', $res['replies'][0] === 'You are now ignoring alice.');
@@ -197,7 +201,7 @@ check('/ignore', $res['replies'][0] === 'You are now ignoring bob_the_second.', 
 $res = CommandParser::run('/unignore bob_the_second', $alice, $ch);
 check('/unignore', $res['replies'][0] === 'You are no longer ignoring bob_the_second.', $res['replies'][0] ?? '');
 $pm = CommandParser::run('/msg alice note to self', $alice, $ch);
-check('message yourself is allowed (IRC hallmark)', $pm['replies'] === [] && count(MessageService::forDm((int) $alice['id'], (int) $alice['id'])) === 1);
+check('message yourself is allowed (IRC hallmark)', $pm['replies'] === [] && count(MessageService::forDm($alice, $alice)) === 1);
 $res = CommandParser::run('/invite bob_the_second #test', $alice, $ch);
 check('/invite', str_contains($res['replies'][0] ?? '', 'invited'));
 $res = CommandParser::run('/knock #secret', $bob2, $ch);
@@ -394,7 +398,7 @@ check('/spamfilter del', $res['replies'][0] === 'Spam filter removed.');
 
 echo "== mentions ==\n";
 $before = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND kind = "mention"', [$erin['id']]);
-MessageService::send((int) $ch['id'], (int) $alice['id'], 'hey @erin check this');
+MessageService::send((int) $ch['id'], $alice, 'hey @erin check this');
 $after = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND kind = "mention"', [$erin['id']]);
 check('mention creates notification', $after === $before + 1);
 
@@ -479,7 +483,7 @@ check('/badword del', $res['replies'][0] === 'Bad word removed.');
 
 // ── Admin red text data (role present in message payloads) ──────────────────
 echo "== admin role payload ==\n";
-$m = MessageService::send((int) $ch['id'], (int) $alice['id'], 'admin message check');
+$m = MessageService::send((int) $ch['id'], $alice, 'admin message check');
 check('admin message carries role=admin', ($m['role'] ?? '') === 'admin');
 
 // ── Comprehensive logging (survives channel deletion) ───────────────────────
@@ -487,8 +491,8 @@ echo "== chat logs archive ==\n";
 $logCh = ChannelService::create($frank, '#logtest');
 ChannelService::join($logCh, $frank);
 ChannelService::join($logCh, $alice);
-MessageService::send((int) $logCh['id'], (int) $frank['id'], 'logged message one');
-MessageService::send((int) $logCh['id'], (int) $alice['id'], 'logged message two');
+MessageService::send((int) $logCh['id'], $frank, 'logged message one');
+MessageService::send((int) $logCh['id'], $alice, 'logged message two');
 MessageService::system((int) $logCh['id'], 'topic', $frank['username'] . ' set the topic');
 $entries = (int) Database::scalar('SELECT COUNT(*) FROM chat_logs WHERE channel_name = "#logtest"');
 check('chat_logs has channel activity', $entries >= 4, "got $entries");
@@ -550,30 +554,32 @@ check('guest cannot take a registered nick', Auth::loginGuest('alice') === null)
 // ── Guest nick release (guests are never permanently "registered") ──────────
 $g1 = Auth::loginGuest('guestnick');
 check('guest login creates a guest row', $g1 !== null && (int) $g1['guest'] === 1, json_encode($g1));
+check('guests never live in the users table', Database::scalar('SELECT COUNT(*) FROM users WHERE username = "guestnick"') === 0);
 Auth::logout(); // guest logout stamps last_seen = NULL -> nick frees instantly
 $g2 = Auth::loginGuest('guestnick');
 check('guest logout frees nick (re-login reuses same row)', $g2 !== null && (int) $g2['id'] === (int) $g1['id'], json_encode($g2));
 check('active guest still blocks a duplicate nick', Auth::loginGuest('guestnick') === null);
-Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g2['id']]);
+Database::query('UPDATE guests SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g2['id']]);
 $g3 = Auth::loginGuest('guestnick');
 check('stale guest row reclaimed (same id keeps DM history)', $g3 !== null && (int) $g3['id'] === (int) $g1['id'], json_encode($g3));
 Auth::logout();
 $g4 = Auth::loginGuest('claimme');
-Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g4['id']]);
+Database::query('UPDATE guests SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g4['id']]);
 $rc = Auth::register('claimme', 'claimme@example.com', 'password123');
-check('register converts a stale guest row into a real account', $rc['ok'] === true && (int) $rc['id'] === (int) $g4['id'], json_encode($rc));
+check('register converts a stale guest row into a real account', $rc['ok'] === true, json_encode($rc));
 $claimed = Auth::attempt('claimme', 'password123');
-check('converted guest is a real (non-guest) account', $claimed !== null && (int) $claimed['guest'] === 0 && (int) $claimed['id'] === (int) $g4['id'], json_encode($claimed));
+check('converted guest is a real (non-guest) account', $claimed !== null && (int) $claimed['guest'] === 0, json_encode($claimed));
+check('guest row is gone after conversion', Database::scalar('SELECT COUNT(*) FROM guests WHERE nick = "claimme"') === 0);
 check('guest can join an existing channel', ChannelService::joinStatus(ChannelService::find('#test'), $guest)['ok'] === true);
 ChannelService::join(ChannelService::find('#test'), $guest);
-$gm = MessageService::send((int) ChannelService::find('#test')['id'], (int) $guest['id'], 'guest says hi');
+$gm = MessageService::send((int) ChannelService::find('#test')['id'], $guest, 'guest says hi');
 check('guest can send messages', ($gm['username'] ?? '') === 'anoncat');
 check('guest cannot create a channel', is_string(ChannelService::create($guest, '#guestchan')));
 $res = CommandParser::run('/join #nobodyhere', $guest, null);
 check('guest /join nonexistent denied', str_contains($res['replies'][0] ?? '', 'existing channels'), $res['replies'][0] ?? '');
-Database::query('UPDATE users SET last_seen = datetime("now", "-2 days") WHERE username = "anoncat"');
+Database::query('UPDATE guests SET last_seen = datetime("now", "-2 days") WHERE nick = "anoncat"');
 Auth::purgeGuests();
-check('inactive guest purged', Database::scalar('SELECT id FROM users WHERE username = "anoncat"') === false);
+check('inactive guest purged', Database::scalar('SELECT id FROM guests WHERE nick = "anoncat"') === false);
 
 // ── O:lines / operclasses ───────────────────────────────────────────────────
 echo "== o-lines ==\n";

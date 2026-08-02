@@ -63,7 +63,7 @@ final class CommandParser
             if (!$channel) {
                 return ['replies' => ["You must be in a channel or provide one, e.g. /$cmd #channel ..."]];
             }
-            $level = AccessService::effectiveLevel($channel['id'], (int) $user['id']);
+            $level = AccessService::effectiveLevel($channel['id'], $user);
             $min = (int) $reg['min_level'];
             if ($user['role'] !== 'admin' && level_weight($level) < $min) {
                 return ['replies' => ["You do not have permission to use /$cmd in " . $channel['name'] . '.']];

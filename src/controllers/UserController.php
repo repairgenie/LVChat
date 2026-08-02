@@ -12,7 +12,7 @@ final class UserController
             render_view('errors/notfound', [], null);
         }
         $isSelf = (int) $viewer['id'] === (int) $user['id'];
-        $channels = ChannelService::joinedChannelNames((int) $user['id']);
+        $channels = ChannelService::joinedChannelNames($user);
         $isOnline = Auth::isOnline($user);
         render_view('user/profile', [
             'viewer' => $viewer,

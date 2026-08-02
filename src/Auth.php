@@ -37,8 +37,65 @@ final class Auth
             if (empty($u['last_ip'])) {
                 $u['last_ip'] = client_ip();
             }
+            return $u;
         }
-        return $u;
+        // Guest session — guests live in `guests`, never in `users`.
+        $g = Database::row(
+            'SELECT g.*, s.expires_at FROM guest_sessions s JOIN guests g ON g.id = s.guest_id
+             WHERE s.token = ? AND s.expires_at > datetime("now")',
+            [$token]
+        );
+        if ($g) {
+            $throttle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+            $lastWrite = (int) ($_SESSION['presence_ts'] ?? 0);
+            if (time() - $lastWrite >= $throttle) {
+                Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $g['id']]);
+                $_SESSION['presence_ts'] = time();
+            }
+            if (empty($g['last_seen']) || time() - strtotime($g['last_seen'] . ' UTC') > $throttle) {
+                $g['last_seen'] = now();
+            }
+            return self::guestActor($g);
+        }
+        return null;
+    }
+
+    /** Shape a `guests` row like a user row so the rest of the app treats it uniformly. */
+    public static function guestActor(array $g): array
+    {
+        return [
+            'id' => (int) $g['id'],
+            'username' => $g['nick'],
+            'email' => '',
+            'password_hash' => '',
+            'role' => 'user',
+            'role_id' => null,
+            'guest' => 1,
+            'vhost' => null,
+            'away' => null,
+            'away_at' => null,
+            'bot' => 0,
+            'banned' => 0,
+            'ban_reason' => null,
+            'theme' => '',
+            'registered_at' => $g['created_at'] ?? null,
+            'last_seen' => $g['last_seen'] ?? null,
+            'last_ip' => $g['ip'] ?? null,
+        ];
+    }
+
+    /** Find a registered user or guest by nickname, returned as an actor array. */
+    public static function findActor(string $nick): ?array
+    {
+        $u = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+        if ($u) {
+            return $u;
+        }
+        $g = Database::row('SELECT * FROM guests WHERE nick = ? COLLATE NOCASE', [$nick]);
+        if ($g) {
+            return self::guestActor($g);
+        }
+        return null;
     }
 
     public static function login(array $user): void
@@ -59,11 +116,12 @@ final class Auth
         $token = $_SESSION['token'] ?? null;
         if ($token) {
             Database::query('DELETE FROM sessions WHERE token = ?', [$token]);
+            Database::query('DELETE FROM guest_sessions WHERE token = ?', [$token]);
         }
         if ($user && (int) ($user['guest'] ?? 0) === 1) {
             // Guests are not real accounts: release the nick immediately on logout
             // (the row + its DM history are kept, so the thread survives re-login).
-            Database::query('UPDATE users SET last_seen = NULL WHERE id = ?', [$user['id']]);
+            Database::query('UPDATE guests SET last_seen = NULL WHERE id = ?', [$user['id']]);
         }
         unset($_SESSION['token']);
         session_regenerate_id(true);
@@ -104,18 +162,28 @@ final class Auth
             return ['ok' => false, 'errors' => ['That email address is already registered.']];
         }
         if ($exists) {
-            // A real account owns the name (or a guest is actively using it) → reject.
-            if (self::nickInUse($exists)) {
+            return ['ok' => false, 'errors' => ['That username is already registered.']];
+        }
+        // A stale guest row may hold the nick — convert it into the real account,
+        // transferring its DMs / memberships / notifications to the new user id.
+        $guest = Database::row('SELECT * FROM guests WHERE nick = ? COLLATE NOCASE', [$username]);
+        if ($guest) {
+            if (self::guestInUse($guest)) {
                 return ['ok' => false, 'errors' => ['That username is already registered.']];
             }
-            // Only a stale guest row holds the name — convert it into the real
-            // account (preserving any DM history tied to that id).
-            Database::query('DELETE FROM sessions WHERE user_id = ?', [$exists['id']]);
             Database::query(
-                'UPDATE users SET email = ?, password_hash = ?, guest = 0, away = NULL, away_at = NULL, last_seen = NULL WHERE id = ?',
-                [$email, password_hash($password, PASSWORD_ARGON2ID), $exists['id']]
+                'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+                [$username, $email, password_hash($password, PASSWORD_ARGON2ID)]
             );
-            $id = (int) $exists['id'];
+            $id = (int) Database::lastId();
+            Database::query('UPDATE private_messages SET sender_id = ?, sender_guest_id = NULL WHERE sender_guest_id = ?', [$id, $guest['id']]);
+            Database::query('UPDATE private_messages SET recipient_id = ?, recipient_guest_id = NULL WHERE recipient_guest_id = ?', [$id, $guest['id']]);
+            Database::query('UPDATE channel_members SET user_id = ?, guest_id = NULL WHERE guest_id = ?', [$id, $guest['id']]);
+            Database::query('UPDATE messages SET sender_id = ?, sender_guest_id = NULL WHERE sender_guest_id = ?', [$id, $guest['id']]);
+            Database::query('UPDATE notifications SET user_id = ?, guest_user_id = NULL WHERE guest_user_id = ?', [$id, $guest['id']]);
+            Database::query('UPDATE notifications SET sender_id = ?, sender_guest_id = NULL WHERE sender_guest_id = ?', [$id, $guest['id']]);
+            Database::query('DELETE FROM guest_sessions WHERE guest_id = ?', [$guest['id']]);
+            Database::query('DELETE FROM guests WHERE id = ?', [$guest['id']]);
         } else {
             Database::query(
                 'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
@@ -131,13 +199,12 @@ final class Auth
     }
 
     /**
-     * Create and log in an anonymous guest. No email/password is collected; the
-     * guest row is ephemeral and purged after a day of inactivity.
+     * Create and log in an anonymous guest. Guests live in the `guests` table —
+     * never in `users` — so they are not registered accounts at all.
      *
-     * A guest nick is never "registered": an existing *stale* guest row (not
-     * actively present) is reclaimed in place, so the nick frees immediately
-     * after logout or a short inactivity and its DM history survives re-login.
-     * Returns the user row, or null if the nick is invalid/in use/banned.
+     * A guest nick is reused in place when the previous holder is gone (logout or
+     * a short inactivity), so the nick frees quickly and its DM history survives.
+     * Returns the guest actor array, or null if the nick is invalid/in use/banned.
      */
     public static function loginGuest(string $nick): ?array
     {
@@ -146,42 +213,36 @@ final class Auth
             return null;
         }
         self::purgeGuests();
-        $existing = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
-        if ($existing && self::nickInUse($existing)) {
+        // A registered user owns this nick — guests can never take it.
+        if (Database::scalar('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE', [$nick])) {
             return null;
         }
-        $probe = ['username' => $nick, 'email' => '', 'last_ip' => client_ip(), 'role' => 'user'];
+        $existing = Database::row('SELECT * FROM guests WHERE nick = ? COLLATE NOCASE', [$nick]);
+        if ($existing && self::guestInUse($existing)) {
+            return null;
+        }
+        $probe = ['username' => $nick, 'email' => '', 'last_ip' => client_ip(), 'role' => 'user', 'guest' => 1];
         if (self::globalBanFor($probe)) {
             return null;
         }
         if ($existing) {
-            // Stale guest row: reclaim it, keeping the same user id and DMs.
-            Database::query('DELETE FROM sessions WHERE user_id = ?', [$existing['id']]);
-            Database::query(
-                'UPDATE users SET last_seen = datetime("now"), last_ip = ?, away = NULL, away_at = NULL WHERE id = ?',
-                [client_ip(), $existing['id']]
-            );
-            $user = Database::row('SELECT * FROM users WHERE id = ?', [$existing['id']]);
-            self::login($user);
+            // Stale guest row: reclaim it, keeping the same guest id and DMs.
+            Database::query('DELETE FROM guest_sessions WHERE guest_id = ?', [$existing['id']]);
+            Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $existing['id']]);
+            $g = Database::row('SELECT * FROM guests WHERE id = ?', [$existing['id']]);
+            self::loginGuestSession($g);
             log_audit('guest_join', $nick);
-            return $user;
+            return self::guestActor($g);
         }
-        Database::query(
-            'INSERT INTO users (username, email, password_hash, guest) VALUES (?, ?, ?, 1)',
-            [$nick, 'guest-' . bin2hex(random_bytes(8)) . '@guest.invalid', password_hash(bin2hex(random_bytes(16)), PASSWORD_ARGON2ID)]
-        );
-        $id = (int) Database::lastId();
-        $user = Database::row('SELECT * FROM users WHERE id = ?', [$id]);
-        self::login($user);
+        Database::query('INSERT INTO guests (nick, ip) VALUES (?, ?)', [$nick, client_ip()]);
+        $g = Database::row('SELECT * FROM guests WHERE id = ?', [(int) Database::lastId()]);
+        self::loginGuestSession($g);
         log_audit('guest_join', $nick);
-        return $user;
+        return self::guestActor($g);
     }
 
-    /**
-     * Whether a nickname is currently claimed. Registered users always own their
-     * name; a guest's nick is only claimed while they are actively present (a
-     * short grace period after their last activity), so leaving frees it fast.
-     */
+    /** Whether a nickname is currently claimed. Registered users always own their
+     *  name; a guest's nick is only claimed while they are actively present. */
     public static function nickInUse(array $user, int $grace = 120): bool
     {
         if ((int) ($user['guest'] ?? 0) !== 1) {
@@ -191,10 +252,29 @@ final class Auth
             && (time() - strtotime((string) $user['last_seen'] . ' UTC')) < $grace;
     }
 
+    /** Whether a `guests` row is actively present right now. */
+    public static function guestInUse(array $g, int $grace = 120): bool
+    {
+        return !empty($g['last_seen'])
+            && (time() - strtotime((string) $g['last_seen'] . ' UTC')) < $grace;
+    }
+
+    private static function loginGuestSession(array $g): void
+    {
+        $token = bin2hex(random_bytes(32));
+        Database::query(
+            'INSERT INTO guest_sessions (guest_id, token, expires_at) VALUES (?, ?, datetime("now", "+30 days"))',
+            [$g['id'], $token]
+        );
+        Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $g['id']]);
+        @session_regenerate_id(true);
+        $_SESSION['token'] = $token;
+    }
+
     /** Remove guests that have been inactive for over a day. */
     public static function purgeGuests(): void
     {
-        Database::query('DELETE FROM users WHERE guest = 1 AND last_seen < datetime("now", "-1 day")');
+        Database::query('DELETE FROM guests WHERE last_seen < datetime("now", "-1 day")');
     }
 
     public static function isGuest(array $user): bool

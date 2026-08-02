@@ -29,6 +29,23 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+-- Anonymous guests live here, never in `users` (a guest is not an account).
+CREATE TABLE IF NOT EXISTS guests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nick TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  ip TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen TEXT
+);
+
+CREATE TABLE IF NOT EXISTS guest_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS channels (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -51,12 +68,13 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 
 CREATE TABLE IF NOT EXISTS channel_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
   level TEXT NOT NULL DEFAULT 'normal',
   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_read_id INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (channel_id, user_id)
+  last_read_id INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS channel_access (
@@ -105,6 +123,7 @@ CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
   sender_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
   kind TEXT NOT NULL DEFAULT 'message',
   content TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -115,8 +134,10 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE TABLE IF NOT EXISTS private_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sender_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  recipient_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  sender_guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
+  recipient_guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
   content TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   read_at TEXT
@@ -211,10 +232,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  guest_user_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
   sender_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
   message_id INTEGER,
   read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -222,6 +245,10 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id);
 CREATE INDEX IF NOT EXISTS idx_pm_pair ON private_messages(sender_id, recipient_id, id);
+CREATE INDEX IF NOT EXISTS idx_pm_guest_pair ON private_messages(sender_guest_id, recipient_guest_id, id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON channel_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_members_guest ON channel_members(guest_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_member_actor ON channel_members(channel_id, COALESCE(user_id, 0), COALESCE(guest_id, 0));
 CREATE INDEX IF NOT EXISTS idx_bans_active ON bans(active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read);
+CREATE INDEX IF NOT EXISTS idx_notif_guest_user ON notifications(guest_user_id, read);

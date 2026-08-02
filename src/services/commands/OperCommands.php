@@ -263,7 +263,7 @@ CommandRegistry::register('sanick', [
             return ['replies' => ["$newnick is already in use."]];
         }
         Database::query('UPDATE users SET username = ? WHERE id = ?', [$newnick, $t['id']]);
-        foreach (ChannelService::joinedChannelNames((int) $t['id']) as $c) {
+        foreach (ChannelService::joinedChannelNames($t) as $c) {
             MessageService::system($c['id'], 'nick', $nick . ' is now known as ' . $newnick . ' (SANICK)');
         }
         return ['replies' => ["$nick is now known as $newnick."]];
