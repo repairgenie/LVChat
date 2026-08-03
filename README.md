@@ -19,8 +19,9 @@ services from Anope.
 - **Context menus** — right-click any message, user, or channel for actions (copy, edit,
   delete, report, message, profile, whois, ignore, kick, ban, share link, leave, channel info)
 - **Message reports** — right-click → **Report message** on any channel or DM message with
-  preset reasons plus a free-text "Other"; reports snapshot the sender and content (inline
-  images included) and land in **Admin → Reports** (staff+admin) with a review/resolve/dismiss flow
+  preset reasons plus a free-text "Other"; reports snapshot the sender, message kind, and content
+  (inline images/GIFs included and rendered in the review queue) and land in **Admin → Reports**
+  (staff+admin) with a review/resolve/dismiss flow
 - **Moderation queue** — every time a user trips a bad-word/spam filter, or is kicked, banned,
   muted, or hit with a kline/gline/zline/shun, it's recorded in **Admin → Moderation** with the
   actor, match, and channel

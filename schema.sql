@@ -378,6 +378,7 @@ CREATE TABLE IF NOT EXISTS reports (
   sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
   sender_name TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'message',
   reason TEXT NOT NULL DEFAULT '',
   reason_other TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',

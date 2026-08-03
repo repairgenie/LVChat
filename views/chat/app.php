@@ -579,9 +579,9 @@ function member_html(array $m, bool $online): string {
         <button type="button" data-report-close class="text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
       </div>
       <p class="text-xs text-discord-400 mb-4">This report goes to the staff. The message content is included.</p>
-      <div class="mb-3 rounded-lg bg-discord-850 border border-discord-700 px-3 py-2 text-sm text-discord-300 max-h-24 overflow-y-auto">
+      <div class="mb-3 rounded-lg bg-discord-850 border border-discord-700 px-3 py-2 text-sm text-discord-300 max-h-72 overflow-y-auto scrollbar-thin">
         <span class="text-[10px] uppercase tracking-wide text-discord-400 font-semibold block mb-0.5"><?= h($user['username']) ?> · quoted message</span>
-        <span id="report-quote" class="line-clamp-3 break-words"></span>
+        <div id="report-quote" class="break-words"></div>
       </div>
       <div class="space-y-2 text-sm" id="report-reasons">
         <?php foreach (['Harassment / Bullying', 'Spam or advertising', 'Hate speech', 'Inappropriate / NSFW content', 'Threatening violence', 'Personal information (doxxing)', 'Other'] as $i => $opt): ?>

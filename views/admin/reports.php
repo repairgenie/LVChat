@@ -16,6 +16,20 @@
 <?php foreach ($reports as $r):
   $sender = $r['sender_name'];
   $reporter = $r['reporter_name'] ?: $r['reporter_guest_name'];
+  // Reports snapshot the message kind so images/GIFs render inline. Rows that
+  // predate the kind column default to 'message'; fall back to detecting the
+  // media by content so those still show the image rather than its URL.
+  $kind = (string) ($r['kind'] ?? '');
+  if ($kind === '' || $kind === 'message') {
+      $rc = (string) $r['content'];
+      if (str_starts_with($rc, '/uploads/') || str_starts_with($rc, '/assets/')) {
+          $kind = 'image';
+      } elseif (preg_match('#^https://(?:[\w-]+\.)?giphy\.com/#i', $rc)) {
+          $kind = 'gif';
+      } else {
+          $kind = 'message';
+      }
+  }
 ?>
 <div class="card p-5 mb-4">
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
@@ -36,7 +50,7 @@
     <?php if ($r['reason_other'] !== ''): ?>
     <div class="text-xs text-discord-300 italic mb-2">"<?= h($r['reason_other']) ?>"</div>
     <?php endif; ?>
-    <div class="msg-content text-[15px] leading-[1.4] text-discord-200 break-words"><?= chat_content_html(['kind' => $r['pm'] ? 'message' : (str_starts_with($r['content'], '/uploads/') || str_starts_with($r['content'], '/assets/') ? 'image' : 'message'), 'content' => $r['content']]) ?></div>
+    <div class="msg-content text-[15px] leading-[1.4] text-discord-200 break-words"><?= chat_content_html(['kind' => $kind, 'content' => $r['content']]) ?></div>
   </div>
 
   <?php if ($r['handled_name']): ?>

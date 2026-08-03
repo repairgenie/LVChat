@@ -1267,6 +1267,7 @@
     const author = el.dataset.author;
     const contentEl = el.querySelector('.msg-content');
     const content = contentEl ? contentEl.textContent : '';
+    const contentHtml = contentEl ? contentEl.innerHTML : '';
     const items = [];
     if (author) {
       items.push({ label: 'Reply', onClick: () => { setPendingReply(id, author, content.slice(0, 80)); if (!CHANNEL) { input.value = '@' + author + ' '; } } });
@@ -1274,7 +1275,7 @@
     if (content) items.push({ label: 'Copy text', onClick: () => copyText(content) });
     const kind = el.dataset.kind || '';
     if (kind === 'message' || kind === 'image' || kind === 'gif') {
-      items.push({ label: 'Report message', onClick: () => openReport(id, el.dataset.isPm === '1', content) });
+      items.push({ label: 'Report message', onClick: () => openReport(id, el.dataset.isPm === '1', contentHtml) });
     }
     const mine = author && author.toLowerCase() === MY_NICK;
     if (CAN_ADMIN || mine) {
@@ -1315,10 +1316,12 @@
   const reportSubmit = document.getElementById('report-submit');
   let reportTarget = null;
 
-  function openReport(id, isPm, excerpt) {
+  function openReport(id, isPm, html) {
     if (!reportModal) return;
     reportTarget = { id: parseInt(id, 10) || 0, pm: !!isPm };
-    if (reportQuote) reportQuote.textContent = (excerpt || '(no text)').slice(0, 300);
+    // The quote reuses the message's already-escaped rendered markup, so an
+    // image/GIF report shows the picture inline instead of its raw URL.
+    if (reportQuote) reportQuote.innerHTML = html || '(no text)';
     if (reportOther) { reportOther.value = ''; reportOther.classList.add('hidden'); }
     if (reportError) reportError.classList.add('hidden');
     document.querySelectorAll('#report-reasons input[name="report_reason"]').forEach((r) => {

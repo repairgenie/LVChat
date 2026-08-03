@@ -685,6 +685,18 @@ check('report of a missing message rejected', $s === 404, "$s $b");
 $reports = dbq('SELECT * FROM reports ORDER BY id');
 check('reports snapshotted into DB', count($reports) === 2 && ($reports[0]['content'] ?? '') === 'report me please' && ($reports[1]['reason_other'] ?? '') === 'custom detail', json_encode($reports));
 
+// Reporting an image/GIF snapshots its kind so the admin view renders the
+// media inline instead of showing the raw URL.
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2]), 'channel' => 'gaming', 'gif_url' => 'https://media.giphy.com/media/abc456/giphy.gif', 'gif_title' => 'reported gif'], $cjA);
+$gifMsgId = jsonDecode($b)['message']['id'] ?? 0;
+check('alice posts gif for reporting', $s === 200 && $gifMsgId > 0, "$s $b");
+[$s, , $b] = req('POST', '/api/report', ['csrf' => $t, 'id' => (string) $gifMsgId, 'pm' => '0', 'reason' => 'Spam or advertising', 'other' => ''], $cjB);
+check('report gif message', $s === 200, "$s $b");
+$repKind = (dbq('SELECT kind FROM reports WHERE message_id = ?', [$gifMsgId])[0]['kind'] ?? '');
+check('report snapshots kind gif', $repKind === 'gif', $repKind);
+[$s, , $b] = req('GET', '/admin/reports', [], $cjA);
+check('admin reports renders gif inline', $s === 200 && strpos($b, '<img') !== false && strpos($b, 'media.giphy.com/media/abc456/giphy.gif') !== false, (string) $s);
+
 $tA = csrf(req('GET', '/admin/reports', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'report_status', 'id' => '1', 'status' => 'resolved', 'resolution' => 'Warned the user', 'back' => '/admin/reports'], $cjA);
 check('admin resolves report', $s === 302, (string) $s);

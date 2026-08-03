@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '14';
+    private const SCHEMA_VERSION = '15';
 
     public static function init(): void
     {
@@ -146,8 +146,13 @@ final class Database
             $pdo->exec('CREATE INDEX idx_moderation_events_guest ON moderation_events(guest_id, id)');
         }
         if (!in_array('reports', $tables, true)) {
-            $pdo->exec('CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL, pm INTEGER NOT NULL DEFAULT 0, channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, reporter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, reporter_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, sender_name TEXT NOT NULL DEFAULT "", content TEXT NOT NULL DEFAULT "", reason TEXT NOT NULL DEFAULT "", reason_other TEXT NOT NULL DEFAULT "", status TEXT NOT NULL DEFAULT "open", handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL, handled_at TEXT, resolution TEXT, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+            $pdo->exec('CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL, pm INTEGER NOT NULL DEFAULT 0, channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, reporter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, reporter_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, sender_name TEXT NOT NULL DEFAULT "", content TEXT NOT NULL DEFAULT "", kind TEXT NOT NULL DEFAULT "message", reason TEXT NOT NULL DEFAULT "", reason_other TEXT NOT NULL DEFAULT "", status TEXT NOT NULL DEFAULT "open", handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL, handled_at TEXT, resolution TEXT, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
             $pdo->exec('CREATE INDEX idx_reports_status ON reports(status, id)');
+        } else {
+            $repCols = array_column($pdo->query('PRAGMA table_info(reports)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('kind', $repCols, true)) {
+                $pdo->exec('ALTER TABLE reports ADD COLUMN kind TEXT NOT NULL DEFAULT "message"');
+            }
         }
         if (!in_array('user_notes', $tables, true)) {
             $pdo->exec('CREATE TABLE user_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL, action TEXT NOT NULL DEFAULT "note", reason TEXT NOT NULL DEFAULT "", created_at TEXT NOT NULL DEFAULT (datetime("now")))');

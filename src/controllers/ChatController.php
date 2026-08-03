@@ -775,6 +775,7 @@ final class ChatController
                     ? (Database::scalar('SELECT nick FROM guests WHERE id = ?', [(int) $row['sender_guest_id']]) ?: '')
                     : ''));
             $content = (string) $row['content'];
+            $kind = (string) ($row['kind'] ?? 'message');
             $channelId = null;
         } else {
             $row = Database::row('SELECT * FROM messages WHERE id = ?', [$id]);
@@ -796,16 +797,18 @@ final class ChatController
                     ? (Database::scalar('SELECT nick FROM guests WHERE id = ?', [(int) $row['sender_guest_id']]) ?: '')
                     : ''));
             $content = (string) $row['content'];
+            $kind = (string) ($row['kind'] ?? 'message');
             $channelId = (int) $row['channel_id'];
         }
 
         Database::query(
             'INSERT INTO reports (message_id, pm, channel_id, reporter_user_id, reporter_guest_id,
-                                  sender_user_id, sender_guest_id, sender_name, content, reason, reason_other)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                                  sender_user_id, sender_guest_id, sender_name, content, kind, reason, reason_other)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [$id, $pm ? 1 : 0, $channelId,
              $isGuest ? null : (int) $user['id'], $isGuest ? (int) $user['id'] : null,
-             $senderId, $senderGuestId, mb_substr($senderName, 0, 64), mb_substr($content, 0, 4000), $reason, $other]
+             $senderId, $senderGuestId, mb_substr($senderName, 0, 64), mb_substr($content, 0, 4000),
+             $kind !== '' ? $kind : 'message', $reason, $other]
         );
         log_audit('report_add', 'msg#' . $id, $reason . ($other !== '' ? ' / ' . $other : ''));
         json_out(['ok' => true, 'message' => 'Report submitted. Thanks — staff will review it.']);
