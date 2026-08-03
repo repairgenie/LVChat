@@ -251,17 +251,29 @@
     bindMessageActions();
   }
 
+  // ── Stick-to-bottom ─────────────────────────────────────────────────────────
+  // New content auto-scrolls into view by default. The moment the reader scrolls
+  // up (off the very end), the view holds its position for new messages instead;
+  // scrolling back to the end resumes auto-scroll. This also covers images, which
+  // are lazy-loaded and grow after the initial scroll — the view re-pins to the
+  // bottom as they finish loading, but only while still stuck to the bottom.
+  let stickToBottom = true;
+  const STICK_THRESHOLD = 40;
+  function isAtBottom() {
+    return msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < STICK_THRESHOLD;
+  }
+  if (msgsEl) msgsEl.addEventListener('scroll', () => { stickToBottom = isAtBottom(); }, { passive: true });
+
   function maybeScroll() {
-    const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
-    if (nearBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
+    if (stickToBottom) scrollBottom();
   }
 
   function scrollBottom() { msgsEl.scrollTop = msgsEl.scrollHeight; }
 
   // Images (uploads) are lazy-loaded, so they expand after the initial scroll —
   // pin the view to the bottom again as each one loads so a just-posted image is
-  // fully visible without the user having to scroll. Only re-scrolls while the
-  // reader is (still) near the bottom, so it never yanks someone scrolled up.
+  // fully visible. Re-scrolls only while the reader is still stuck to the bottom,
+  // so it never yanks someone who scrolled up.
   function scrollBottomWhenImagesLoad(el) {
     if (!el || !el.querySelector('img')) return;
     const imgs = el.querySelectorAll('img');
@@ -373,9 +385,7 @@
     if (j.redirect) { window.location = j.redirect; return; }
     if (j.error) return;
     if (j.messages && j.messages.length) {
-      const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 160;
       j.messages.forEach(appendMsg);
-      if (atBottom) scrollBottom();
     }
     if (j.presence && CHANNEL) applyPresence(j.presence);
     if (typeof j.notify_count === 'number') setBell(j.notify_count);
@@ -617,7 +627,7 @@
     if (!msgsEl) return;
     msgsEl.insertAdjacentHTML('beforeend',
       `<div class="msg-system px-4 py-1 text-xs text-sky-400 italic text-center select-none">${linkify(text)}</div>`);
-    scrollBottom();
+    maybeScroll();
   }
 
   // ── Reply-to chip (set from the message context menu) ─────────────────────
@@ -1276,6 +1286,8 @@
 
   // ── Boot ───────────────────────────────────────────────────────────────────
   scrollBottom();
+  // Also re-pin as any initially-rendered images load (they start lazy/0-height).
+  scrollBottomWhenImagesLoad(msgsEl);
   bindMessageActions();
   // Runtime diagnostic: confirm the chat fills the viewport (body rect vs window).
   (() => {

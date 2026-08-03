@@ -212,9 +212,10 @@ Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
   chip to toggle it). Every message shows its reaction chips live.
 - **Images:** use the **📎** button (or drag & drop an image) in a channel **or
   a private message** to post an image; it renders as a thumbnail and opens in a
-  lightbox when clicked. The view pins to the bottom while an image loads so a
-  just-posted picture is fully visible without scrolling. If an administrator
-  has disabled uploads you'll be told so.
+  lightbox when clicked. The chat auto-scrolls to keep new messages and images
+  fully in view — but if you scroll up to read earlier chat, it holds your place
+  instead of yanking you back down. If an administrator has disabled uploads
+  you'll be told so.
 - **Reply (quote):** right-click somebody's message → **Reply** sets a "Replying to @nick — excerpt" chip above the composer; your message then carries the quoted context, and the quoted line is shown under the author's name in the timeline. Click the `↪` line to jump to (and briefly highlight) the original message.
 - **Mentions:** mention a member of the current channel with `@nick`; they get a
   notification bell. Mute a channel from its 🔔 header button to stop its
