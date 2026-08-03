@@ -135,4 +135,20 @@ final class ChannelController
         ChannelService::part($channel, $user, $reason ?: null);
         json_out(['ok' => true, 'redirect' => '/app']);
     }
+
+    /** POST /api/channel/delete — founder deletes their channel (history preserved). */
+    public static function deleteChannel(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        $r = ChannelService::delete($channel['id'], $user);
+        if ($r !== true) {
+            json_out(['error' => $r], 403);
+        }
+        json_out(['ok' => true, 'redirect' => '/app']);
+    }
 }

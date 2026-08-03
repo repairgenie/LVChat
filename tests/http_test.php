@@ -283,6 +283,14 @@ check('non-member cannot send to #gaming', $s === 403, (string) $s);
 check('notifications endpoint', $s === 200 && isset(jsonDecode($b)['notifications']), $b);
 [$s] = req('POST', '/api/notifications/read', ['csrf' => $tB], $cjB);
 check('mark notifications read', $s === 200, (string) $s);
+// Founder-only channel delete (renames to -deleted####, history preserved).
+$tA = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/channels', ['csrf' => $tA, 'name' => '#throwaway'], $cjA);
+check('create #throwaway', $s === 200, $b);
+[$s, , $b] = req('POST', '/api/channel/delete', ['csrf' => $tA, 'channel' => 'throwaway'], $cjA);
+check('founder deletes channel via API', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+[$s, , $b] = req('POST', '/api/channel/delete', ['csrf' => $tB, 'channel' => 'gaming'], $cjB);
+check('non-founder cannot delete a channel', $s === 403, "$s $b");
 [$s, , $b] = req('POST', '/api/message/edit', ['csrf' => $tA, 'id' => $msgId, 'content' => 'edited'], $cjA);
 check('admin can edit a message', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 // Only admins may edit messages — a regular user gets 403.

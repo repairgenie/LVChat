@@ -38,13 +38,38 @@ CommandRegistry::register('register', [
                 log_audit('channel_register', $name);
                 return ['replies' => ["Channel $name registered. You are the founder. It will now persist even when empty."], 'redirect' => '/c/' . rawurlencode($created['slug'])];
             }
-            if ((int) $ch['owner_id'] === (int) $user['id'] || $user['role'] === 'admin') {
+            if ((int) $ch['owner_id'] === (int) $user['id'] || (int) $ch['owner_id'] === 0 || $user['role'] === 'admin') {
                 if (ChannelService::isRegistered($ch)) {
-                    return ['replies' => ["$name is already registered to you. Registration confirmed."]];
+                    // Registered but unowned (e.g. a seeded default channel): an
+                    // admin may claim it so it shows under their "My Channels".
+                    if ((int) $ch['owner_id'] === 0 && $user['role'] === 'admin') {
+                        Database::query('UPDATE channels SET owner_id = ? WHERE id = ?', [$user['id'], $ch['id']]);
+                        Database::query(
+                            'INSERT INTO channel_members (channel_id, user_id, level) VALUES (?, ?, "founder")
+                             ON CONFLICT DO UPDATE SET level = "founder"',
+                            [$ch['id'], $user['id']]
+                        );
+                        log_audit('channel_register', $name);
+                        return ['replies' => ["$name is now registered to you. You are the founder."]];
+                    }
+                    return ['replies' => ["$name is already registered."]];
+                }
+                // Registering claims the channel: an unowned channel becomes the
+                // registerer's (owner_id + founder level). Registering someone
+                // else's owned channel just marks it registered without stealing.
+                if ((int) $ch['owner_id'] === 0 || (int) $ch['owner_id'] === (int) $user['id']) {
+                    Database::query('UPDATE channels SET owner_id = ?, registered_at = datetime("now") WHERE id = ?', [$user['id'], $ch['id']]);
+                    Database::query(
+                        'INSERT INTO channel_members (channel_id, user_id, level) VALUES (?, ?, "founder")
+                         ON CONFLICT DO UPDATE SET level = "founder"',
+                        [$ch['id'], $user['id']]
+                    );
+                    log_audit('channel_register', $name);
+                    return ['replies' => ["Channel $name is now registered. You are the founder. It will persist even when empty."]];
                 }
                 Database::query('UPDATE channels SET registered_at = datetime("now") WHERE id = ?', [$ch['id']]);
                 log_audit('channel_register', $name);
-                return ['replies' => ["Channel $name is now registered. You are the founder. It will persist even when empty."]];
+                return ['replies' => ["Channel $name is now registered."]];
             }
             return ['replies' => ["$name belongs to someone else and cannot be registered."]];
         }

@@ -676,6 +676,13 @@
       items.push({ label: 'Set topic', onClick: () => { const t = prompt('New topic:', ''); if (t !== null) runCommand('/topic ' + name + (t ? ' ' + t : '')); } });
       items.push({ label: 'Invite', onClick: () => { const n = prompt('Invite user:', ''); if (n) runCommand('/invite ' + n + ' ' + name); } });
     }
+    if (el.dataset.owned === '1') {
+      items.push({ div: true });
+      items.push({ label: 'Delete channel', danger: true, onClick: () => {
+        if (!confirm('Delete ' + name + '? The channel will be closed, but its chat history is preserved for admins.')) return;
+        post('/api/channel/delete', { channel: slug }, () => { window.location = '/app'; });
+      } });
+    }
     items.push({ div: true });
     items.push({ label: 'Leave channel', danger: true, onClick: () => post('/api/part', { channel: slug }, () => { window.location = '/app'; }) });
     ctxShow(x, y, items);

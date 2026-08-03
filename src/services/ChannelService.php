@@ -228,20 +228,21 @@ final class ChannelService
 
     public static function joinedChannelNames(array $actor): array
     {
+        $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id';
         if (Auth::isGuest($actor)) {
             return Database::all(
-                'SELECT c.id, c.name, c.slug, c.topic, c.visibility, c.moderated
+                "SELECT $cols
                  FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
                  WHERE cm.guest_id = ?
-                 ORDER BY c.name COLLATE NOCASE',
+                 ORDER BY c.name COLLATE NOCASE",
                 [$actor['id']]
             );
         }
         return Database::all(
-            'SELECT c.id, c.name, c.slug, c.topic, c.visibility, c.moderated
+            "SELECT $cols
              FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
              WHERE cm.user_id = ?
-             ORDER BY c.name COLLATE NOCASE',
+             ORDER BY c.name COLLATE NOCASE",
             [$actor['id']]
         );
     }
@@ -272,6 +273,58 @@ final class ChannelService
     public static function drop(int|string $channelId): void
     {
         Database::query('DELETE FROM channels WHERE id = ?', [$channelId]);
+    }
+
+    /** A unique "-deleted####" name so a deleted channel's archive stays separate
+     *  from any newer channel that later reuses the original name. */
+    private static function deletedChannelName(): string
+    {
+        do {
+            $name = '-deleted' . str_pad((string) random_int(0, 9999), 4, '0', STR_PAD_LEFT);
+        } while (Database::scalar('SELECT 1 FROM channels WHERE name = ? COLLATE NOCASE', [$name]));
+        return $name;
+    }
+
+    /** Delete a channel the actor owns. The channel is renamed to "-deleted####"
+     *  (not removed), its archived logs re-labelled under that name, and its
+     *  memberships cleared — so admins can still retrieve the old conversation
+     *  and it never mixes with a channel that later takes the same name. */
+    public static function delete(int|string $channelId, array $actor): bool|string
+    {
+        $ch = Database::row('SELECT * FROM channels WHERE id = ?', [$channelId]);
+        if (!$ch) {
+            return 'Channel not found.';
+        }
+        if ($actor['role'] !== 'admin' && (int) $ch['owner_id'] !== (int) $actor['id']) {
+            return 'Only the channel founder can delete this channel.';
+        }
+        $oldName = $ch['name'];
+        $deleted = self::deletedChannelName();
+        Database::query('DELETE FROM channel_members WHERE channel_id = ?', [$channelId]);
+        Database::query(
+            'UPDATE channels SET name = ?, slug = ?, owner_id = NULL, key_hash = NULL, forbidden = 1 WHERE id = ?',
+            [$deleted, $deleted, $channelId]
+        );
+        Database::query('UPDATE chat_logs SET channel_name = ? WHERE channel_name = ?', [$deleted, $oldName]);
+        log_audit('channel_delete', $oldName, 'renamed to ' . $deleted);
+        return true;
+    }
+
+    /** Channels the actor founded (used for the "My Channels" section). A
+     *  channel counts when the actor is its owner OR holds founder level, so
+     *  stale/missing owner_id doesn't hide a channel the user actually owns. */
+    public static function ownedChannels(array $actor): array
+    {
+        return Database::all(
+            "SELECT DISTINCT c.*,
+                (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id
+                 WHERE cm.channel_id = c.id AND u.away IS NULL AND u.last_seen >= datetime('now', '-30 seconds')) AS members
+             FROM channels c
+             LEFT JOIN channel_members fm ON fm.channel_id = c.id AND fm.user_id = ? AND fm.level = 'founder'
+             WHERE c.forbidden = 0 AND (c.owner_id = ? OR fm.id IS NOT NULL)
+             ORDER BY (c.registered_at IS NULL) ASC, c.name COLLATE NOCASE",
+            [$actor['id'], $actor['id']]
+        );
     }
 
     public static function publicChannels(string $term = ''): array

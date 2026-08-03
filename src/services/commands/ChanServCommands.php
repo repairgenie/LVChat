@@ -11,12 +11,11 @@ CommandRegistry::register('drop', [
     'needs_channel' => true,
     'min_level' => 5,
     'run' => function (array $args, array $user, ?array $channel) {
-        if ($user['role'] !== 'admin' && (int) $channel['owner_id'] !== (int) $user['id']) {
-            return ['replies' => ['Only the channel founder can drop this channel.']];
-        }
         $name = $channel['name'];
-        ChannelService::drop($channel['id']);
-        log_audit('channel_drop', $name);
+        $res = ChannelService::delete($channel['id'], $user);
+        if ($res !== true) {
+            return ['replies' => [$res]];
+        }
         return ['replies' => ["Channel $name has been dropped."], 'redirect' => '/app'];
     },
 ]);

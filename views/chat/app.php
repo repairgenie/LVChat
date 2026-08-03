@@ -196,6 +196,7 @@ function member_html(array $m, bool $online): string {
           <a href="/app?channel=<?= h(rawurlencode($c['slug'])) ?>"
              data-ctx-channel="<?= h($c['slug']) ?>"
              data-ctx-channel-name="<?= h($c['name']) ?>"
+             data-owned="<?= (int) ($c['owner_id'] ?? 0) === (int) $user['id'] ? '1' : '0' ?>"
              class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $channelSlug === $c['slug'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?>">
              <span class="truncate"><?= h($c['name']) ?></span>
              <?php if ($c['visibility'] !== 'public'): ?><span class="text-[10px] text-discord-400 ml-auto"><?= $c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁') ?></span><?php endif; ?>

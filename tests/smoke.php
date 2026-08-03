@@ -293,6 +293,30 @@ check('#test forbidden blocks join', ChannelService::joinStatus($ch, $dave)['ok'
 $res = CommandParser::run('/forbid #test off', $alice, $ch);
 check('/forbid off', str_contains($res['replies'][0] ?? '', 'un-forbidden'));
 
+// ── Channel delete: rename to -deleted####, archive preserved ───────────────
+$doomed = ChannelService::create($alice, '#doomed');
+CommandParser::run('/register #doomed', $alice, $doomed);
+MessageService::send((int) $doomed['id'], $alice, 'doomed history line');
+$delRes = ChannelService::delete($doomed['id'], $alice);
+check('founder can delete their channel', $delRes === true, is_string($delRes) ? $delRes : '');
+$delName = (string) Database::scalar('SELECT name FROM channels WHERE id = ?', [$doomed['id']]);
+check('deleted channel renamed to -deleted####', ChannelService::find('#doomed') === null && preg_match('/^-deleted\d{4}$/', $delName) === 1, $delName);
+check('deleted channel hidden (forbidden)', (int) Database::scalar('SELECT forbidden FROM channels WHERE id = ?', [$doomed['id']]) === 1);
+check('deleted channel members cleared', (int) Database::scalar('SELECT COUNT(*) FROM channel_members WHERE channel_id = ?', [$doomed['id']]) === 0);
+check('archive re-labelled under -deleted name', (int) Database::scalar('SELECT COUNT(*) FROM chat_logs WHERE channel_name = ?', [$delName]) >= 1 && (int) Database::scalar('SELECT COUNT(*) FROM chat_logs WHERE channel_name = "#doomed"') === 0);
+check('non-founder cannot delete a channel', is_string(ChannelService::delete($doomed['id'], $bob)));
+$owned = ChannelService::ownedChannels($alice);
+check('ownedChannels lists the founder\'s channels (excludes deleted)', in_array('#test', array_column($owned, 'name'), true) && !array_filter($owned, fn ($c) => str_starts_with($c['name'], '-deleted'))) ;
+
+// A registered-but-unowned channel (e.g. a seeded default) can be claimed by an
+// admin via /register, and then appears under "My Channels".
+$gen = ChannelService::find('#general');
+Database::query('UPDATE channels SET owner_id = NULL WHERE id = ?', [$gen['id']]);
+$res = CommandParser::run('/register #general', $alice, $gen);
+check('admin can claim an unowned registered channel', str_contains($res['replies'][0] ?? '', 'You are the founder'), $res['replies'][0] ?? '');
+$owned2 = ChannelService::ownedChannels($alice);
+check('claimed channel appears in My Channels', in_array('#general', array_column($owned2, 'name'), true));
+
 echo "== nickserv ==\n";
 $res = CommandParser::run('/ns status alice', $alice, $ch);
 check('/ns status', str_contains($res['replies'][0] ?? '', 'registered'));

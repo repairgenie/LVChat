@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 define('ROOT', dirname(__DIR__));
-define('LVC_VERSION', '1.5.1');
+define('LVC_VERSION', '1.6.0');
 
 error_reporting(E_ALL);
 ini_set('display_errors', '1');

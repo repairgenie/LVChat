@@ -33,6 +33,7 @@ $router->post('/api/notifications/read', [ChatController::class, 'readNotificati
 $router->post('/api/channels', [ChannelController::class, 'create']);
 $router->post('/api/join', [ChannelController::class, 'join']);
 $router->post('/api/part', [ChannelController::class, 'part']);
+$router->post('/api/channel/delete', [ChannelController::class, 'deleteChannel']);
 $router->post('/api/message/delete', [ChatController::class, 'deleteMessage']);
 $router->post('/api/message/edit', [ChatController::class, 'editMessage']);
 
