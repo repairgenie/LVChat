@@ -925,9 +925,15 @@
         }
         const items = j.gifs || [];
         if (gifGrid) {
+          // Uniform square tiles, guaranteed in every browser: the button's
+          // height collapses to 0 and a bottom padding of 100% of its width
+          // stretches it into an exact square (box-sizing:border-box). The
+          // preview is absolutely positioned to fill it. No aspect-ratio or
+          // parent-height chains involved, and images load eagerly so every
+          // tile fills in immediately.
           const html = items.map((g) =>
-            `<button type="button" class="gif-item w-full rounded-md overflow-hidden border border-discord-700 hover:border-blurple/60 transition-colors aspect-square bg-discord-850" data-url="${esc(g.url)}" data-title="${esc(g.title)}" title="${esc(g.title || 'GIF')}">
-              <img src="${esc(g.preview)}" alt="${esc(g.title || 'GIF')}" loading="lazy" class="w-full h-full object-cover">
+            `<button type="button" class="gif-item w-full relative rounded-md overflow-hidden border border-discord-700 hover:border-blurple/60 transition-colors bg-discord-850" style="box-sizing:border-box;height:0;padding:0 0 100% 0" data-url="${esc(g.url)}" data-title="${esc(g.title)}" title="${esc(g.title || 'GIF')}">
+              <img src="${esc(g.preview)}" alt="${esc(g.title || 'GIF')}" class="absolute inset-0 w-full h-full object-cover">
             </button>`).join('');
           if (reset) gifGrid.innerHTML = html;
           else gifGrid.insertAdjacentHTML('beforeend', html);
