@@ -328,6 +328,64 @@ final class AdminController
                 log_audit('user_reset', 'user#' . $id);
                 $message = "Password reset to: $pw (user must use it to log in)";
                 break;
+            case 'user_delete':
+                $id = (int) ($_POST['id'] ?? 0);
+                if ($id === (int) $admin['id']) {
+                    $ok = false;
+                    $message = 'You cannot delete your own account.';
+                    break;
+                }
+                $u = Database::row('SELECT * FROM users WHERE id = ?', [$id]);
+                if (!$u) {
+                    $ok = false;
+                    $message = 'User not found.';
+                    break;
+                }
+                if ($u['role'] === 'admin' && (int) Database::scalar('SELECT COUNT(*) FROM users WHERE role = "admin"') <= 1) {
+                    $ok = false;
+                    $message = 'You cannot delete the last admin account.';
+                    break;
+                }
+                // Owned channels pass to the channel's chosen successor (if
+                // still a member) or the longest-standing remaining member
+                // before the row goes, then IRC cleanup runs on every channel
+                // the user was in (empty unregistered channels vanish).
+                $channelIds = array_column(Database::all('SELECT DISTINCT channel_id FROM channel_members WHERE user_id = ?', [$id]), 'channel_id');
+                foreach ($channelIds as $cid) {
+                    $ch = Database::row('SELECT * FROM channels WHERE id = ?', [$cid]);
+                    if ($ch && (int) $ch['owner_id'] === $id) {
+                        $heir = null;
+                        if (!empty($ch['successor_id']) && AccessService::member($cid, (int) $ch['successor_id'])) {
+                            $heir = ['user_id' => (int) $ch['successor_id']];
+                        }
+                        if (!$heir) {
+                            $heir = Database::row(
+                                'SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id IS NOT NULL AND user_id != ?
+                                 ORDER BY joined_at ASC, user_id ASC LIMIT 1',
+                                [$cid, $id]
+                            );
+                        }
+                        if ($heir) {
+                            Database::query('UPDATE channels SET owner_id = ? WHERE id = ?', [$heir['user_id'], $cid]);
+                            Database::query('UPDATE channel_members SET level = "founder" WHERE channel_id = ? AND user_id = ?', [$cid, $heir['user_id']]);
+                        }
+                    }
+                }
+                // A freed nick must not leave a usable o:line behind (opers are
+                // keyed by username, not user id) — anyone could claim the nick
+                // and /oper with it.
+                Database::query('DELETE FROM opers WHERE username = ? COLLATE NOCASE', [$u['username']]);
+                Database::query("DELETE FROM reactions WHERE actor_type = 'user' AND actor_id = ?", [$id]);
+                // The row goes last: sessions and every FK reference cascade or
+                // set NULL. Messages keep their content (sender_id -> NULL) and
+                // the append-only chat_logs archive keeps the username forever.
+                Database::query('DELETE FROM users WHERE id = ?', [$id]);
+                foreach ($channelIds as $cid) {
+                    ChannelService::afterMemberRemoval($cid);
+                }
+                log_audit('user_delete', $u['username'], (string) $id);
+                $message = 'User ' . $u['username'] . ' deleted.';
+                break;
             case 'channel_drop':
                 $id = (int) ($_POST['id'] ?? 0);
                 $name = Database::scalar('SELECT name FROM channels WHERE id = ?', [$id]);

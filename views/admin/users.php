@@ -108,6 +108,7 @@
               <button name="action" value="user_admin" class="btn-ghost text-xs !py-1 text-amber-400">Make admin</button>
               <?php endif; ?>
               <button name="action" value="user_reset" class="btn-ghost text-xs !py-1" onclick="return confirm('Reset password? New password shown on next page.')">Reset pw</button>
+              <button name="action" value="user_delete" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Permanently delete this user? Their account, sessions, memberships and reactions are removed. Channel/PM messages are kept (shown without the name); the chat log archive keeps everything.')">Delete</button>
             <?php endif; ?>
           </form>
         </td>

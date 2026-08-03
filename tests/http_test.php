@@ -296,6 +296,47 @@ $t = csrf(req('GET', '/login', [], $cjM)[2]);
 [$s, $h] = req('POST', '/login', ['csrf' => $t, 'username' => 'manual', 'password' => $manualPw, 'next' => '/'], $cjM);
 check('manually created user logs in with shown password', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
 
+// ── User deletion ────────────────────────────────────────────────────────────
+echo "== user delete ==\n";
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_create', 'username' => 'doomed', 'email' => 'doomed@x.com', 'role' => 'user', 'back' => '/admin/users'], $cjA);
+[$s, , $b] = req('GET', '/admin/users', [], $cjA);
+preg_match('/Password: ([0-9a-f]{16})/', $b, $dm);
+$doomedPw = $dm[1] ?? '';
+check('doomed created with password', $doomedPw !== '', $b);
+// Log in as the doomed user and have them own a temporary channel.
+$cjX = '/tmp/opencode/httptest-x.txt';
+$t = csrf(req('GET', '/login', [], $cjX)[2]);
+[$s, $h] = req('POST', '/login', ['csrf' => $t, 'username' => 'doomed', 'password' => $doomedPw, 'next' => '/'], $cjX);
+check('doomed logs in', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
+$tX = csrf(req('GET', '/app', [], $cjX)[2]);
+[$s, , $b] = req('POST', '/api/channels', ['csrf' => $tX, 'name' => '#doomedroom'], $cjX);
+check('doomed creates a channel', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+// A second channel with another member: ownership should pass to the heir.
+[$s, , $b] = req('POST', '/api/channels', ['csrf' => $tX, 'name' => '#ownedroom'], $cjX);
+check('doomed creates an owned channel', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+$tM = csrf(req('GET', '/app', [], $cjM)[2]);
+[$s, , $b] = req('POST', '/api/join', ['csrf' => $tM, 'name' => '#ownedroom'], $cjM);
+check('manual joins #ownedroom', $s === 200, "$s $b");
+$pdo = new PDO('sqlite:' . $DB);
+$doomedId = (int) $pdo->query("SELECT id FROM users WHERE username = 'doomed'")->fetchColumn();
+check('doomed user id found', $doomedId > 0, "id=$doomedId");
+// Delete the user as admin; their sessions + empty temp channel should disappear.
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_delete', 'id' => (string) $doomedId, 'back' => '/admin/users'], $cjA);
+check('user_delete redirects', $s === 302, (string) $s);
+check('deleted user row gone', (int) $pdo->query("SELECT COUNT(*) FROM users WHERE id = " . $doomedId)->fetchColumn() === 0);
+check('deleted user sessions gone', (int) $pdo->query("SELECT COUNT(*) FROM sessions WHERE user_id = " . $doomedId)->fetchColumn() === 0);
+check('ownerless temp channel removed', (int) $pdo->query("SELECT COUNT(*) FROM channels WHERE name = '#doomedroom'")->fetchColumn() === 0);
+check('channel with a remaining member survives', (int) $pdo->query("SELECT COUNT(*) FROM channels WHERE name = '#ownedroom'")->fetchColumn() === 1);
+$heir = $pdo->query("SELECT u.username FROM channels c JOIN users u ON u.id = c.owner_id WHERE c.name = '#ownedroom'")->fetchColumn();
+check('ownership passed to remaining member', $heir === 'manual', (string) $heir);
+check('user_delete is audited', (int) $pdo->query("SELECT COUNT(*) FROM audit_log WHERE action = 'user_delete' AND target = 'doomed'")->fetchColumn() >= 1);
+// Admin cannot delete themselves.
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_delete', 'id' => '1', 'back' => '/admin/users'], $cjA);
+check('self-delete blocked (admin still exists)', $s === 302 && (int) $pdo->query("SELECT COUNT(*) FROM users WHERE id = 1")->fetchColumn() === 1, (string) $s);
+
 // SMTP settings save + graceful test failure (no SMTP server running).
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'smtp_enabled' => '1', 'smtp_host' => '127.0.0.1', 'smtp_port' => '9', 'smtp_encryption' => 'none', 'smtp_from_email' => 'noreply@x.com', 'smtp_from_name' => 'LVChat', 'back' => '/admin/settings'], $cjA);

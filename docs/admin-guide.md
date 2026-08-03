@@ -65,6 +65,7 @@ Per-user actions (all confirm via CSRF-protected POSTs, all logged to audit):
 | **Make admin / Demote** | Promotes/removes `admin` role. You cannot demote yourself. |
 | **Make staff / Remove staff** | Staff opens `#staff` and shares its badge. |
 | **Reset pw** | Sets a new random 12-char password (shown once) and kills all sessions. |
+| **Delete** | **Permanently deletes** the account, its sessions, memberships and reactions. Channel/PM messages stay (they just lose the name); the append-only log archive keeps everything. Owned channels pass to the longest-standing remaining member, or vanish if empty and unregistered. A freed nick's **o:line is removed** so nobody can claim the nick and `/oper`. You cannot delete yourself or the last admin. |
 | **Role selector** | Assigns or clears the user's custom role (dropdown mid-table). |
 
 Above the table is a **Create a user manually** form: username, email, role
@@ -349,7 +350,7 @@ or empty/permanent. Targets: nick (resolved to `nick!*@*`), IP, `IP/CIDR`
 The `audit_log` table stores `(actor_id, action, target, detail, created_at)`.
 Every dashboard POST and the important chat actions append a row. Common
 `action` values: `user_ban`, `user_unban`, `user_admin`, `user_staff`,
-`user_reset`, `user_create`, `zline_ip`, `ban_add`, `ban_remove`, `channel_create`,
+`user_reset`, `user_create`, `user_delete`, `zline_ip`, `ban_add`, `ban_remove`, `channel_create`,
 `channel_drop`, `channel_register`, `channel_auto_delete`, `channel_forbid`,
 `channel_topic_admin`, `channel_visibility`, `topic`, `kick`, `kill`,
 `global`, `spamfilter_add/del`, `badword_add/del`, `role_add/update/del`,
