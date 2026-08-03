@@ -786,5 +786,52 @@ check('webhook empty payload rejected', $rEmpty['ok'] === false);
 unset($_POST);
 Database::query('DELETE FROM webhooks WHERE id = (SELECT id FROM webhooks ORDER BY id DESC LIMIT 1)');
 
+// ── Account invites + SMTP ───────────────────────────────────────────────────
+echo "== invites & smtp ==\n";
+$inv = InviteService::create('invitee@example.com', 'Welcome aboard!', (int) $alice['id']);
+check('invite created with token + link', $inv['ok'] === true && strlen($inv['token'] ?? '') === 48 && str_contains($inv['link'] ?? '', '/register?invite='), json_encode($inv));
+check('invite email not sent without SMTP', $inv['email_sent'] === false && $inv['error'] !== null, json_encode($inv));
+$invRow = InviteService::valid($inv['token']);
+check('unused invite validates', $invRow !== null && strtolower($invRow['email']) === 'invitee@example.com', json_encode($invRow));
+check('duplicate invite for registered email rejected', InviteService::create('alice@example.com', '', (int) $alice['id'])['ok'] === false);
+check('invite for invalid email rejected', InviteService::create('not-an-email', '', (int) $alice['id'])['ok'] === false);
+
+$inv2 = InviteService::create('invitee2@example.com', '', (int) $alice['id']);
+check('second invite ok', $inv2['ok'] === true, json_encode($inv2));
+InviteService::claim((int) $inv2['id'], (int) $bob['id']);
+check('used invite no longer validates', InviteService::valid($inv2['token']) === null);
+
+$inv3 = InviteService::create('invitee3@example.com', '', (int) $alice['id']);
+Database::query('UPDATE registration_invites SET expires_at = datetime("now", "-1 hour") WHERE id = ?', [(int) $inv3['id']]);
+check('expired invite no longer validates', InviteService::valid($inv3['token']) === null);
+
+$inv4 = InviteService::create('invitee4@example.com', '', (int) $alice['id']);
+$oldToken = $inv4['token'];
+$res = InviteService::resend((int) $inv4['id']);
+check('resend rolls a new token', $res['ok'] === true && $res['token'] !== $oldToken && $res['email'] === 'invitee4@example.com', json_encode($res));
+InviteService::revoke((int) $inv4['id']);
+check('revoked invite removed', InviteService::row((int) $inv4['id']) === null);
+check('invite list returns rows', count(InviteService::all()) >= 2);
+
+// Admin-style manual creation with an auto-generated password.
+$manualPw = bin2hex(random_bytes(8));
+$rManual = Auth::register('manualuser', 'manual@example.com', $manualPw);
+check('admin-style manual creation works', $rManual['ok'] === true && Auth::attempt('manualuser', $manualPw) !== null, json_encode($rManual));
+
+// Mailer: graceful errors, never an uncaught exception.
+check('Mailer::configured false by default', Mailer::configured() === false);
+$noMail = Mailer::send('x@example.com', 't', 'body');
+check('Mailer disabled returns graceful error', $noMail['ok'] === false && $noMail['error'] !== null);
+config_set('smtp_enabled', '1');
+config_set('smtp_host', '127.0.0.1');
+config_set('smtp_port', '9'); // discard/refused port — connect fails instantly
+config_set('smtp_from_email', 'test@example.com');
+check('Mailer::configured true once set', Mailer::configured() === true);
+$conn = Mailer::send('x@example.com', 't', 'body');
+check('Mailer unreachable host returns graceful error', $conn['ok'] === false && $conn['error'] !== null, json_encode($conn));
+config_set('smtp_from_email', '');
+check('Mailer refuses to send without a from address', Mailer::send('x@example.com', 't', 'b')['ok'] === false);
+config_set('smtp_enabled', '0');
+
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

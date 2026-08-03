@@ -31,9 +31,9 @@ Related guides: see `installation.md` for deploying/upgrading the server; see
 ## 2. The admin dashboard (`/admin`)
 
 The navigation bar links to **Overview, Users, Channels, Bans, Spam filters,
-Bad words, Roles, O-lines, Operclasses, MOTD, Chat logs, Settings** — described
-per-page below. A **🛡 Admin dashboard** link also appears at the top of the
-sidebar in the chat app for admins.
+Bad words, Roles, O-lines, Operclasses, MOTD, Chat logs, Webhooks, Invites,
+Settings** — described per-page below. A **🛡 Admin dashboard** link also appears
+at the top of the sidebar in the chat app for admins.
 
 ### 2.1 Overview
 
@@ -66,6 +66,12 @@ Per-user actions (all confirm via CSRF-protected POSTs, all logged to audit):
 | **Make staff / Remove staff** | Staff opens `#staff` and shares its badge. |
 | **Reset pw** | Sets a new random 12-char password (shown once) and kills all sessions. |
 | **Role selector** | Assigns or clears the user's custom role (dropdown mid-table). |
+
+Above the table is a **Create a user manually** form: username, email, role
+(user/staff/admin), and an optional **Email credentials** checkbox. A random
+16-character password is generated and shown once in the flash banner — use it
+to hand the account over directly. When SMTP is configured and "Email
+credentials" is ticked, the credentials are also emailed (`user_create`).
 
 > The Users page lists up to 200 rows, ordered by registration date.
 
@@ -239,13 +245,40 @@ operclass permissions**.
 | Setting | Meaning |
 |---|---|
 | **Site name** | Shown in the header, chat titles, and `/api/version` |
-| **Registration** | Whether new accounts can be created (`/register` closed when off; the **Join as guest** option on the login page is unaffected and stays available) |
+| **Registration** | Whether new accounts can be created (`/register` closed when off; the **Join as guest** option on the login page is unaffected and stays available). **Invite links keep working when this is off.** |
 | **Spam filters** | Master switch for all active spam filters |
 | **Max channels per user** | Per-user owned-channel cap (affects + create/`/register`) |
+| **Email (SMTP)** | Host, port, encryption (STARTTLS / SSL / none), username, password, from address/name. Used for invite and welcome emails. |
 
-(The old shared **operator password** field was removed — operator access is now
-managed exclusively via **O-lines**.) Settings writes appear in the audit log
-(`settings_save`).
+**Sending email** is a dependency-free SMTP client — no `mail()`, no Composer.
+The **Send test email** box under the settings form (or the **SMTP test** flash
+from the header) verifies the stored settings against a live server and reports
+the exact failure. The password field is write-only: leave it blank to keep the
+stored one.
+
+> The old shared **operator password** field was removed — operator access is now
+> managed exclusively via **O-lines**. Settings writes appear in the audit log
+> (`settings_save`).
+
+### 2.13 Invites (`/admin/invites`)
+
+Invite people by email instead of (or in addition to) open registration. Enter
+an email (plus an optional personal message) and a sign-up link is generated,
+emailed, and listed on this page:
+
+- **Email** + inviter + expiry (links are valid for **7 days**).
+- **Status** — pending, *used by <nick>*, or expired.
+- **Copy link** — copy the `/register?invite=<token>` URL to share manually
+  (handy when SMTP isn't configured yet — the created link is also shown in a
+  banner whenever the email fails to send).
+- **Resend** — rolls a *new* token for an unused invite and emails it again.
+- **Revoke** — deletes the invite; its link stops working immediately.
+
+The recipient opens the link and registers with their **email locked** to the
+invited address. Clicking the emailed link is the proof of access, so an invite
+**bypasses the `registration_enabled` toggle** — you can close open registration
+and still admit people you've invited. Invites are audited
+(`invite_create`, `invite_resend`, `invite_revoke`).
 
 ---
 
@@ -316,13 +349,14 @@ or empty/permanent. Targets: nick (resolved to `nick!*@*`), IP, `IP/CIDR`
 The `audit_log` table stores `(actor_id, action, target, detail, created_at)`.
 Every dashboard POST and the important chat actions append a row. Common
 `action` values: `user_ban`, `user_unban`, `user_admin`, `user_staff`,
-`user_reset`, `zline_ip`, `ban_add`, `ban_remove`, `channel_create`,
+`user_reset`, `user_create`, `zline_ip`, `ban_add`, `ban_remove`, `channel_create`,
 `channel_drop`, `channel_register`, `channel_auto_delete`, `channel_forbid`,
 `channel_topic_admin`, `channel_visibility`, `topic`, `kick`, `kill`,
 `global`, `spamfilter_add/del`, `badword_add/del`, `role_add/update/del`,
 `user_set_role`, `oper_add`, `oper_del`, `oper_toggle`,
 `operclass_add/update/del`, `guest_join`, `oper`, `motd_save`,
-`settings_save`, `message_delete`, `password_change`, `rehash`,
+`settings_save`, `invite_create`, `invite_resend`, `invite_revoke`,
+`message_delete`, `password_change`, `rehash`,
 `kline_add`, `gline_add`, `zline_add`, `shun_add`, `unkline`, `ungline`,
 `unzline`, `unshun`, etc.
 
@@ -345,6 +379,14 @@ DESC LIMIT 100;"`).
 | `webhooks_enabled` | `1` | Master switch for incoming webhooks |
 | `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |
 | `max_channels_per_user` | `100` | Owned-channel cap |
+| `smtp_enabled` | `0` | Master switch for email sending |
+| `smtp_host` | — | SMTP server hostname/IP |
+| `smtp_port` | `587` | SMTP port |
+| `smtp_encryption` | `tls` | `tls` (STARTTLS), `ssl`, or `none` |
+| `smtp_username` | — | Auth username (empty = no auth) |
+| `smtp_password` | — | Auth password (write-only from the dashboard) |
+| `smtp_from_email` | — | Envelope + From address |
+| `smtp_from_name` | — | Display name for the From header |
 
 There is **no `oper_password` key anymore** — operator access lives in the
 `opers` / `operclasses` tables (see §2.10–2.11). The four default operator

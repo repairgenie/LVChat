@@ -20,6 +20,12 @@ messaging, private messages, your profile, and the complete command reference.
 - **Email:** a valid address (used only for account recovery / admin tools).
 - **Password:** at least 8 characters.
 
+If open registration is turned off, the **Register** page instead says that only
+invite links can create accounts. When a server admin invites you, you'll get an
+email with a **create-account link** — opening it lands you on the registration
+form with your email already filled in (and locked). Just pick a username and
+password and you're in.
+
 Log in with your username and password. Sessions last 30 days. Too many failed
 login attempts from the same IP within 10 minutes locks that IP out briefly.
 

@@ -8,6 +8,41 @@
 </div>
 <?php require ROOT . '/views/admin/_nav.php'; ?>
 
+<div class="card p-5 mb-5">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="font-semibold text-white">Create a user manually</h2>
+    <span class="text-xs text-discord-400">No email needed — the password is shown once</span>
+  </div>
+  <form method="post" action="/admin/action" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+    <?= Csrf::field() ?>
+    <input type="hidden" name="back" value="/admin/users">
+    <div>
+      <label class="label">Username</label>
+      <input class="input" name="username" required pattern="[A-Za-z0-9_\-\[\]\\`^{}|]{2,32}" title="2-32 chars, letters, numbers, and - _ [ ] { } ^ ` |">
+    </div>
+    <div>
+      <label class="label">Email</label>
+      <input class="input" type="email" name="email" required>
+    </div>
+    <div>
+      <label class="label">Role</label>
+      <select name="role" class="input !py-1.5">
+        <option value="user" selected>user</option>
+        <option value="staff">staff</option>
+        <option value="admin">admin</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="flex items-center gap-2 text-sm text-discord-300 cursor-pointer">
+        <input type="checkbox" name="email_welcome" value="1" class="w-4 h-4 accent-blurple">
+        Email credentials
+      </label>
+      <button name="action" value="user_create" class="btn-primary justify-center">Create user</button>
+    </div>
+  </form>
+  <p class="text-xs text-discord-400 mt-2">A random 16-character password is generated and shown once on the next page. Check "Email credentials" to also send it to the address above (requires SMTP under Settings).</p>
+</div>
+
 <div class="card overflow-x-auto">
   <table class="w-full text-sm">
     <thead>

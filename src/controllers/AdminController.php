@@ -250,12 +250,29 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'logo_url', 'registration_enabled', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'webhooks_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd'];
+        $keys = ['site_name', 'logo_url', 'registration_enabled', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'webhooks_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
         }
+        // The password is write-only: never echo it back. The view just reports
+        // whether one is already stored so admins can leave the field blank.
+        $settings['smtp_has_password'] = trim((string) (config_get('smtp_password', '') ?? '')) !== '';
         render_view('admin/settings', ['admin' => $admin, 'settings' => $settings]);
+    }
+
+    public static function invites(): void
+    {
+        $admin = self::require();
+        $invites = InviteService::all();
+        $lastLink = $_SESSION['invite_link'] ?? null;
+        unset($_SESSION['invite_link']);
+        render_view('admin/invites', [
+            'admin' => $admin,
+            'invites' => $invites,
+            'smtp' => Mailer::configured(),
+            'lastLink' => $lastLink,
+        ]);
     }
 
     public static function action(): void
@@ -507,6 +524,90 @@ final class AdminController
                     $message = 'Operator class deleted.';
                 }
                 break;
+            case 'user_create':
+                $username = trim((string) ($_POST['username'] ?? ''));
+                $email = trim((string) ($_POST['email'] ?? ''));
+                $role = (string) ($_POST['role'] ?? 'user');
+                if (!in_array($role, ['user', 'staff', 'admin'], true)) {
+                    $role = 'user';
+                }
+                $pw = bin2hex(random_bytes(8)); // 16 hex chars, shown once
+                $result = Auth::register($username, $email, $pw);
+                if (!$result['ok']) {
+                    $ok = false;
+                    $message = implode(' ', $result['errors']);
+                } else {
+                    if ($role === 'staff' || $role === 'admin') {
+                        Database::query('UPDATE users SET role = ? WHERE id = ?', [$role, $result['id']]);
+                    }
+                    log_audit('user_create', $username, $role);
+                    $message = "User $username created. Password: $pw (shown once)";
+                    if (($_POST['email_welcome'] ?? '0') === '1') {
+                        if (Mailer::configured()) {
+                            $sent = Mailer::sendWelcome($email, $username, $pw);
+                            $message .= $sent['ok'] ? ' — welcome email sent.' : ' — welcome email failed: ' . $sent['error'];
+                        } else {
+                            $message .= ' — welcome email not sent (SMTP not configured).';
+                        }
+                    }
+                }
+                break;
+            case 'invite_create':
+                $email = trim((string) ($_POST['email'] ?? ''));
+                $message = trim((string) ($_POST['message'] ?? ''));
+                $invite = InviteService::create($email, $message, (int) $admin['id']);
+                if (!$invite['ok']) {
+                    $ok = false;
+                    $message = $invite['error'];
+                } else {
+                    log_audit('invite_create', $email);
+                    if ($invite['email_sent']) {
+                        $message = "Invite sent to $email.";
+                    } else {
+                        $message = "Invite created for $email, but the email could not be sent (" . ($invite['error'] ?? 'SMTP not configured') . '). The link was shown below — copy and share it manually.';
+                        $_SESSION['invite_link'] = $invite['link'];
+                    }
+                }
+                break;
+            case 'invite_resend':
+                $id = (int) ($_POST['id'] ?? 0);
+                $res = InviteService::resend($id);
+                if (!$res['ok']) {
+                    $ok = false;
+                    $message = $res['error'];
+                } else {
+                    log_audit('invite_resend', $res['email']);
+                    if ($res['email_sent']) {
+                        $message = "Invite re-sent to {$res['email']}.";
+                    } else {
+                        $message = "New invite link generated for {$res['email']}, but the email could not be sent (" . ($res['error'] ?? 'SMTP not configured') . '). The link was shown below.';
+                        $_SESSION['invite_link'] = $res['link'];
+                    }
+                }
+                break;
+            case 'invite_revoke':
+                $id = (int) ($_POST['id'] ?? 0);
+                $inv = InviteService::row($id);
+                InviteService::revoke($id);
+                log_audit('invite_revoke', $inv['email'] ?? ('invite#' . $id));
+                $message = 'Invite revoked.';
+                break;
+            case 'smtp_test':
+                $to = trim((string) ($_POST['email'] ?? ''));
+                if ($to === '') {
+                    $to = (string) ($admin['email'] ?? '');
+                }
+                if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                    $ok = false;
+                    $message = 'A valid recipient email is required for the test.';
+                } else {
+                    $site = (string) (config_get('site_name', 'LVChat') ?: 'LVChat');
+                    $sent = Mailer::send($to, 'SMTP test from ' . $site, "This is a test email. Your SMTP settings are working correctly.");
+                    $message = $sent['ok']
+                        ? "Test email sent to $to."
+                        : 'SMTP test failed: ' . $sent['error'];
+                }
+                break;
             case 'motd_save':
                 config_set('motd', (string) ($_POST['motd'] ?? ''));
                 log_audit('motd_save');
@@ -524,6 +625,17 @@ final class AdminController
                 config_set('presence_throttle', (string) max(5, (int) ($_POST['presence_throttle'] ?? 30)));
                 config_set('poll_interval', (string) max(1, (int) ($_POST['poll_interval'] ?? 2)));
                 config_set('realtime', ($_POST['realtime'] ?? 'poll') === 'sse' ? 'sse' : 'poll');
+                config_set('smtp_enabled', ($_POST['smtp_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('smtp_host', trim((string) ($_POST['smtp_host'] ?? '')));
+                config_set('smtp_port', (string) max(1, (int) ($_POST['smtp_port'] ?? 587)));
+                config_set('smtp_encryption', in_array(($_POST['smtp_encryption'] ?? 'tls'), ['none', 'ssl', 'tls'], true) ? (string) $_POST['smtp_encryption'] : 'tls');
+                config_set('smtp_username', trim((string) ($_POST['smtp_username'] ?? '')));
+                $smtpPass = (string) ($_POST['smtp_password'] ?? '');
+                if ($smtpPass !== '') {
+                    config_set('smtp_password', $smtpPass);
+                }
+                config_set('smtp_from_email', trim((string) ($_POST['smtp_from_email'] ?? '')));
+                config_set('smtp_from_name', trim((string) ($_POST['smtp_from_name'] ?? '')));
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 break;

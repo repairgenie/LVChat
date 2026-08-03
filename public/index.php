@@ -66,6 +66,7 @@ $router->get('/admin/logs', [AdminController::class, 'logs']);
 $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
 $router->get('/admin/logs/export', [AdminController::class, 'logDayExport']);
 $router->get('/admin/settings', [AdminController::class, 'settings']);
+$router->get('/admin/invites', [AdminController::class, 'invites']);
 $router->post('/admin/action', [AdminController::class, 'action']);
 
 // Incoming webhooks (public, token-authenticated) + admin management

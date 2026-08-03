@@ -9,6 +9,8 @@ services from Anope.
 ## Features
 
 - **Accounts** — register/login (argon2id), session auth, CSRF everywhere
+- **Admin account tools** — admins create accounts manually (auto-generated password shown once, optional welcome email), or **invite** people by email with a sign-up link that works even when open registration is closed; pending invites can be re-sent or revoked. **Admin → Invites**.
+- **Email (SMTP)** — a dependency-free SMTP client configured under **Admin → Settings** (host, port, STARTTLS/SSL, auth, from address) with a one-click **Send test email**; used for invite and welcome emails
 - **Channels** — create, register/deregister (temp channels vanish when empty, founder passes on), public/private/secret, invite-only, keyed, moderated, member limits, topics, ban lists, AKICK, access lists
 - **Admin tools** — see every user's IP, ban by nick or IP/CIDR with duration and reason (kline/gline/zline/shun), manage the bad-word filter (censor to `****` or block the whole message with a ChanServ notice) via **Admin → Bad words**, per-channel `+C` flag, and a clickable mode bar with tooltips above each channel
 - **Admin presence** — operators' messages and nicks render in red throughout the chat and member lists
@@ -160,16 +162,17 @@ client automatically falls back to polling if the stream drops.
 bash bin/test.sh
 ```
 
-Runs **212 automated assertions** in two layers:
+Runs **423 automated assertions** in two layers:
 
-- **`tests/smoke.php`** (213) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (319) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
-  share links, and the admin dashboard data.
-- **`tests/http_test.php`** (52) — full HTTP end-to-end: spins up the built-in server
+  share links, guests, webhooks, account invites + SMTP, and the admin dashboard data.
+- **`tests/http_test.php`** (104) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
-  private messages, admin pages & actions, private/keyed/staff channel flows, share-link
-  redirects, and logout.
+  private messages, admin pages & actions (including invites, manual user creation
+  and SMTP settings), private/keyed/staff channel flows, share-link redirects,
+  webhooks, and logout.
 
 A headless-browser check (Chrome DevTools Protocol) is also used during development to
 confirm the chat page loads without JS errors, fills the viewport, polls for messages,
@@ -183,8 +186,8 @@ src/             bootstrap, router, DB, auth, services (commands), controllers
 views/           layout, auth, chat app, browse, admin pages
 bin/deploy.sh    post-upload restore + sanity check
 bin/test.sh      run the full automated test suite
-tests/smoke.php  213 command/service assertions
-tests/http_test.php  52 HTTP assertions
+tests/smoke.php  319 command/service assertions
+tests/http_test.php  104 HTTP assertions
 schema.sql       SQLite schema (applied on boot)
 data/            SQLite database (beside public/, never web-served)
 ```

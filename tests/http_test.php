@@ -237,6 +237,76 @@ check('save site logo setting', $s === 302, (string) $s);
 [$s, , $b] = req('GET', '/login');
 check('logo renders on login page', $s === 200 && strpos($b, 'https://example.com/logo.png') !== false, $b);
 
+// ── Invites + manual user creation ───────────────────────────────────────────
+echo "== invites ==\n";
+[$s] = req('GET', '/admin/invites', [], $cjA);
+check('GET /admin/invites 200', $s === 200, (string) $s);
+
+$tA = csrf(req('GET', '/admin/invites', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'invite_create', 'email' => 'invited@x.com', 'message' => 'join us', 'back' => '/admin/invites'], $cjA);
+check('invite_create redirects', $s === 302, (string) $s);
+$invPage = req('GET', '/admin/invites', [], $cjA)[2];
+preg_match('#/register\?invite=([0-9a-f]{48})#', $invPage, $m);
+$invToken = $m[1] ?? '';
+check('invite link surfaced on invites page', $invToken !== '', $invPage);
+
+$cjE = '/tmp/opencode/httptest-e.txt';
+[$s, , $b] = req('GET', '/register?invite=' . $invToken, [], $cjE);
+check('invite link opens locked register form', $s === 200 && strpos($b, 'invited@x.com') !== false && strpos($b, 'name="invite"') !== false, $b);
+$t = csrf($b);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken, 'username' => 'erin', 'email' => 'invited@x.com', 'password' => 'password123', 'next' => '/'], $cjE);
+check('register via invite 302', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
+$pdo = new PDO('sqlite:' . $DB);
+$used = (int) $pdo->query('SELECT COUNT(*) FROM registration_invites WHERE token = ' . $pdo->quote($invToken) . ' AND used_at IS NOT NULL')->fetchColumn();
+check('invite marked used after registration', $used === 1, "used=$used");
+[$s] = req('GET', '/register?invite=' . $invToken, [], '/tmp/opencode/httptest-e2.txt');
+check('used invite link redirects away', $s === 302, (string) $s);
+
+// Invites bypass closed registration; plain registration is blocked.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '0', 'back' => '/admin/settings'], $cjA);
+$tA = csrf(req('GET', '/admin/invites', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'invite_create', 'email' => 'invited2@x.com', 'back' => '/admin/invites'], $cjA);
+$invPage = req('GET', '/admin/invites', [], $cjA)[2];
+preg_match('#/register\?invite=([0-9a-f]{48})#', $invPage, $m);
+$invToken2 = $m[1] ?? '';
+check('second invite link available', $invToken2 !== '', $invPage);
+$cjF = '/tmp/opencode/httptest-f.txt';
+$t = csrf(req('GET', '/register', [], $cjF)[2]);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'frank2', 'email' => 'frank2@x.com', 'password' => 'password123', 'next' => '/'], $cjF);
+check('plain register blocked when registration closed', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
+[$s, , $b] = req('GET', '/register?invite=' . $invToken2, [], $cjF);
+$t = csrf($b);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken2, 'username' => 'frank', 'email' => 'invited2@x.com', 'password' => 'password123', 'next' => '/'], $cjF);
+check('invite bypasses closed registration', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
+// Restore open registration for the rest of the suite.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'back' => '/admin/settings'], $cjA);
+
+// Manual user creation: auto-generated password shown once, then login works.
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_create', 'username' => 'manual', 'email' => 'manual@x.com', 'role' => 'user', 'back' => '/admin/users'], $cjA);
+check('user_create redirects', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/admin/users', [], $cjA);
+preg_match('/Password: ([0-9a-f]{16})/', $b, $pm);
+$manualPw = $pm[1] ?? '';
+check('created user password shown once', $manualPw !== '', $b);
+$cjM = '/tmp/opencode/httptest-m.txt';
+$t = csrf(req('GET', '/login', [], $cjM)[2]);
+[$s, $h] = req('POST', '/login', ['csrf' => $t, 'username' => 'manual', 'password' => $manualPw, 'next' => '/'], $cjM);
+check('manually created user logs in with shown password', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
+
+// SMTP settings save + graceful test failure (no SMTP server running).
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'smtp_enabled' => '1', 'smtp_host' => '127.0.0.1', 'smtp_port' => '9', 'smtp_encryption' => 'none', 'smtp_from_email' => 'noreply@x.com', 'smtp_from_name' => 'LVChat', 'back' => '/admin/settings'], $cjA);
+check('SMTP settings saved', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/admin/settings', [], $cjA);
+check('SMTP from email persists', $s === 200 && strpos($b, 'noreply@x.com') !== false, $b);
+$tA = csrf($b);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'smtp_test', 'back' => '/admin/settings'], $cjA);
+[$s, , $b] = req('GET', '/admin/settings', [], $cjA);
+check('smtp_test reports failure gracefully', $s === 200 && strpos($b, 'SMTP test failed') !== false, $b);
+
 // Embeddable channel page: gates on auth, offers guest/login/register.
 [$s, , $b] = req('GET', '/embed/general');
 check('embed page prompts sign-in (guest form)', $s === 200 && strpos($b, 'Chat as guest') !== false && strpos($b, '/guest') !== false, $b);

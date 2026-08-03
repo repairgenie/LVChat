@@ -121,6 +121,22 @@ CREATE TABLE IF NOT EXISTS invites (
   UNIQUE (channel_id, user_id)
 );
 
+-- Account invites: an email-based invitation to create a real account. The
+-- recipient opens /register?invite=<token>; the token proves access even when
+-- open registration is disabled. Distinct from `invites` (channel invites).
+CREATE TABLE IF NOT EXISTS registration_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL COLLATE NOCASE,
+  token TEXT NOT NULL UNIQUE,
+  invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_registration_invites_email ON registration_invites(email);
+
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,

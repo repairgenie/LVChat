@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '9';
+    private const SCHEMA_VERSION = '10';
 
     public static function init(): void
     {
@@ -105,6 +105,10 @@ final class Database
         if (!in_array('login_attempts', $tables, true)) {
             $pdo->exec('CREATE TABLE login_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, attempted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
             $pdo->exec('CREATE INDEX idx_login_attempts_ip ON login_attempts(ip, attempted_at)');
+        }
+        if (!in_array('registration_invites', $tables, true)) {
+            $pdo->exec('CREATE TABLE registration_invites (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL COLLATE NOCASE, token TEXT NOT NULL UNIQUE, invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL, message TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL, used_at TEXT, used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL)');
+            $pdo->exec('CREATE INDEX idx_registration_invites_email ON registration_invites(email)');
         }
 
         // Backfill the FTS index from any pre-existing messages (new rows are

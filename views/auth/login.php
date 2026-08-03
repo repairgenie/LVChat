@@ -31,7 +31,7 @@
       <?php if (config_get('registration_enabled', '1') === '1'): ?>
       <a class="text-blurple hover:underline" href="/register?next=<?= h(rawurlencode($next)) ?>">Register</a>
       <?php else: ?>
-      Registration is currently closed.
+      Registration is currently closed — but invite links still work.
       <?php endif; ?>
     </p>
 

@@ -69,5 +69,64 @@
       <p class="text-xs text-discord-400 mt-1">How often the server writes "last seen" per user. Most polls become pure reads.</p>
     </div>
   </div>
+
+  <div class="pt-4 border-t border-discord-700">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <div class="text-sm font-medium text-white">Email (SMTP)</div>
+        <div class="text-xs text-discord-400">Used to send account invitations and welcome emails</div>
+      </div>
+      <input type="checkbox" name="smtp_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['smtp_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label">SMTP host</label>
+        <input class="input" name="smtp_host" value="<?= h($settings['smtp_host'] ?? '') ?>" placeholder="smtp.example.com">
+      </div>
+      <div class="flex gap-3">
+        <div>
+          <label class="label">Port</label>
+          <input class="input" type="number" min="1" name="smtp_port" value="<?= (int) ($settings['smtp_port'] ?? 587) ?>">
+        </div>
+        <div class="flex-1">
+          <label class="label">Encryption</label>
+          <select name="smtp_encryption" class="input !py-1.5">
+            <option value="tls" <?= ($settings['smtp_encryption'] ?? 'tls') === 'tls' ? 'selected' : '' ?>>STARTTLS</option>
+            <option value="ssl" <?= ($settings['smtp_encryption'] ?? '') === 'ssl' ? 'selected' : '' ?>>SSL</option>
+            <option value="none" <?= ($settings['smtp_encryption'] ?? '') === 'none' ? 'selected' : '' ?>>None</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="label">Username (optional)</label>
+        <input class="input" name="smtp_username" value="<?= h($settings['smtp_username'] ?? '') ?>" autocomplete="off">
+      </div>
+      <div>
+        <label class="label">Password</label>
+        <input class="input" type="password" name="smtp_password" value="" placeholder="<?= !empty($settings['smtp_has_password']) ? '•••••••• (kept)' : '…' ?>" autocomplete="new-password">
+        <p class="text-xs text-discord-400 mt-1">Leave blank to keep the stored password.</p>
+      </div>
+      <div>
+        <label class="label">From email</label>
+        <input class="input" type="email" name="smtp_from_email" value="<?= h($settings['smtp_from_email'] ?? '') ?>" placeholder="noreply@example.com">
+      </div>
+      <div>
+        <label class="label">From name (optional)</label>
+        <input class="input" name="smtp_from_name" value="<?= h($settings['smtp_from_name'] ?? '') ?>" placeholder="LVChat">
+      </div>
+    </div>
+  </div>
+
   <button name="action" value="settings_save" class="btn-primary">Save settings</button>
+</form>
+
+<form method="post" action="/admin/action" class="card p-6 max-w-2xl space-y-3">
+  <?= Csrf::field() ?>
+  <input type="hidden" name="back" value="/admin/settings">
+  <h2 class="font-semibold text-white">Test SMTP</h2>
+  <p class="text-xs text-discord-400">Send a test email to verify the current settings. Save first — the test uses whatever is stored.</p>
+  <div class="flex gap-3">
+    <input class="input flex-1" type="email" name="email" placeholder="recipient@example.com (blank = your email)">
+    <button name="action" value="smtp_test" class="btn-ghost">Send test email</button>
+  </div>
 </form>
