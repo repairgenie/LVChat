@@ -1,4 +1,6 @@
 <?php
+// The whole admin dashboard uses the full-width layout (like the chat logs page).
+$fullWidth = true;
 $title = 'Admin dashboard';
 $active = $active ?? '';
 $user = $admin ?? null;
