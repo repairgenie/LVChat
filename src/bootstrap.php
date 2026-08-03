@@ -24,6 +24,8 @@ require ROOT . '/src/services/ChannelService.php';
 require ROOT . '/src/services/MessageService.php';
 require ROOT . '/src/services/BanService.php';
 require ROOT . '/src/services/CensorService.php';
+require ROOT . '/src/services/UploadService.php';
+require ROOT . '/src/services/WebhookService.php';
 require ROOT . '/src/services/CommandParser.php';
 require ROOT . '/src/services/CommandRegistry.php';
 require ROOT . '/src/services/commands/CoreCommands.php';
@@ -39,5 +41,6 @@ require ROOT . '/src/controllers/ChannelController.php';
 require ROOT . '/src/controllers/BrowseController.php';
 require ROOT . '/src/controllers/UserController.php';
 require ROOT . '/src/controllers/AdminController.php';
+require ROOT . '/src/controllers/WebhookController.php';
 
 Database::init();

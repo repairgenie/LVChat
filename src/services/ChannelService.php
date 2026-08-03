@@ -202,6 +202,7 @@ final class ChannelService
             "SELECT COALESCE(u.id, g.id) AS id, COALESCE(u.username, g.nick) AS username,
                     u.away, u.away_at, COALESCE(u.last_seen, g.last_seen) AS last_seen,
                     COALESCE(u.role, 'user') AS role, COALESCE(u.bot, 0) AS bot,
+                    u.avatar,
                     CASE WHEN g.id IS NOT NULL THEN 1 ELSE 0 END AS guest,
                     cm.level,
                     (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
@@ -230,20 +231,81 @@ final class ChannelService
     {
         $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id';
         if (Auth::isGuest($actor)) {
-            return Database::all(
-                "SELECT $cols
+            $rows = Database::all(
+                "SELECT $cols,
+                        (SELECT COUNT(*) FROM messages m
+                         WHERE m.channel_id = c.id AND m.deleted = 0 AND m.sender_guest_id IS NOT NULL
+                           AND m.sender_guest_id != ? AND m.id > COALESCE(cm.last_read_id, 0)
+                           AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')) AS unread
                  FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
                  WHERE cm.guest_id = ?
                  ORDER BY c.name COLLATE NOCASE",
-                [$actor['id']]
+                [$actor['id'], $actor['id']]
+            );
+        } else {
+            $rows = Database::all(
+                "SELECT $cols,
+                        (SELECT COUNT(*) FROM messages m
+                         WHERE m.channel_id = c.id AND m.deleted = 0 AND m.sender_id IS NOT NULL
+                           AND m.sender_id != ? AND m.id > COALESCE(cm.last_read_id, 0)
+                           AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')) AS unread
+                 FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+                 WHERE cm.user_id = ?
+                 ORDER BY c.name COLLATE NOCASE",
+                [$actor['id'], $actor['id']]
             );
         }
-        return Database::all(
-            "SELECT $cols
-             FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
-             WHERE cm.user_id = ?
-             ORDER BY c.name COLLATE NOCASE",
-            [$actor['id']]
+        foreach ($rows as &$r) {
+            $r['unread'] = (int) $r['unread'];
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /** Advance the user's last-read watermark in a channel (clears unread badge). */
+    public static function markRead(int|string $channelId, array $actor): void
+    {
+        if (Auth::isGuest($actor)) {
+            Database::query(
+                'UPDATE channel_members SET last_read_id = (SELECT COALESCE(MAX(id),0) FROM messages WHERE channel_id = ?)
+                 WHERE channel_id = ? AND guest_id = ?',
+                [$channelId, $channelId, $actor['id']]
+            );
+        } else {
+            Database::query(
+                'UPDATE channel_members SET last_read_id = (SELECT COALESCE(MAX(id),0) FROM messages WHERE channel_id = ?)
+                 WHERE channel_id = ? AND user_id = ?',
+                [$channelId, $channelId, $actor['id']]
+            );
+        }
+    }
+
+    /** Current channel notification mode: 'all', 'mentions', or 'muted'. */
+    public static function notifyMode(int|string $channelId, array $actor): string
+    {
+        if (Auth::isGuest($actor)) {
+            return 'all';
+        }
+        $m = Database::scalar(
+            'SELECT mode FROM channel_notify WHERE channel_id = ? AND user_id = ?',
+            [$channelId, $actor['id']]
+        );
+        return in_array((string) $m, ['all', 'mentions', 'muted'], true) ? (string) $m : 'all';
+    }
+
+    /** Set the user's notification mode for a channel. */
+    public static function setNotifyMode(int|string $channelId, array $actor, string $mode): void
+    {
+        if (Auth::isGuest($actor)) {
+            return;
+        }
+        if (!in_array($mode, ['all', 'mentions', 'muted'], true)) {
+            $mode = 'all';
+        }
+        Database::query(
+            'INSERT INTO channel_notify (channel_id, user_id, mode) VALUES (?, ?, ?)
+             ON CONFLICT(channel_id, user_id) DO UPDATE SET mode = excluded.mode',
+            [$channelId, $actor['id'], $mode]
         );
     }
 

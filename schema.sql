@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS users (
   theme TEXT NOT NULL DEFAULT '',
   registered_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen TEXT,
-  last_ip TEXT
+  last_ip TEXT,
+  notify TEXT NOT NULL DEFAULT 'all',
+  avatar TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -216,10 +218,58 @@ CREATE TABLE IF NOT EXISTS ignores (
   UNIQUE (user_id, ignored_user_id)
 );
 
+-- Emoji reactions on messages. A user (or guest) may react once per emoji.
+-- actor_type is 'user' or 'guest'; actor_id is the matching id.
+CREATE TABLE IF NOT EXISTS reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  actor_type TEXT NOT NULL DEFAULT 'user',
+  actor_id INTEGER NOT NULL,
+  emoji TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (message_id, actor_type, actor_id, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_msg ON reactions(message_id, emoji);
+
+-- Per-user channel notification preference: 'all' (default), 'mentions' (only
+-- @mention alerts), or 'muted' (no channel alerts at all).
+CREATE TABLE IF NOT EXISTS channel_notify (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'all',
+  UNIQUE (channel_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_channel_notify_user ON channel_notify(user_id);
+
+-- Incoming webhooks: POST /api/webhooks/<token> posts into a channel as a bot.
+-- token_hash stores the SHA-256 of the secret (never the raw token).
+CREATE TABLE IF NOT EXISTS webhooks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  avatar TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_channel ON webhooks(channel_id);
+
 CREATE TABLE IF NOT EXISTS server_config (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- Rolling window of failed login attempts, keyed by client IP (throttle stays
+-- per-IP; rows are pruned opportunistically by login_attempt_gate()).
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ip TEXT NOT NULL,
+  attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, attempted_at);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,3 +302,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_member_actor ON channel_members(channel_id
 CREATE INDEX IF NOT EXISTS idx_bans_active ON bans(active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read);
 CREATE INDEX IF NOT EXISTS idx_notif_guest_user ON notifications(guest_user_id, read);
+
+-- Full-text search index over channel messages (external-content FTS5). The
+-- triggers keep it in sync with INSERT/UPDATE/DELETE on `messages`. The
+-- service-layer search falls back to LIKE when the PHP sqlite build lacks FTS5.
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  content,
+  content='messages',
+  content_rowid='id'
+);
+CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+END;

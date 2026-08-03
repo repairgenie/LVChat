@@ -142,6 +142,16 @@ $j = jsonDecode($b);
 check('send message ok', $s === 200 && ($j['ok'] ?? false) === true && ($j['message']['content'] ?? '') === 'hello world', $b);
 $msgId = $j['message']['id'] ?? 0;
 
+[$s, , $b] = req('GET', '/api/search?q=hello', [], $cjA);
+$j = jsonDecode($b);
+$found = false;
+foreach (($j['results']['channels'] ?? []) as $r) { if (($r['channel_slug'] ?? '') === 'gaming' && str_contains($r['content'] ?? '', 'hello')) $found = true; }
+check('search finds channel message', $s === 200 && $found, $b);
+
+[$s, , $b] = req('GET', '/api/search?q=zzzz-no-such-term', [], $cjA);
+$j = jsonDecode($b);
+check('search handles hyphenated term', $s === 200 && !count($j['results']['channels'] ?? []), $b);
+
 [$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0', [], $cjA);
 $j = jsonDecode($b);
 check('poll returns messages', $s === 200 && count($j['messages'] ?? []) > 0, $b);
@@ -191,7 +201,7 @@ check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found
 
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
-foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/logs', '/admin/settings'] as $p) {
+foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/logs', '/admin/settings', '/admin/webhooks'] as $p) {
     [$s] = req('GET', $p, [], $cjA);
     check("GET $p 200", $s === 200, (string) $s);
 }
@@ -204,6 +214,21 @@ check('ban action with bad id handled', $s === 302, (string) $s);
 
 [$s, , $b] = req('GET', '/admin/logs?q=hello', [], $cjA);
 check('admin log search', $s === 200, (string) $s);
+
+// Webhook: admin creates one, then an unauthenticated POST posts into a channel.
+$tA = csrf(req('GET', '/admin/webhooks', [], $cjA)[2]);
+[$s] = req('POST', '/admin/webhooks/action', ['csrf' => $tA, 'action' => 'webhook_create', 'channel_id' => '1', 'name' => 'Forum Bot'], $cjA);
+check('admin creates webhook', $s === 302, (string) $s);
+// Fetch the token from the flash URL shown on the webhooks page (next request re-renders the created box).
+$hookPage = req('GET', '/admin/webhooks', [], $cjA)[2];
+preg_match('#/api/webhooks/([0-9a-f]{40,})#', $hookPage, $m);
+$whToken = $m[1] ?? '';
+check('webhook token surfaced once', $whToken !== '', $hookPage);
+[$s, , $b] = req('POST', '/api/webhooks/' . $whToken, ['content' => 'hello from webhook'], null, ['Content-Type' => 'application/x-www-form-urlencoded']);
+$j = jsonDecode($b);
+check('webhook POST posts a message', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
+[$s] = req('POST', '/api/webhooks/' . str_repeat('0', 48), ['content' => 'x']);
+check('webhook unknown token 404', $s === 404, (string) $s);
 
 // Site logo: save a logo URL, verify it renders in place of the site name.
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
@@ -354,6 +379,13 @@ check('guest nick free after logout (re-login ok)', $s === 302 && ($h['location'
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);
 check('logout redirects', $s === 302 && ($h['location'] ?? '') === '/login', "$s " . ($h['location'] ?? ''));
+
+// SSE stream (last: the stream holds the single-threaded dev server, so any
+// follow-up request would hang). Bob is still logged in.
+$sseBody = (string) shell_exec(
+    'timeout 4 curl -s -N --max-time 4 -b ' . escapeshellarg($cjB) . ' ' . escapeshellarg($BASE . '/api/stream?since=0') . ' 2>/dev/null'
+);
+check('SSE stream emits data frames', str_contains($sseBody, 'data:'), $sseBody);
 
 proc_terminate($server);
 echo "\n" . $GLOBALS['pass'] . " passed, " . $GLOBALS['fail'] . " failed\n";

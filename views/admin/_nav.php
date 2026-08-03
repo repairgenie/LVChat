@@ -15,6 +15,7 @@ function admin_nav(string $active): void {
     'operclasses' => ['/admin/operclasses', 'Operclasses'],
     'motd' => ['/admin/motd', 'MOTD'],
     'logs' => ['/admin/logs', 'Chat logs'],
+    'webhooks' => ['/admin/webhooks', 'Webhooks'],
     'settings' => ['/admin/settings', 'Settings'],
   ];
   echo '<div class="flex flex-wrap gap-1 mb-6 bg-discord-850 border border-discord-700 rounded-lg p-1">';

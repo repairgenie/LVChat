@@ -86,7 +86,6 @@ body.chat-app { position: fixed; inset: 0; overflow: hidden; }
 html.light .text-white { color: var(--c-d-100); }
 html.light .hover\:text-white:hover { color: var(--c-d-100); }
 html.light .hover\:bg-white\/\[0\.03\]:hover { background-color: rgba(0, 0, 0, .045); }
-/* …but white text stays white on solid colored chips/avatars/badges. */
 html.light .bg-blurple.text-white,
 html.light .bg-blurple .text-white,
 html.light .bg-blurple-dark.text-white,
@@ -95,3 +94,10 @@ html.light .bg-discord-500.text-white,
 html.light .bg-discord-500 .text-white,
 html.light .bg-red-500.text-white,
 html.light .bg-red-500 .text-white { color: #fff; }
+
+/* Temporarily highlight a message jumped to via a reply link. */
+.reply-highlight {
+  background: rgba(88, 101, 242, 0.12);
+  box-shadow: inset 2px 0 0 0 rgb(88 101 242 / .6);
+  transition: background .4s ease;
+}

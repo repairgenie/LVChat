@@ -29,6 +29,30 @@
     </div>
     <input type="checkbox" name="spamfilter_enabled" value="1" class="w-5 h-5 accent-blurple" <?= $settings['spamfilter_enabled'] === '1' ? 'checked' : '' ?>>
   </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
+      <div class="text-sm font-medium text-white">Image uploads</div>
+      <div class="text-xs text-discord-400">Allow members to upload and post images in channels</div>
+    </div>
+    <input type="checkbox" name="uploads_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['uploads_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
+      <div class="text-sm font-medium text-white">Emoji reactions</div>
+      <div class="text-xs text-discord-400">Allow reactions on messages</div>
+    </div>
+    <input type="checkbox" name="reactions_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['reactions_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
+      <div class="text-sm font-medium text-white">Realtime mode</div>
+      <div class="text-xs text-discord-400">SSE streams live updates but holds a PHP worker per client — best on a VPS/php-fpm. Polling is the shared-hosting default.</div>
+    </div>
+    <select name="realtime" class="input w-36 !py-1.5">
+      <option value="poll" <?= ($settings['realtime'] ?? 'poll') === 'poll' ? 'selected' : '' ?>>Polling</option>
+      <option value="sse" <?= ($settings['realtime'] ?? 'poll') === 'sse' ? 'selected' : '' ?>>SSE</option>
+    </select>
+  </div>
   <div>
     <label class="label">Max channels per user</label>
     <input class="input" type="number" min="1" name="max_channels_per_user" value="<?= (int) $settings['max_channels_per_user'] ?>">

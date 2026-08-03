@@ -51,6 +51,18 @@ Auth::login($alice);
 check('session token set', !empty($_SESSION['token']));
 check('Auth::user returns alice', (Auth::user()['username'] ?? '') === 'alice');
 
+// --- Login rate limiting ---
+echo "== login throttle ==\n";
+Database::query('DELETE FROM login_attempts');
+check('login attempts start at 0', login_attempt_count() === 0);
+for ($i = 0; $i < login_attempt_max(); $i++) {
+    login_attempt_record();
+}
+check('attempts counted up to max', login_attempt_count() === login_attempt_max());
+check('gate blocks over the limit', login_attempt_count() >= login_attempt_max());
+login_attempt_clear();
+check('clear resets attempts', login_attempt_count() === 0);
+
 // --- Channel creation + join ---
 echo "== channels ==\n";
 $ch = ChannelService::create($alice, '#test');
@@ -75,10 +87,90 @@ $before = count($hist);
 MessageService::system((int) $ch['id'], 'join', 'alice has joined #test');
 $hist2 = MessageService::history((int) $ch['id']);
 check('system message appended', count($hist2) === $before + 1 && $hist2[count($hist2) - 1]['kind'] === 'join');
-// Only admins may edit messages.
+// Pagination: historyBefore returns only older messages.
+$last = end($hist2);
+check('historyBefore excludes newest', count(MessageService::historyBefore((int) $ch['id'], (int) $last['id'], 50)) === count($hist2) - 1);
+$hb = MessageService::historyBefore((int) $ch['id'], (int) $last['id'], 50);
+$asc = true;
+for ($i = 1, $n = count($hb); $i < $n; $i++) { if ($hb[$i]['id'] <= $hb[$i - 1]['id']) $asc = false; }
+check('historyBefore returns ascending order', $asc);
+// Owners may edit their own messages within 5 minutes; admins may edit anything.
 check('admin can edit a message', MessageService::edit((int) $msg['id'], 'hello edited', $alice) === true);
 $msg2 = MessageService::send((int) $ch['id'], $bob, 'bob message');
-check('non-admin cannot edit a message', is_string(MessageService::edit((int) $msg2['id'], 'hacked', $bob)));
+check('owner can edit own message', MessageService::edit((int) $msg2['id'], 'bob edited', $bob) === true);
+Auth::register('mallory', 'mallory@example.com', 'password123');
+$mallory = Auth::attempt('mallory', 'password123');
+check('non-owner cannot edit a message', is_string(MessageService::edit((int) $msg2['id'], 'hacked', $mallory)));
+$edited = Database::row('SELECT edited_at FROM messages WHERE id = ?', [(int) $msg2['id']]);
+check('owner edit marks edited_at', !empty($edited['edited_at']));
+
+// --- Search ---
+echo "== search ==\n";
+$res = MessageService::searchChannels($alice, 'hello');
+check('search finds channel message', in_array('hello world', array_column($res, 'content'), true) || in_array('hello edited', array_column($res, 'content'), true));
+check('search result has channel slug', !empty($res[0]['channel_slug'] ?? null));
+$res2 = MessageService::searchChannels($alice, 'zzzz-no-such-term');
+check('search misses unknown term', count($res2) === 0);
+check('snippet truncates around match', strpos(MessageService::snippet('the quick brown fox jumps', 'fox', 60), 'fox') !== false);
+$res3 = MessageService::searchDm($alice, 'hello');
+check('DM search returns results or empty array', is_array($res3));
+
+// --- Image messages ---
+echo "== image messages ==\n";
+$img = MessageService::send((int) $ch['id'], $alice, '/uploads/abc123.jpg' . "\n" . 'a caption', 'image');
+check('image message inserted', $img['kind'] === 'image');
+check('image message has avatar key', array_key_exists('avatar', $img));
+
+// --- Reactions ---
+echo "== reactions ==\n";
+$r = MessageService::toggleReaction((int) $msg['id'], $alice, '👍');
+check('reaction added', is_array($r) && $r['added'] === true);
+check('reaction count includes mine', $r['reactions']['rows'][0]['count'] === 1);
+$r2 = MessageService::toggleReaction((int) $msg['id'], $alice, '👍');
+check('reaction toggled off', is_array($r2) && $r2['added'] === false && count($r2['reactions']['rows']) === 0);
+MessageService::toggleReaction((int) $msg['id'], $alice, '❤️');
+$hydrated = MessageService::hydrateReactions(MessageService::history((int) $ch['id']), $alice);
+$withReactions = null;
+foreach ($hydrated as $m) { if ((int) $m['id'] === (int) $msg['id']) $withReactions = $m; }
+check('hydrateReactions attaches reactions', $withReactions !== null && count($withReactions['reactions'] ?? []) > 0);
+$bad = MessageService::toggleReaction(999999, $alice, '👍');
+check('reaction on missing message rejected', is_string($bad));
+
+// --- Rich text markup ---
+echo "== rich text ==\n";
+check('inline bold', str_contains(chat_markup_rich('**x**'), '<strong>x</strong>'));
+check('inline italic', str_contains(chat_markup_rich('*x*'), '<em>x</em>'));
+check('inline strike', str_contains(chat_markup_rich('~~x~~'), '<s>x</s>'));
+check('blockquote', str_contains(chat_markup_rich("> hi"), '<blockquote'));
+check('code fence', str_contains(chat_markup_rich("```\ncode here\n```"), '<pre'));
+check('unordered list', str_contains(chat_markup_rich("- a\n- b"), '<ul'));
+check('ordered list', str_contains(chat_markup_rich("1. a\n2. b"), '<ol'));
+check('markup escapes html', !str_contains(chat_markup_rich('<script>alert(1)</script>'), '<script>'));
+
+// --- Channel unread + mute prefs ---
+echo "== channel unread + mute ==\n";
+ChannelService::markRead((int) $ch['id'], $bob);
+check('markRead sets watermark', (int) Database::scalar('SELECT last_read_id FROM channel_members WHERE channel_id = ? AND user_id = ?', [$ch['id'], $bob['id']]) > 0);
+$msgU = MessageService::send((int) $ch['id'], $alice, 'unread marker for bob');
+$unread = ChannelService::joinedChannelNames($bob);
+$u = null;
+foreach ($unread as $c) { if ((int) $c['id'] === (int) $ch['id']) $u = $c; }
+check('unread badge counts new messages', is_array($u) && (int) $u['unread'] > 0);
+ChannelService::markRead((int) $ch['id'], $bob);
+$unread2 = ChannelService::joinedChannelNames($bob);
+foreach ($unread2 as $c) { if ((int) $c['id'] === (int) $ch['id']) $u = $c; }
+check('markRead clears unread badge', (int) $u['unread'] === 0);
+check('notifyMode defaults to all', ChannelService::notifyMode((int) $ch['id'], $bob) === 'all');
+ChannelService::setNotifyMode((int) $ch['id'], $bob, 'muted');
+check('notifyMode respects mute', ChannelService::notifyMode((int) $ch['id'], $bob) === 'muted');
+$beforeNotif = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+MessageService::send((int) $ch['id'], $alice, '@bob you are muted');
+$afterNotif = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+check('muted user gets no mention notification', $afterNotif === $beforeNotif);
+ChannelService::setNotifyMode((int) $ch['id'], $bob, 'all');
+MessageService::send((int) $ch['id'], $alice, '@bob you are unmuted');
+$afterNotif2 = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+check('unmuted user gets mention notification again', $afterNotif2 > $afterNotif);
 
 // --- Slash commands ---
 echo "== slash commands ==\n";
@@ -645,6 +737,54 @@ check('disabled o:line rejected', str_contains($res['replies'][0] ?? '', 'Incorr
 echo "== admin dashboard data ==\n";
 check('audit log populated', (int) Database::scalar('SELECT COUNT(*) FROM audit_log') > 0);
 check('notifications created', (int) Database::scalar('SELECT COUNT(*) FROM notifications') > 0);
+
+// ── Client IP detection (reverse proxy aware) ────────────────────────────────
+$origRem = $_SERVER['REMOTE_ADDR'] ?? null;
+$origCf = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? null;
+$origXr = $_SERVER['HTTP_X_REAL_IP'] ?? null;
+$origXff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null;
+$_SERVER['REMOTE_ADDR'] = '10.0.0.5';
+unset($_SERVER['HTTP_CF_CONNECTING_IP'], $_SERVER['HTTP_X_REAL_IP'], $_SERVER['HTTP_X_FORWARDED_FOR']);
+check('client_ip falls back to REMOTE_ADDR', client_ip() === '10.0.0.5');
+$_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.7, 10.0.0.5';
+check('client_ip uses X-Forwarded-For leftmost', client_ip() === '203.0.113.7');
+$_SERVER['HTTP_X_REAL_IP'] = '198.51.100.3';
+check('client_ip prefers X-Real-IP', client_ip() === '198.51.100.3');
+$_SERVER['HTTP_CF_CONNECTING_IP'] = '1.2.3.4';
+check('client_ip prefers CF-Connecting-IP', client_ip() === '1.2.3.4');
+// Invalid values are skipped, not trusted.
+$_SERVER['HTTP_CF_CONNECTING_IP'] = 'not-an-ip';
+$_SERVER['HTTP_X_REAL_IP'] = '198.51.100.3';
+check('client_ip skips invalid header values', client_ip() === '198.51.100.3');
+if ($origRem !== null) { $_SERVER['REMOTE_ADDR'] = $origRem; } else { unset($_SERVER['REMOTE_ADDR']); }
+foreach (['HTTP_CF_CONNECTING_IP' => $origCf, 'HTTP_X_REAL_IP' => $origXr, 'HTTP_X_FORWARDED_FOR' => $origXff] as $k => $v) {
+    if ($v !== null) { $_SERVER[$k] = $v; } else { unset($_SERVER[$k]); }
+}
+
+// --- Webhooks ---
+echo "== webhooks ==\n";
+$wh = WebhookService::create((int) $ch['id'], $alice, 'Forum Bot');
+check('webhook create returns token', $wh['ok'] === true && strlen($wh['token'] ?? '') >= 40, json_encode($wh));
+$token = $wh['token'];
+check('webhook found by token', WebhookService::findByToken($token) !== null);
+check('webhook rejected for bad token', WebhookService::findByToken('short-token') === null);
+check('webhook name validation', WebhookService::create((int) $ch['id'], $alice, '')['ok'] === false);
+$_SERVER['CONTENT_TYPE'] = 'application/x-www-form-urlencoded';
+$_POST = ['content' => 'Hello from the forum!'];
+$beforeHook = count(MessageService::history((int) $ch['id']));
+$r = WebhookService::post($token);
+check('webhook post succeeds', $r['ok'] === true, json_encode($r));
+$histHook = MessageService::history((int) $ch['id']);
+check('webhook message inserted', count($histHook) === $beforeHook + 1);
+$lastHook = end($histHook);
+check('webhook posts as bot', ($lastHook['bot'] ?? 0) === 1);
+$rBad = WebhookService::post('nonexistenttoken00000000000000000000000000000000');
+check('webhook unknown token rejected', $rBad['ok'] === false && ($rBad['status'] ?? 0) === 404);
+$_POST = [];
+$rEmpty = WebhookService::post($token);
+check('webhook empty payload rejected', $rEmpty['ok'] === false);
+unset($_POST);
+Database::query('DELETE FROM webhooks WHERE id = (SELECT id FROM webhooks ORDER BY id DESC LIMIT 1)');
 
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

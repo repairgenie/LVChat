@@ -3,7 +3,19 @@
 <button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost fixed top-4 right-4 z-40 !p-2" title="Back to chat" aria-label="Close profile">✕</button>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
   <div class="card p-6 text-center md:col-span-1">
-    <div class="mx-auto w-20 h-20 rounded-full bg-blurple flex items-center justify-center text-3xl font-bold text-white"><?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?></div>
+    <div class="mx-auto w-20 h-20">
+      <?php if (!empty($user['avatar'])): ?>
+      <img src="<?= h(url((string) $user['avatar'])) ?>" alt="<?= h($user['username']) ?>" class="w-20 h-20 rounded-full object-cover">
+      <?php else: ?>
+      <div class="w-20 h-20 rounded-full bg-blurple flex items-center justify-center text-3xl font-bold text-white"><?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?></div>
+      <?php endif; ?>
+    </div>
+    <?php if ($isSelf && !(int) ($user['guest'] ?? 0)): ?>
+    <div class="mt-2 flex items-center justify-center gap-2 text-xs">
+      <label class="btn-ghost !py-1 cursor-pointer">Change<input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden"></label>
+      <?php if (!empty($user['avatar'])): ?><button id="avatar-remove" class="btn-ghost !py-1 text-red-400">Remove</button><?php endif; ?>
+    </div>
+    <?php endif; ?>
     <h1 class="mt-3 text-xl font-bold text-white"><?= h($user['username']) ?></h1>
     <div class="mt-1 text-sm">
       <?php if ((int) ($user['guest'] ?? 0)): ?>
@@ -85,5 +97,15 @@
       setTimeout(() => msg.classList.add('hidden'), 2000);
     });
   });
+  const avFile = document.getElementById('avatar-file');
+  if (avFile) avFile.addEventListener('change', () => {
+    const f = avFile.files && avFile.files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('avatar', f);
+    post('/api/avatar', fd, () => location.reload());
+  });
+  const avRemove = document.getElementById('avatar-remove');
+  if (avRemove) avRemove.addEventListener('click', () => post('/api/avatar/remove', new FormData(), () => location.reload()));
 })();
 </script>

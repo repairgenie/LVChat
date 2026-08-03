@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '3';
+    private const SCHEMA_VERSION = '9';
 
     public static function init(): void
     {
@@ -58,11 +58,29 @@ final class Database
         if (!in_array('theme', $userCols, true)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT ''");
         }
+        if (!in_array('notify', $userCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN notify TEXT NOT NULL DEFAULT 'all'");
+        }
+        if (!in_array('avatar', $userCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+        }
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('censor', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN censor INTEGER NOT NULL DEFAULT 0');
         }
         $tables = array_column($pdo->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll(PDO::FETCH_ASSOC), 'name');
+        if (!in_array('reactions', $tables, true)) {
+            $pdo->exec('CREATE TABLE reactions (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, actor_type TEXT NOT NULL DEFAULT "user", actor_id INTEGER NOT NULL, emoji TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (message_id, actor_type, actor_id, emoji))');
+            $pdo->exec('CREATE INDEX idx_reactions_msg ON reactions(message_id, emoji)');
+        }
+        if (!in_array('channel_notify', $tables, true)) {
+            $pdo->exec('CREATE TABLE channel_notify (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL DEFAULT "all", UNIQUE (channel_id, user_id))');
+            $pdo->exec('CREATE INDEX idx_channel_notify_user ON channel_notify(user_id)');
+        }
+        if (!in_array('webhooks', $tables, true)) {
+            $pdo->exec('CREATE TABLE webhooks (id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, name TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used TEXT)');
+            $pdo->exec('CREATE INDEX idx_webhooks_channel ON webhooks(channel_id)');
+        }
         if (!in_array('badwords', $tables, true)) {
             $pdo->exec('CREATE TABLE badwords (id INTEGER PRIMARY KEY AUTOINCREMENT, word TEXT NOT NULL, action TEXT NOT NULL DEFAULT "censor", enabled INTEGER NOT NULL DEFAULT 1)');
         }
@@ -84,6 +102,21 @@ final class Database
             }
         }
 
+        if (!in_array('login_attempts', $tables, true)) {
+            $pdo->exec('CREATE TABLE login_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, attempted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+            $pdo->exec('CREATE INDEX idx_login_attempts_ip ON login_attempts(ip, attempted_at)');
+        }
+
+        // Backfill the FTS index from any pre-existing messages (new rows are
+        // indexed by the triggers created above). Only rebuild when it lags.
+        if (self::fts5($pdo)) {
+            $fts = (int) $pdo->query('SELECT COUNT(*) FROM messages_fts')->fetchColumn();
+            $msg = (int) $pdo->query('SELECT COUNT(*) FROM messages')->fetchColumn();
+            if ($fts < $msg) {
+                $pdo->exec('INSERT INTO messages_fts(messages_fts) VALUES("rebuild")');
+            }
+        }
+
         // Rename the default site name on installs created before the rebrand.
         $pdo->exec("UPDATE server_config SET value = 'LVChat' WHERE key = 'site_name' AND value = 'Chat Relay'");
 
@@ -100,6 +133,14 @@ final class Database
     {
         self::init();
         return self::$pdo;
+    }
+
+    /** Whether the underlying SQLite build ships FTS5 (drives full-text search). */
+    public static function fts5(?PDO $pdo = null): bool
+    {
+        $pdo = $pdo ?: self::instance();
+        $opts = $pdo->query('PRAGMA compile_options')->fetchAll(PDO::FETCH_COLUMN);
+        return in_array('ENABLE_FTS5', $opts, true);
     }
 
     public static function query(string $sql, array $params = []): PDOStatement
@@ -264,9 +305,13 @@ final class Database
             'registration_enabled' => '1',
             'motd' => "Welcome to LVChat!\n\nType /help for a list of slash commands.",
             'spamfilter_enabled' => '1',
+            'uploads_enabled' => '1',
+            'reactions_enabled' => '1',
+            'webhooks_enabled' => '1',
             'max_channels_per_user' => '100',
             'presence_throttle' => '30',
             'poll_interval' => '2',
+            'realtime' => 'poll',
             'peak_online' => '0',
         ];
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');

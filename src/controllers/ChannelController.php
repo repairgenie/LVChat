@@ -136,6 +136,26 @@ final class ChannelController
         json_out(['ok' => true, 'redirect' => '/app']);
     }
 
+    /** POST /api/channel/notify — set the user's notification mode for a channel. */
+    public static function notify(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        if (!AccessService::member($channel['id'], $user)) {
+            json_out(['error' => 'You are not a member of this channel.'], 403);
+        }
+        $mode = (string) ($_POST['mode'] ?? 'all');
+        if (!in_array($mode, ['all', 'mentions', 'muted'], true)) {
+            json_out(['error' => 'Invalid notification mode.'], 400);
+        }
+        ChannelService::setNotifyMode($channel['id'], $user, $mode);
+        json_out(['ok' => true, 'mode' => $mode]);
+    }
+
     /** POST /api/channel/delete — founder deletes their channel (history preserved). */
     public static function deleteChannel(): void
     {

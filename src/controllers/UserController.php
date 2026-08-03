@@ -84,4 +84,47 @@ final class UserController
         Database::query('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?', $vals);
         json_out(['ok' => true]);
     }
+
+    public static function uploadAvatar(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        if (!isset($_FILES['avatar']) || !UploadService::isImageUpload($_FILES['avatar'])) {
+            json_out(['error' => 'Choose an image file first.'], 400);
+        }
+        $v = UploadService::validate($_FILES['avatar'], 'avatar');
+        if (!$v['ok']) {
+            json_out(['error' => $v['error']], 400);
+        }
+        $stored = UploadService::store($_FILES['avatar'], 'avatar');
+        if (!$stored['ok']) {
+            json_out(['error' => $stored['error']], 500);
+        }
+        // Downscale to a small square-ish avatar (WebP when possible).
+        $abs = UploadService::dir('avatar') . '/' . basename($stored['url']);
+        $scaled = UploadService::downscale($abs, (string) $stored['ext'], 256);
+        $url = $scaled === false
+            ? $stored['url']
+            : str_replace('\\', '/', substr($scaled, strlen(ROOT . '/public')));
+        // Remove any previous avatar file (keep the row clean).
+        $old = Database::scalar('SELECT avatar FROM users WHERE id = ?', [$user['id']]);
+        Database::query('UPDATE users SET avatar = ? WHERE id = ?', [$url, $user['id']]);
+        if ($old) {
+            UploadService::remove((string) $old);
+        }
+        log_audit('avatar_upload', $user['username']);
+        json_out(['ok' => true, 'avatar' => $url]);
+    }
+
+    public static function removeAvatar(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $old = Database::scalar('SELECT avatar FROM users WHERE id = ?', [$user['id']]);
+        Database::query('UPDATE users SET avatar = NULL WHERE id = ?', [$user['id']]);
+        if ($old) {
+            UploadService::remove((string) $old);
+        }
+        json_out(['ok' => true]);
+    }
 }

@@ -20,7 +20,8 @@ messaging, private messages, your profile, and the complete command reference.
 - **Email:** a valid address (used only for account recovery / admin tools).
 - **Password:** at least 8 characters.
 
-Log in with your username and password. Sessions last 30 days.
+Log in with your username and password. Sessions last 30 days. Too many failed
+login attempts from the same IP within 10 minutes locks that IP out briefly.
 
 ### 1.2 Join as a guest
 
@@ -71,12 +72,18 @@ may appear in their assigned colour. Users operating through an **o:line**
 
 ### 2.1 Text formatting
 
-In any message you can use light formatting:
+Messages support multi-line input (**Enter** sends, **Shift+Enter** is a newline)
+and light formatting:
 
 | You type | You see |
 |---|---|
 | `**bold**` | **bold** |
+| `*italic*` | *italic* |
+| `~~strike~~` | ~~strike~~ |
 | `\`code\`` | `code` |
+| ` ```php` … ` ``` ` (own line) | fenced code block |
+| `> quote` (line prefix) | blockquote |
+| `- item` or `1. item` (line prefix) | bulleted / numbered list |
 | `@nick` | highlighted mention |
 | `https://example.com` | clickable link |
 
@@ -104,6 +111,11 @@ your notification bell stay fresh without reloading.
   - an **invite** from a member (`+i` invite-only);
   - **secret** channels (`+s`) — hidden entirely and joinable by invitation only;
   - **staff-only** channels — restricted to admins and Staff.
+- Channels with **unread messages** show a red count badge next to their name in
+  the sidebar; it clears as soon as you open the channel and updates live.
+- Click the **🔔 button** in a channel's header to cycle its notification mode:
+  **all** (default) → **mentions only** → **muted** (no alerts from that channel
+  at all, including `@mention`s).
 - If a channel requires a key, LVChat shows a dedicated "enter key" page.
 - If you're denied access to an invite-only channel, the page offers a
   **Request access (knock)** button.
@@ -184,15 +196,30 @@ Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
 - Send a message by typing in the composer and pressing **Enter**. A message
   posts instantly (AJAX) with a native no-JS fallback that still delivers.
 - **Edit:** hover your message and click ✏️, or right-click it and choose *Edit*.
-  Only your own messages can be edited. Edited messages show "(edited)".
+  You can edit your own messages within **5 minutes** of posting; server
+  administrators can edit any message at any time. Edited messages show
+  "(edited)".
 - **Delete:** hover and click 🗑, or right-click → **Delete** (normal users can
   delete their own; admins can delete any).
 - **Actions:** `/me does something` renders as an italic *action* line.
-- **Reply (quote):** right-click somebody's message → **Reply** prefills `@nick `
-  in the composer.
+- **Reactions:** hover a message and use the **+** under it (or click an emoji
+  chip to toggle it). Every message shows its reaction chips live.
+- **Images:** use the **📎** button (or drag & drop an image) in a channel to
+  post an image; it renders as a thumbnail and opens in a lightbox when clicked.
+  If an administrator has disabled uploads you'll be told so.
+- **Reply (quote):** right-click somebody's message → **Reply** sets a "Replying to @nick — excerpt" chip above the composer; your message then carries the quoted context, and the quoted line is shown under the author's name in the timeline. Click the `↪` line to jump to (and briefly highlight) the original message.
 - **Mentions:** mention a member of the current channel with `@nick`; they get a
-  notification bell. There is no personal mute in a channel — an operator can
-  mute someone with `/quiet`.
+  notification bell. Mute a channel from its 🔔 header button to stop its
+  mention alerts (an operator can also mute someone with `/quiet`).
+
+### 4.1 Searching your messages
+
+Use the **search box** in the chat header (or `/search <term>`) to find
+messages across **every channel you are a member of** and your **private
+messages**. Results show the channel, author, and a snippet; clicking a result
+opens the channel and **jumps straight to** (and highlights) that message.
+Admins can additionally search the full append-only archive on the **Admin →
+Chat logs** page. Search only ever covers messages you are allowed to see.
 
 ---
 
@@ -219,6 +246,9 @@ From the `⚙` menu next to your name in the sidebar, open **Profile & settings*
 edit).
 
 - **Change password** — must verify your current password; new password 8+ chars.
+- **Avatar** — upload a profile picture (JPEG/PNG/WebP/GIF, up to 1 MB; downscaled
+  to 256px). It appears next to your name in messages, member lists, and profile.
+  Use **Remove** to go back to the initial-letter avatar.
 - **Virtual host (vhost)** — a hostname that identifies your connection/status.
   Also manageable with HostServ commands (below).
 - **Away** — use `/away [message]`, or the **Set away** sidebar menu item; you
@@ -284,6 +314,7 @@ grouped below exactly as `/help` groups them. For one command's details run
 | `/ignore <nick>` | Stop receiving private messages from a user |
 | `/unignore <nick>` | Reverse `/ignore` |
 | `/share [#channel]` | Show the shareable link for a channel (and copy it) |
+| `/search <term>` | Search your channels and private messages (or use the search box in the chat header) |
 
 ### 8.2 Channel operator commands
 
@@ -398,4 +429,5 @@ owner. See the **Admin Guide**.
 - Sends are rate-limited: more than ~12 messages/DMs in 5 seconds will get a
   "sending too quickly" message — pause and retry.
 - The channel history shown when you open a channel is the most recent 60
-  messages; older text is in the (admin-only) chat logs.
+  messages; use **↑ Load earlier messages** to page back, and older text is in
+  the (admin-only) chat logs.

@@ -401,6 +401,34 @@ CommandRegistry::register('share', [
     },
 ]);
 
+CommandRegistry::register('search', [
+    'group' => 'Core',
+    'desc' => 'Search channels you are in and your private messages.',
+    'usage' => '/search <term>',
+    'run' => function (array $args, array $user, ?array $channel) {
+        $term = trim(implode(' ', $args));
+        if ($term === '') {
+            return ['replies' => ['Usage: /search <term>']];
+        }
+        $channels = MessageService::searchChannels($user, $term, 20);
+        $dms = MessageService::searchDm($user, $term, 20);
+        if (!$channels && !$dms) {
+            return ['replies' => ['No results for "' . $term . '".']];
+        }
+        $replies = ['Results for "' . $term . '":'];
+        foreach ($channels as $r) {
+            $replies[] = '#' . ($r['channel_slug'] ?? '?') . ' · ' . $r['username'] . ' · ' . MessageService::snippet($r['content'], $term, 45);
+        }
+        foreach ($dms as $r) {
+            $replies[] = 'DM · ' . $r['username'] . ' · ' . MessageService::snippet($r['content'], $term, 45);
+        }
+        if (count($replies) > 11) {
+            $replies = array_merge(array_slice($replies, 0, 10), ['…' . (count($channels) + count($dms) - 9) . ' more matches in the search box.']);
+        }
+        return ['replies' => $replies];
+    },
+]);
+
 // Used by /msg handlers above.
 final class UserCommands
 {

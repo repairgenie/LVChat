@@ -28,6 +28,10 @@ services from Anope.
   per-channel participant list; nothing is ever removed
 - **Custom roles & permissions** — admins create roles (name, colour, permissions) and assign
   them to users; the `oper` permission turns a regular user into an IRC Operator
+- **Incoming webhooks** — Discord-compatible `POST /api/webhooks/<token>` endpoints post into
+  a channel as a bot (JSON or form-encoded, `content` + `username` + `avatar_url` + `embeds`).
+  Point FriendsOfFlarum/webhooks (or GitHub/GitLab/Zapier) at one per channel. Manage from
+  **Admin → Webhooks**.
 - **Channel operator rules** — ops can promote other members to op; half-ops get standard IRC
   privileges (voice/kick/ban/`+imtk`) but not op-level modes (`+l`, `+C`, `+p`, `+s`, `+o`)
 - **Admin dashboard** — users, channels, global bans (kline/gline/zline/shun/qline),
@@ -145,7 +149,10 @@ php tests/load_check.php 10 10   # concurrent requests × rounds → req/s
 ```
 
 Beyond a few hundred concurrent users, move to a VPS (php-fpm with more workers) and/or
-switch realtime from polling to SSE or WebSockets.
+switch realtime from polling to **SSE**: set **Realtime mode → SSE** under Admin → Settings.
+SSE streams live updates over one connection per client instead of repeated polls, but each
+connection holds a PHP worker, so it suits php-fpm/VPS far better than shared hosting. The
+client automatically falls back to polling if the stream drops.
 
 ## Testing
 

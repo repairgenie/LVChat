@@ -41,13 +41,72 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function linkify(text) {
+  function linkifyInline(text) {
     text = esc(text);
-    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    text = text.replace(/`(.+?)`/g, '<code class="bg-discord-800 px-1 rounded">$1</code>');
+    text = text.replace(/`([^`\n]+)`/g, '<code class="bg-discord-800 px-1 rounded">$1</code>');
+    text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    text = text.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    text = text.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
     text = text.replace(/@([A-Za-z0-9_\-\[\]\\`^{}|]+)/g, '<span class="mention text-blurple font-semibold">@$1</span>');
     text = text.replace(/(https?:\/\/[^\s<]+)/gi, '<a class="text-sky-400 hover:underline" target="_blank" rel="noopener" href="$1">$1</a>');
     return text;
+  }
+
+  function linkify(text) {
+    text = String(text == null ? '' : text);
+    // Extract fenced code blocks first so inner newlines survive.
+    const blocks = [];
+    text = text.replace(/```([a-z0-9]*)\s*\n([\s\S]*?)```/g, (m, lang, code) => {
+      const i = blocks.length;
+      const langTag = lang ? `<span class="text-[10px] text-discord-400 font-mono">${esc(lang)}</span>` : '';
+      blocks[i] = `<div class="code-block bg-discord-900/70 border border-discord-700 rounded-lg p-3 my-1.5 text-[13px] leading-relaxed overflow-x-auto">${langTag}<pre class="whitespace-pre-wrap font-mono text-discord-200"><code>${esc(code.replace(/\n$/, ''))}</code></pre></div>`;
+      return '\x02BLK' + i + '\x03';
+    });
+    let html = '';
+    let listBuf = [];
+    let listType = null;
+    let quoteBuf = [];
+    const flushList = () => {
+      if (!listBuf.length) return;
+      const tag = listType === 'ol' ? 'ol' : 'ul';
+      const cls = listType === 'ol' ? 'list-decimal' : 'list-disc';
+      html += `<${tag} class="${cls} list-outside pl-5 my-1.5 space-y-0.5">` + listBuf.map((item) => `<li class="leading-relaxed">${linkifyInline(item)}</li>`).join('') + `</${tag}>`;
+      listBuf = [];
+      listType = null;
+    };
+    const flushQuote = () => {
+      if (!quoteBuf.length) return;
+      html += `<blockquote class="border-l-2 border-blurple/50 pl-2 my-1.5 text-discord-300">` + quoteBuf.map((q) => linkifyInline(q)).join('<br>') + `</blockquote>`;
+      quoteBuf = [];
+    };
+    text.split('\n').forEach((line) => {
+      if (/^&gt; ?(.*)$/.test(line) || /^> ?(.*)$/.test(line)) {
+        flushList();
+        quoteBuf.push(line.replace(/^&gt; ?/, '').replace(/^> ?/, ''));
+        return;
+      }
+      if (/^[-*] (.*)$/.test(line)) {
+        flushQuote();
+        if (listType !== 'ul') { flushList(); listType = 'ul'; }
+        listBuf.push(line.replace(/^[-*] /, ''));
+        return;
+      }
+      if (/^(\d+)\. (.*)$/.test(line)) {
+        flushQuote();
+        if (listType !== 'ol') { flushList(); listType = 'ol'; }
+        listBuf.push(line.replace(/^\d+\. /, ''));
+        return;
+      }
+      flushList();
+      flushQuote();
+      if (!line.trim()) return;
+      if (/^\x02BLK\d+\x03$/.test(line)) { html += line; return; }
+      html += `<div class="leading-relaxed">${linkifyInline(line)}</div>`;
+    });
+    flushList();
+    flushQuote();
+    blocks.forEach((b, i) => { html = html.replace('\x02BLK' + i + '\x03', b); });
+    return html;
   }
 
   function timeStr(ts) {
@@ -78,6 +137,38 @@
     </div>`;
   }
 
+  function msgContentHtml(m) {
+    if (m.kind === 'image') {
+      const parts = String(m.content || '').split('\n');
+      const path = (parts.shift() || '').trim();
+      const caption = parts.join('\n').trim();
+      let html = '';
+      if (path) {
+        html += `<a href="${esc(path)}" class="inline-block mt-1" data-lightbox="${esc(path)}"><img src="${esc(path)}" alt="${esc(caption)}" loading="lazy" class="max-h-72 max-w-full rounded-lg border border-discord-700 object-contain hover:opacity-90 transition-opacity"></a>`;
+      }
+      if (caption) html += `<div class="mt-1">${linkify(caption)}</div>`;
+      return html;
+    }
+    return linkify(m.content);
+  }
+
+  function avatarHtml(m, cls) {
+    if (m.avatar) return `<img src="${esc(m.avatar)}" alt="${esc(m.username || '')}" loading="lazy" class="${cls} object-cover">`;
+    const initial = (m.username || '?').charAt(0).toUpperCase();
+    return `<div class="${cls} bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600 shrink-0">${esc(initial)}</div>`;
+  }
+
+  function msgReactionsHtml(m) {
+    const rows = m.reactions || [];
+    if (!rows.length) return '';
+    const mine = (m.my_reactions || []).map(String);
+    const chips = rows.map((r) => {
+      const isMine = mine.indexOf(String(r.emoji)) !== -1;
+      return `<button type="button" class="reaction-btn flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border transition-colors hover:border-blurple/60 hover:bg-blurple/20 ${isMine ? 'bg-blurple/30 border-blurple/60' : 'bg-discord-800 border-discord-700'}" data-emoji="${esc(r.emoji)}" title="Toggle reaction"><span class="text-sm leading-none">${esc(r.emoji)}</span><span class="text-discord-300 font-medium">${parseInt(r.count, 10)}</span></button>`;
+    }).join('');
+    return `<div class="msg-reactions flex flex-wrap gap-1.5 mt-1.5">${chips}<button type="button" class="reaction-add px-2 py-0.5 rounded-md text-xs bg-discord-800 border border-discord-700 text-discord-400 hover:text-white hover:border-blurple/60" title="Add a reaction">+</button></div>`;
+  }
+
   function msgHtml(m, grouped) {
     if (SYSTEM.includes(m.kind)) {
       return `<div class="msg-system px-4 py-1.5 text-xs text-discord-400 italic text-center select-none" data-kind="${esc(m.kind)}">${linkify(m.content)}</div>`;
@@ -93,33 +184,37 @@
         <div class="text-sm ${contentColor}"${roleStyle}><span class="italic">* <span class="font-medium ${nameColor}"${roleStyle}>${esc(m.username)}</span>${guestTag} ${linkify(m.content)}</span></div>
       </div>`;
     }
-    const initial = (m.username || '?').charAt(0).toUpperCase();
     const sym = SYMBOL[m.level || 'normal'] || '';
+    const replyLine = m.reply_to_id
+      ? `<a class="reply-line block text-xs text-discord-400 italic hover:text-discord-300 mt-0.5 break-all" href="#msg-${parseInt(m.reply_to_id, 10)}" data-reply-scroll="${parseInt(m.reply_to_id, 10)}">↪ <span class="font-semibold">${esc(m.reply_to_username || '')}</span>: ${esc(m.reply_to_excerpt || '')}</a>`
+      : '';
     if (grouped) {
-      return `<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="message" data-author="${esc(m.username)}">
+      return `<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-author="${esc(m.username)}">
         <div class="w-10 shrink-0"></div>
         <div class="min-w-0 flex-1">
-          <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${linkify(m.content)}</div>
+          ${replyLine}
+          <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${msgContentHtml(m)}</div>
+          ${msgReactionsHtml(m)}
         </div>
       </div>`;
     }
     let actions = '';
     const mine = String(m.sender_id) === String(MY_ID) || (m.username && m.username.toLowerCase() === MY_NICK);
-    if (CAN_ADMIN) {
+    if (CAN_ADMIN || mine) {
       actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
         + '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
-    } else if (mine) {
-      actions = '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
-    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="message" data-author="${esc(m.username)}">
-      <div class="w-10 h-10 shrink-0 rounded-full bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600">${esc(initial)}</div>
+    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-author="${esc(m.username)}">
+      <div class="w-10 h-10 shrink-0">${avatarHtml(m, 'w-10 h-10 rounded-full')}</div>
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 h-[22px]">
           <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ${nameColor}"${roleStyle} data-nick="${esc(m.username)}">${sym}${esc(m.username)}${guestTag}</span>
           <span class="time text-[11px] text-discord-400 hidden group-hover:inline">${timeStr(m.created_at)}</span>
           ${m.edited_at ? '<span class="text-[10px] text-discord-400">(edited)</span>' : ''}
         </div>
-        <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${linkify(m.content)}</div>
+        ${replyLine}
+        <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${msgContentHtml(m)}</div>
+        ${msgReactionsHtml(m)}
       </div>
       <div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">${actions}</div>
     </div>`;
@@ -193,6 +288,51 @@
       el.dataset.bound = '1';
       el.addEventListener('click', () => { window.location = '/u/' + encodeURIComponent(el.dataset.nick); });
     });
+
+    // Reactions: click a chip to toggle, "+" to add from the quick picker.
+    const react = (btn, emoji) => {
+      const msg = btn.closest('.msg');
+      if (!msg) return;
+      post('/api/message/reaction', { id: msg.dataset.id, emoji }, (j) => {
+        if (!j.reactions) return;
+        renderReactions(msg, j.reactions);
+      });
+    };
+    msgsEl.querySelectorAll('.reaction-btn').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => react(btn, btn.dataset.emoji));
+    });
+    msgsEl.querySelectorAll('.reaction-add').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const msg = btn.closest('.msg');
+        if (!msg) return;
+        const emoji = prompt('Emoji to add:', '👍');
+        if (!emoji) return;
+        react(btn, emoji.trim());
+      });
+    });
+  }
+
+  function renderReactions(msgEl, reactions) {
+    if (!msgEl) return;
+    let el = msgEl.querySelector('.msg-reactions');
+    const html = reactions.rows && reactions.rows.length
+      ? reactions.rows.map((r) => {
+          const isMine = (reactions.mine || []).indexOf(String(r.emoji)) !== -1;
+          return `<button type="button" class="reaction-btn flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border transition-colors hover:border-blurple/60 hover:bg-blurple/20 ${isMine ? 'bg-blurple/30 border-blurple/60' : 'bg-discord-800 border-discord-700'}" data-emoji="${esc(r.emoji)}" title="Toggle reaction"><span class="text-sm leading-none">${esc(r.emoji)}</span><span class="text-discord-300 font-medium">${parseInt(r.count, 10)}</span></button>`;
+        }).join('')
+      : '';
+    if (html) {
+      const wrap = `<div class="msg-reactions flex flex-wrap gap-1.5 mt-1.5">${html}<button type="button" class="reaction-add px-2 py-0.5 rounded-md text-xs bg-discord-800 border border-discord-700 text-discord-400 hover:text-white hover:border-blurple/60" title="Add a reaction">+</button></div>`;
+      if (el) el.outerHTML = wrap;
+      else msgEl.querySelector('.msg-content')?.insertAdjacentHTML('afterend', wrap);
+    } else if (el) {
+      el.remove();
+    }
+    bindMessageActions();
   }
 
   function post(url, data, onOk) {
@@ -211,6 +351,21 @@
 
   // ── Polling ────────────────────────────────────────────────────────────────
   let pollFails = 0;
+  // Shared handler for a realtime payload (poll response or SSE message).
+  function handleRealtime(j) {
+    if (!j) return;
+    if (j.redirect) { window.location = j.redirect; return; }
+    if (j.error) return;
+    if (j.messages && j.messages.length) {
+      const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 160;
+      j.messages.forEach(appendMsg);
+      if (atBottom) scrollBottom();
+    }
+    if (j.presence && CHANNEL) applyPresence(j.presence);
+    if (typeof j.notify_count === 'number') setBell(j.notify_count);
+    if (j.dm_list) handleDmList(j.dm_list);
+    if (j.channel_unread) updateChannelUnread(j.channel_unread);
+  }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
     if (CHANNEL) q.set('channel', CHANNEL);
@@ -219,16 +374,7 @@
       .then((r) => r.json())
       .then((j) => {
         pollFails = 0;
-        if (j.redirect) { window.location = j.redirect; return; }
-        if (j.error) return;
-        if (j.messages && j.messages.length) {
-          const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 160;
-          j.messages.forEach(appendMsg);
-          if (atBottom) scrollBottom();
-        }
-        if (j.presence && CHANNEL) applyPresence(j.presence);
-        if (typeof j.notify_count === 'number') setBell(j.notify_count);
-        if (j.dm_list) handleDmList(j.dm_list);
+        handleRealtime(j);
       })
       .catch(() => {
         // Never silently drop a poll forever: keep retrying, but log once and
@@ -312,6 +458,31 @@
   const dmToastEl = document.getElementById('dm-toast');
   if (dmToastEl) dmToastEl.addEventListener('click', () => dmToastEl.classList.add('hidden'));
 
+  // ── Live channel unread badges (sidebar) ───────────────────────────────────
+  let chanUnreadSig = '';
+  function updateChannelUnread(list) {
+    const map = {};
+    list.forEach((c) => { map[c.slug] = c.unread; });
+    const sig = JSON.stringify(map);
+    if (sig === chanUnreadSig) return;
+    chanUnreadSig = sig;
+    document.querySelectorAll('a[data-ctx-channel]').forEach((a) => {
+      const slug = a.dataset.ctxChannel;
+      const n = map[slug] || 0;
+      let badge = a.querySelector('.unread-badge');
+      if (n > 0) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center';
+          a.appendChild(badge);
+        }
+        badge.textContent = n > 99 ? '99+' : n;
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+  }
+
   function applyPresence(list) {
     const el = document.getElementById('member-list');
     if (!el) return;
@@ -323,6 +494,7 @@
       const cc = m.role === 'admin' ? 'text-red-400' : (on ? (COLORS[m.level] || COLORS.normal) : 'text-discord-400');
       return `<a href="/app?dm=${encodeURIComponent(m.username)}" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ${cc}"${rs} data-username="${esc(m.username)}" data-level="${esc(m.level || 'normal')}">
         <span class="text-[10px] font-bold w-3">${SYMBOL[m.level] || ''}</span>
+        ${m.avatar ? `<img src="${esc(m.avatar)}" alt="" loading="lazy" class="w-6 h-6 rounded-full object-cover">` : ''}
         <span class="truncate">${esc(m.username)}</span>${m.away ? '<span class="text-xs">💤</span>' : ''}${m.role === 'admin' ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-400">admin</span>' : (m.role === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '')}</a>`;
     }).join('');
     el.innerHTML =
@@ -385,7 +557,9 @@
         (j.replies || []).forEach((r) => showReply(r));
       });
     } else if (CHANNEL || DM) {
-      const payload = DM ? { recipient: DM, content: text } : { channel: CHANNEL, content: text };
+      const payload = DM
+        ? { recipient: DM, content: text }
+        : { channel: CHANNEL, content: text, reply_to: pendingReplyId || '' };
       post('/api/send', payload, (j) => {
         if (j.message) {
           if (j.blocked) {
@@ -400,9 +574,28 @@
             appendMsg(j.message);
           }
         }
+        clearPendingReply();
       });
     }
   });
+
+  // Multi-line composer: Enter sends, Shift+Enter inserts a newline, and the
+  // box auto-grows up to a few lines then scrolls.
+  function autosizeInput() {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  }
+  if (input && input.tagName === 'TEXTAREA') {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    input.addEventListener('input', autosizeInput);
+    autosizeInput();
+  }
 
   function showReply(text) {
     if (!msgsEl) return;
@@ -410,6 +603,41 @@
       `<div class="msg-system px-4 py-1 text-xs text-sky-400 italic text-center select-none">${linkify(text)}</div>`);
     scrollBottom();
   }
+
+  // ── Reply-to chip (set from the message context menu) ─────────────────────
+  const replyChip = document.getElementById('reply-chip');
+  const replyChipName = document.getElementById('reply-chip-name');
+  const replyChipExcerpt = document.getElementById('reply-chip-excerpt');
+  const replyToInput = document.getElementById('reply-to-input');
+  let pendingReplyId = 0;
+  function setPendingReply(id, username, excerpt) {
+    pendingReplyId = parseInt(id, 10) || 0;
+    if (!replyChip || !replyChipName) return;
+    if (!pendingReplyId) { replyChip.classList.add('hidden'); if (replyToInput) replyToInput.value = ''; return; }
+    replyChipName.textContent = username || '';
+    replyChipExcerpt.textContent = excerpt || '';
+    replyChip.classList.remove('hidden');
+    if (replyToInput) replyToInput.value = String(pendingReplyId);
+    input.focus();
+  }
+  function clearPendingReply() {
+    pendingReplyId = 0;
+    if (replyChip) replyChip.classList.add('hidden');
+    if (replyToInput) replyToInput.value = '';
+  }
+  const replyCancel = document.getElementById('reply-cancel');
+  if (replyCancel) replyCancel.addEventListener('click', clearPendingReply);
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest('[data-reply-scroll]');
+    if (!link) return;
+    e.preventDefault();
+    const target = document.querySelector('.msg[data-id="' + link.dataset.replyScroll + '"]');
+    if (target) {
+      target.scrollIntoView({ block: 'center' });
+      target.classList.add('reply-highlight');
+      setTimeout(() => target.classList.remove('reply-highlight'), 2000);
+    }
+  });
 
   // ── Slash autocomplete ─────────────────────────────────────────────────────
   const ac = document.getElementById('autocomplete');
@@ -536,6 +764,63 @@
     hideEmojiPanel();
   });
 
+  // ── Image upload (composer 📎) ─────────────────────────────────────────────
+  const uploadBtn = document.getElementById('upload-btn');
+  const uploadFile = document.getElementById('upload-file');
+  if (uploadBtn && uploadFile && CHANNEL) {
+    uploadBtn.addEventListener('click', () => uploadFile.click());
+    uploadFile.addEventListener('change', () => {
+      const file = uploadFile.files && uploadFile.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('csrf', CSRF);
+      fd.append('ajax', '1');
+      fd.append('channel', CHANNEL);
+      fd.append('file', file);
+      uploadBtn.textContent = '⏳';
+      fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
+        .then((r) => r.json().catch(() => ({ error: 'Server error' })))
+        .then((j) => {
+          uploadBtn.textContent = '📎';
+          uploadFile.value = '';
+          if (j.error) { alert(j.error); return; }
+          if (j.message) appendMsg(j.message);
+        })
+        .catch(() => { uploadBtn.textContent = '📎'; alert('Upload failed.'); });
+    });
+    // Drag & drop an image onto the timeline.
+    document.addEventListener('dragover', (e) => { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') !== -1) e.preventDefault(); });
+    document.addEventListener('drop', (e) => {
+      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      const f = e.dataTransfer.files[0];
+      if (f.type && f.type.indexOf('image/') === -1) return;
+      e.preventDefault();
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      uploadFile.files = dt.files;
+      uploadFile.dispatchEvent(new Event('change'));
+    });
+  }
+
+  // ── Image lightbox ─────────────────────────────────────────────────────────
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightbox-img');
+  function openLightbox(src) {
+    if (!lightbox || !lightboxImg) return;
+    lightboxImg.src = src;
+    lightbox.classList.remove('hidden');
+  }
+  function closeLightbox() { if (lightbox) lightbox.classList.add('hidden'); }
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-lightbox]');
+    if (t) { e.preventDefault(); openLightbox(t.getAttribute('href') || t.dataset.lightbox); }
+  });
+  if (lightbox) {
+    lightbox.querySelectorAll('[data-lightbox-close]').forEach((el) => el.addEventListener('click', closeLightbox));
+    lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
+
   // ── Sidebar toggle (desktop collapse + mobile drawer) ─────────────────────
   (function () {
     const btn = document.getElementById('sidebar-toggle');
@@ -583,6 +868,22 @@
     if (!confirm('Leave this channel?')) return;
     post('/api/part', { channel: CHANNEL }, () => { window.location = '/app'; });
   });
+  const muteBtn = document.getElementById('mute-btn');
+  if (muteBtn) {
+    muteBtn.addEventListener('click', () => {
+      const order = ['all', 'mentions', 'muted'];
+      const cur = muteBtn.dataset.mode || 'all';
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      post('/api/channel/notify', { channel: CHANNEL, mode: next }, (j) => {
+        if (j.mode) {
+          muteBtn.dataset.mode = j.mode;
+          if (j.mode === 'muted') { muteBtn.textContent = '🔕 Muted'; muteBtn.title = 'Unmute channel'; }
+          else if (j.mode === 'mentions') { muteBtn.textContent = '🔔 Mentions'; muteBtn.title = 'Notification mode: mentions only'; }
+          else { muteBtn.textContent = '🔔'; muteBtn.title = 'Mute channel'; }
+        }
+      });
+    });
+  }
   function createChannel() {
     const name = prompt('Channel name (e.g. #gaming):');
     if (!name) return;
@@ -733,12 +1034,12 @@
     const contentEl = el.querySelector('.msg-content');
     const content = contentEl ? contentEl.textContent : '';
     const items = [];
-    if (author && author.toLowerCase() !== MY_NICK) {
-      items.push({ label: 'Reply', onClick: () => { input.value = '@' + author + ' '; input.focus(); hideAutocomplete(); } });
+    if (author) {
+      items.push({ label: 'Reply', onClick: () => { setPendingReply(id, author, content.slice(0, 80)); if (!CHANNEL) { input.value = '@' + author + ' '; } } });
     }
     if (content) items.push({ label: 'Copy text', onClick: () => copyText(content) });
     const mine = author && author.toLowerCase() === MY_NICK;
-    if (CAN_ADMIN) {
+    if (CAN_ADMIN || mine) {
       items.push({ label: 'Edit', onClick: () => {
         const next = prompt('Edit message:', content);
         if (next === null || next === content) return;
@@ -810,6 +1111,153 @@
     });
   }
 
+  // ── Load earlier messages (pagination) ───────────────────────────────────
+  // Shared: render a page of OLDER messages (ascending id order) as one block
+  // and insert it above the first visible message, anchored so the newest row
+  // stays put on screen.
+  function prependOlder(rows) {
+    const anchorRel = msgsEl.scrollHeight - msgsEl.scrollTop;
+    let html = '';
+    let prev = null;
+    let prevDate = '';
+    rows.forEach((m) => {
+      const date = String(m.created_at || '').slice(0, 10);
+      if (date && date !== prevDate) {
+        html += dividerHtml(date);
+        prevDate = date;
+        prev = null;
+      }
+      html += msgHtml(m, shouldGroup(prev, m));
+      prev = m;
+    });
+    const anchor = msgsEl.querySelector('.msg[data-id]');
+    if (anchor) anchor.insertAdjacentHTML('beforebegin', html);
+    else msgsEl.insertAdjacentHTML('afterbegin', html);
+    bindMessageActions();
+    msgsEl.scrollTop = msgsEl.scrollHeight - anchorRel;
+  }
+
+  const loadBtn = document.getElementById('load-earlier');
+  if (loadBtn && (CHANNEL || DM)) {
+    let oldestId = 0;
+    const first = msgsEl ? msgsEl.querySelector('.msg[data-id]') : null;
+    if (first) oldestId = parseInt(first.dataset.id, 10);
+    // If the server-rendered history is a full page, offer more.
+    if (oldestId > 0) loadBtn.classList.remove('hidden');
+
+    loadBtn.addEventListener('click', () => {
+      if (loadBtn.dataset.loading) return;
+      loadBtn.dataset.loading = '1';
+      const q = new URLSearchParams({ before: oldestId });
+      if (CHANNEL) q.set('channel', CHANNEL);
+      if (DM) q.set('dm', DM);
+      fetch('/api/history?' + q.toString())
+        .then((r) => r.json())
+        .then((j) => {
+          loadBtn.dataset.loading = '';
+          if (!j.messages || !j.messages.length) {
+            loadBtn.textContent = 'No earlier messages';
+            loadBtn.classList.add('opacity-40');
+            return;
+          }
+          prependOlder(j.messages);
+          oldestId = j.messages[0].id;
+          if (j.messages.length < 50) {
+            loadBtn.textContent = 'No earlier messages';
+            loadBtn.classList.add('opacity-40');
+          }
+        })
+        .catch(() => { loadBtn.dataset.loading = ''; });
+    });
+  }
+
+  // ── Search box (header) ────────────────────────────────────────────────────
+  const searchInput = document.getElementById('search-input');
+  const searchResults = document.getElementById('search-results');
+  let searchTimer = null;
+  function showSearchResults(j) {
+    if (!searchResults) return;
+    const chan = (j && j.results && j.results.channels) || [];
+    const dms = (j && j.results && j.results.dms) || [];
+    const renderRow = (r, isDm) => {
+      const where = isDm ? ('/app?dm=' + encodeURIComponent(r.username)) : ('/app?channel=' + encodeURIComponent(r.channel_slug) + '&jump=' + r.id);
+      const label = isDm ? ('💬 ' + esc(r.username)) : ('#' + esc(r.channel_slug || '?'));
+      return `<a href="${where}" class="block px-3 py-2 hover:bg-discord-750 text-sm">
+        <span class="font-semibold text-blurple">${label}</span>
+        <span class="text-discord-400">· ${esc(r.username)}</span>
+        <div class="text-discord-300 text-xs mt-0.5 line-clamp-2 break-words">${linkify(esc(r.snippet || ''))}</div>
+      </a>`;
+    };
+    let html = '';
+    if (chan.length) html += `<div class="px-3 pt-2 text-[10px] font-bold uppercase tracking-wide text-discord-400">Channels</div>` + chan.map((r) => renderRow(r, false)).join('');
+    if (dms.length) html += `<div class="px-3 pt-2 text-[10px] font-bold uppercase tracking-wide text-discord-400">Private messages</div>` + dms.map((r) => renderRow(r, true)).join('');
+    if (!html) html = `<div class="px-3 py-3 text-xs text-discord-500">No matches.</div>`;
+    searchResults.innerHTML = html;
+    searchResults.classList.remove('hidden');
+  }
+  function hideSearchResults() {
+    if (searchResults) searchResults.classList.add('hidden');
+  }
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const term = searchInput.value.trim();
+      if (!term) { hideSearchResults(); return; }
+      searchTimer = setTimeout(() => {
+        fetch('/api/search?q=' + encodeURIComponent(term))
+          .then((r) => r.json())
+          .then((j) => { if (searchInput.value.trim()) showSearchResults(j); })
+          .catch(() => {});
+      }, 250);
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { hideSearchResults(); searchInput.blur(); }
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#search-input') && !e.target.closest('#search-results')) hideSearchResults();
+    });
+  }
+
+  // ── Jump to a message (?jump=id) ───────────────────────────────────────────
+  (function () {
+    const params = new URLSearchParams(window.location.search);
+    const jump = params.get('jump');
+    if (!jump) return;
+    const anchor = () => {
+      const el = document.querySelector('.msg[data-id="' + parseInt(jump, 10) + '"]');
+      if (!el) return;
+      el.scrollIntoView({ block: 'center' });
+      el.classList.add('reply-highlight');
+      setTimeout(() => el.classList.remove('reply-highlight'), 2500);
+      history.replaceState(null, '', window.location.pathname);
+    };
+    if (msgsEl.querySelector('.msg[data-id="' + parseInt(jump, 10) + '"]')) {
+      anchor();
+    } else {
+      // Load older history until the target appears (bounded attempts).
+      let oldest = 0;
+      const first = msgsEl.querySelector('.msg[data-id]');
+      if (first) oldest = parseInt(first.dataset.id, 10);
+      const params2 = new URLSearchParams({ before: oldest || 1e12 });
+      if (CHANNEL) params2.set('channel', CHANNEL);
+      const tryLoad = () => {
+        fetch('/api/history?' + params2.toString())
+          .then((r) => r.json())
+          .then((j) => {
+            if (!j.messages || !j.messages.length) { hideSearchResults(); return; }
+            const target = j.messages.find((m) => m.id === parseInt(jump, 10));
+            prependOlder(j.messages);
+            if (target) { anchor(); return; }
+            oldest = j.messages[0].id;
+            params2.set('before', oldest);
+            if (j.messages.length >= 50) tryLoad();
+          })
+          .catch(() => {});
+      };
+      tryLoad();
+    }
+  })();
+
   // ── Boot ───────────────────────────────────────────────────────────────────
   scrollBottom();
   bindMessageActions();
@@ -829,6 +1277,28 @@
     const base = pollFails >= 8 ? pollMs * 5 : pollFails >= 3 ? pollMs * 2 : pollMs;
     setTimeout(() => { poll(); schedulePoll(); }, jitter(base));
   }
-  setTimeout(poll, Math.floor(Math.random() * pollMs));
-  schedulePoll();
+
+  // Realtime transport: SSE when the admin enabled it, else jittered polling.
+  // On any SSE error we fall back to polling so the chat never goes quiet.
+  if (body.dataset.rt === 'sse' && window.EventSource) {
+    let es = null;
+    function openStream() {
+      const q = new URLSearchParams({ since: lastId });
+      if (CHANNEL) q.set('channel', CHANNEL);
+      if (DM) q.set('dm', DM);
+      es = new EventSource('/api/stream?' + q.toString());
+      es.onmessage = (e) => {
+        if (e.data === ': keepalive') return;
+        try { handleRealtime(JSON.parse(e.data)); } catch (err) {}
+      };
+      es.onerror = () => {
+        if (es) { es.close(); es = null; }
+        setTimeout(() => { if (!es) openStream(); }, pollMs * 3);
+      };
+    }
+    openStream();
+  } else {
+    setTimeout(poll, Math.floor(Math.random() * pollMs));
+    schedulePoll();
+  }
 })();

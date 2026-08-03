@@ -1,6 +1,8 @@
 node_modules/
 data/*.db
 data/*.db-*
+public/uploads/
+public/assets/avatars/
 *.log
 .DS_Store
 desktop/dist/

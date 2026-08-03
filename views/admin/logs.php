@@ -12,6 +12,8 @@ $fullWidth = true;
       <option value="<?= h($c['channel_name']) ?>" <?= $channel === $c['channel_name'] ? 'selected' : '' ?>><?= h($c['channel_name']) ?> (<?= (int) $c['entries'] ?> entries)</option>
       <?php endforeach; ?>
     </select>
+    <input type="search" name="q" value="<?= h($q ?? '') ?>" placeholder="Search log content…" class="input w-64 !py-1.5 text-xs" autocomplete="off">
+    <button type="submit" class="btn-primary text-xs !py-1">Search</button>
   </form>
 </div>
 <?php require ROOT . '/views/admin/_nav.php'; ?>

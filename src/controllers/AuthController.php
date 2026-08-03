@@ -23,17 +23,25 @@ final class AuthController
         $password = (string) ($_POST['password'] ?? '');
         $next = $_POST['next'] ?? '/';
 
+        if (login_attempt_count() >= login_attempt_max()) {
+            flash('Too many failed login attempts. Please wait a few minutes and try again.');
+            redirect('/login?next=' . rawurlencode($next));
+        }
+
         $user = Auth::attempt($username, $password);
         if (!$user) {
+            login_attempt_record();
             flash('Invalid username or password.');
             redirect('/login?next=' . rawurlencode($next));
         }
         $ban = Auth::globalBanFor($user);
         if ($ban || (int) $user['banned'] === 1) {
+            login_attempt_record();
             $reason = $ban['reason'] ?? $user['ban_reason'] ?? '';
             flash('This account is banned.' . ($reason ? ' Reason: ' . $reason : ''));
             redirect('/login');
         }
+        login_attempt_clear();
         Auth::login($user);
         redirect($next);
     }
@@ -86,11 +94,17 @@ final class AuthController
         Csrf::verify();
         $next = $_POST['next'] ?? '/';
         $nick = trim((string) ($_POST['nick'] ?? ''));
+        if (login_attempt_count() >= login_attempt_max()) {
+            flash('Too many attempts. Please wait a few minutes and try again.');
+            redirect('/login?next=' . rawurlencode($next));
+        }
         $user = Auth::loginGuest($nick);
         if (!$user) {
+            login_attempt_record();
             flash('That nickname is invalid or already in use. Try another one.');
             redirect('/login?next=' . rawurlencode($next));
         }
+        login_attempt_clear();
         redirect($next);
     }
 }

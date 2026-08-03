@@ -26,22 +26,30 @@ $router->get('/embed/{slug}', [ChannelController::class, 'embed']);
 // Chat API
 $router->get('/api/version', [ChatController::class, 'version']);
 $router->post('/api/send', [ChatController::class, 'send']);
+$router->post('/api/upload', [ChatController::class, 'upload']);
 $router->post('/api/command', [ChatController::class, 'command']);
 $router->get('/api/poll', [ChatController::class, 'poll']);
+$router->get('/api/stream', [ChatController::class, 'stream']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
 $router->post('/api/notifications/read', [ChatController::class, 'readNotifications']);
 $router->post('/api/channels', [ChannelController::class, 'create']);
 $router->post('/api/join', [ChannelController::class, 'join']);
 $router->post('/api/part', [ChannelController::class, 'part']);
+$router->post('/api/channel/notify', [ChannelController::class, 'notify']);
 $router->post('/api/channel/delete', [ChannelController::class, 'deleteChannel']);
 $router->post('/api/message/delete', [ChatController::class, 'deleteMessage']);
 $router->post('/api/message/edit', [ChatController::class, 'editMessage']);
+$router->post('/api/message/reaction', [ChatController::class, 'reaction']);
+$router->get('/api/history', [ChatController::class, 'historyApi']);
+$router->get('/api/search', [ChatController::class, 'search']);
 
 // Users / profiles
 $router->get('/u/{username}', [UserController::class, 'profile']);
 $router->get('/api/online', [UserController::class, 'online']);
 $router->post('/api/password', [UserController::class, 'changePassword']);
 $router->post('/api/profile', [UserController::class, 'updateProfile']);
+$router->post('/api/avatar', [UserController::class, 'uploadAvatar']);
+$router->post('/api/avatar/remove', [UserController::class, 'removeAvatar']);
 
 // Admin dashboard
 $router->get('/admin', [AdminController::class, 'overview']);
@@ -59,5 +67,10 @@ $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
 $router->get('/admin/logs/export', [AdminController::class, 'logDayExport']);
 $router->get('/admin/settings', [AdminController::class, 'settings']);
 $router->post('/admin/action', [AdminController::class, 'action']);
+
+// Incoming webhooks (public, token-authenticated) + admin management
+$router->post('/api/webhooks/{token}', [WebhookController::class, 'post']);
+$router->get('/admin/webhooks', [WebhookController::class, 'admin']);
+$router->post('/admin/webhooks/action', [WebhookController::class, 'action']);
 
 $router->dispatch();

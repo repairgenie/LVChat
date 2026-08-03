@@ -30,6 +30,7 @@ final class Auth
             if (time() - $lastWrite >= $throttle) {
                 Database::query('UPDATE users SET last_seen = datetime("now"), last_ip = ? WHERE id = ?', [client_ip(), $u['id']]);
                 $_SESSION['presence_ts'] = time();
+                self::purgeExpired();
                 record_peak();
             }
             if (empty($u['last_seen']) || time() - strtotime($u['last_seen'] . ' UTC') > $throttle) {
@@ -52,6 +53,7 @@ final class Auth
             if (time() - $lastWrite >= $throttle) {
                 Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $g['id']]);
                 $_SESSION['presence_ts'] = time();
+                self::purgeExpired();
                 record_peak();
             }
             if (empty($g['last_seen']) || time() - strtotime($g['last_seen'] . ' UTC') > $throttle) {
@@ -276,6 +278,23 @@ final class Auth
     /** Remove guests that have been inactive for over a day. */
     public static function purgeGuests(): void
     {
+        Database::query('DELETE FROM guests WHERE last_seen < datetime("now", "-1 day")');
+    }
+
+    /**
+     * Opportunistic housekeeping for tables that otherwise grow forever:
+     * expired sessions (both kinds) and stale guest rows. Throttled off the
+     * presence write (see user()), so most requests stay pure reads.
+     */
+    public static function purgeExpired(): void
+    {
+        $last = (int) ($_SESSION['purge_ts'] ?? 0);
+        if (time() - $last < 3600) {
+            return;
+        }
+        $_SESSION['purge_ts'] = time();
+        Database::query('DELETE FROM sessions WHERE expires_at < datetime("now")');
+        Database::query('DELETE FROM guest_sessions WHERE expires_at < datetime("now")');
         Database::query('DELETE FROM guests WHERE last_seen < datetime("now", "-1 day")');
     }
 

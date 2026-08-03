@@ -48,6 +48,30 @@ function chat_divider_label(string $date): string {
     return date('F j, Y', strtotime($date . ' 00:00:00 UTC'));
 }
 
+function reactions_html(array $m, array $viewer): string {
+    if (!MessageService::reactionsEnabled()) {
+        return '';
+    }
+    $rows = $m['reactions'] ?? [];
+    $mine = array_map('strval', (array) ($m['my_reactions'] ?? []));
+    if (!$rows) {
+        return '';
+    }
+    $html = '<div class="msg-reactions flex flex-wrap gap-1.5 mt-1.5">';
+    foreach ($rows as $r) {
+        $emoji = h((string) $r['emoji']);
+        $count = (int) $r['count'];
+        $mineClass = in_array((string) $r['emoji'], $mine, true) ? ' bg-blurple/30 border-blurple/60' : ' bg-discord-800 border-discord-700';
+        $html .= '<button type="button" class="reaction-btn flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border transition-colors hover:border-blurple/60 hover:bg-blurple/20"' . $mineClass . ' data-emoji="' . $emoji . '" title="Toggle reaction">'
+            . '<span class="text-sm leading-none">' . $emoji . '</span>'
+            . '<span class="text-discord-300 font-medium">' . $count . '</span>'
+            . '</button>';
+    }
+    $html .= '<button type="button" class="reaction-add px-2 py-0.5 rounded-md text-xs bg-discord-800 border border-discord-700 text-discord-400 hover:text-white hover:border-blurple/60" title="Add a reaction">+</button>';
+    $html .= '</div>';
+    return $html;
+}
+
 function msg_html(array $m, ?array $prev, array $viewer): string {
     $system = in_array($m['kind'], MessageService::SYSTEM_KINDS, true);
     if ($system) {
@@ -81,11 +105,21 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     $contentColor = $isAdmin ? 'text-red-400' : 'text-discord-200';
     $levelSym = level_symbol($m['level'] ?? 'normal');
 
+    // Reply line: context for messages that quote another message.
+    $replyLine = '';
+    if (!empty($m['reply_to_id'])) {
+        $rnick = $m['reply_to_username'] ?? '';
+        $excerpt = trim((string) ($m['reply_to_excerpt'] ?? ''));
+        $replyLine = '<a class="reply-line block text-xs text-discord-400 italic hover:text-discord-300 mt-0.5 break-all" href="#msg-' . (int) $m['reply_to_id'] . '" data-reply-scroll="' . (int) $m['reply_to_id'] . '">↪ <span class="font-semibold">' . h($rnick) . '</span>: ' . h($excerpt) . '</a>';
+    }
+
     if ($group) {
         return '<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="message" data-author="' . h($m['username']) . '">
             <div class="w-10 shrink-0"></div>
             <div class="min-w-0 flex-1">
-                <div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_markup_plain($m['content']) . '</div>
+                ' . $replyLine . '
+                <div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>
+                ' . reactions_html($m, $viewer) . '
             </div>
         </div>';
     }
@@ -93,22 +127,22 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     $actions = '';
     $mine = ((int) $m['sender_id'] === (int) $viewer['id'])
         || (!empty($m['username']) && strcasecmp((string) $m['username'], (string) $viewer['username']) === 0);
-    if ($viewer['role'] === 'admin') {
+    if ($viewer['role'] === 'admin' || $mine) {
         $actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
             . '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
-    } elseif ($mine) {
-        $actions = '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
 
-    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="message" data-author="' . h($m['username']) . '">
-        <div class="w-10 h-10 shrink-0 rounded-full bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600">' . h($initial) . '</div>
+    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-author="' . h($m['username']) . '">
+        <div class="w-10 h-10 shrink-0">' . avatar_img($m, 'w-10 h-10 rounded-full') . '</div>
         <div class="min-w-0 flex-1">
             <div class="flex items-baseline gap-2 h-[22px]">
                 <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . (!empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '') . '</span>
                 <span class="time text-[11px] text-discord-400 hidden group-hover:inline" data-ts="' . h($m['created_at']) . '">' . h(date('H:i', strtotime($m['created_at'] . ' UTC'))) . '</span>
                 ' . (!empty($m['edited_at']) ? '<span class="text-[10px] text-discord-400">(edited)</span>' : '') . '
             </div>
-            <div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_markup_plain($m['content']) . '</div>
+            ' . $replyLine . '
+            <div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>
+            ' . reactions_html($m, $viewer) . '
         </div>
         <div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">' . $actions . '</div>
     </div>';
@@ -116,8 +150,12 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
 
 function channel_link(array $c, string $channelSlug, array $user): string {
     $owned = (int) ($c['owner_id'] ?? 0) === (int) $user['id'] ? '1' : '0';
+    $unread = (int) ($c['unread'] ?? 0);
     $vis = $c['visibility'] !== 'public'
         ? '<span class="text-[10px] text-discord-400 ml-auto">' . ($c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁')) . '</span>'
+        : '';
+    $badge = $unread > 0
+        ? '<span class="unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">' . ($unread > 99 ? '99+' : $unread) . '</span>'
         : '';
     $cls = $channelSlug === $c['slug'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white';
     return '<a href="/app?channel=' . h(rawurlencode($c['slug'])) . '"'
@@ -125,7 +163,7 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         . ' data-ctx-channel-name="' . h($c['name']) . '"'
         . ' data-owned="' . $owned . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
-        . '<span class="truncate">' . h($c['name']) . '</span>' . $vis . '</a>';
+        . '<span class="truncate">' . h($c['name']) . '</span>' . ($vis ?: $badge) . '</a>';
 }
 
 function member_html(array $m, bool $online): string {
@@ -136,6 +174,7 @@ function member_html(array $m, bool $online): string {
     $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
     return '<a href="/app?dm=' . h(rawurlencode($m['username'])) . '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ' . $color . '"' . $roleStyle . ' data-username="' . h($m['username']) . '" data-level="' . h($m['level']) . '">
         <span class="text-[10px] font-bold w-3">' . h(level_symbol($m['level'])) . '</span>
+        ' . avatar_img($m, 'w-6 h-6 rounded-full') . '
         <span class="truncate">' . h($m['username']) . $guestTag . '</span>' . ($m['away'] ? '<span class="text-xs" title="' . h($m['away']) . '">💤</span>' : '') . $badge . '</a>';
 }
 ?>
@@ -170,6 +209,7 @@ function member_html(array $m, bool $online): string {
       data-site-name="<?= h($site) ?>"
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
+      data-rt="<?= config_get('realtime', 'poll') === 'sse' ? 'sse' : 'poll' ?>"
       data-commands="<?= h(json_encode($commands)) ?>">
 
   <!-- ── Left: channel sidebar ── -->
@@ -282,8 +322,12 @@ function member_html(array $m, bool $online): string {
       <?php if ($channel): ?>
       <span class="font-bold text-white text-sm"><?= h($channel['name']) ?></span>
       <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= h($channel['topic']) ?></span>
-      <div class="ml-auto flex items-center gap-2">
+      <div class="relative ml-auto flex items-center gap-2">
+        <input id="search-input" type="search" placeholder="Search chat…" autocomplete="off"
+               class="input w-40 md:w-56 !py-1 !text-xs" title="Search messages in your channels and DMs">
+        <div id="search-results" class="hidden absolute top-9 right-0 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin"></div>
         <button id="share-btn" class="btn-ghost text-xs" title="Copy shareable link">🔗 Share</button>
+        <button id="mute-btn" class="btn-ghost text-xs" data-mode="<?= h($notifyMode) ?>" title="<?= h($notifyMode === 'muted' ? 'Unmute channel' : ($notifyMode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel')) ?>"><?= $notifyMode === 'muted' ? '🔕 Muted' : ($notifyMode === 'mentions' ? '🔔 Mentions' : '🔔') ?></button>
         <button type="button" data-embed class="btn-ghost text-xs" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
         <button id="part-btn" class="btn-ghost text-xs text-red-400" title="Leave channel">✕ Leave</button>
       </div>
@@ -331,6 +375,7 @@ function member_html(array $m, bool $online): string {
 
     <div id="messages" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
          data-last-msg="<?= h(json_encode($lastMsg ?? null)) ?>">
+      <button id="load-earlier" class="hidden w-full py-2 text-xs text-blurple hover:text-white hover:bg-blurple/10 transition-colors">↑ Load earlier messages</button>
       <?php if ($motd): ?>
       <div class="msg-system px-4 py-3 text-xs text-discord-400 italic text-center whitespace-pre-wrap"><?= h($motd) ?></div>
       <?php endif; ?>
@@ -362,6 +407,12 @@ function member_html(array $m, bool $online): string {
     <div class="px-4 pt-2 pb-4 shrink-0 bg-discord-750">
       <div id="autocomplete" class="hidden mb-2 card max-h-56 overflow-y-auto scrollbar-thin"></div>
       <div id="emoji-panel" class="hidden mb-2 card p-2 grid grid-cols-8 gap-1 max-h-56 overflow-y-auto scrollbar-thin"></div>
+      <div id="reply-chip" class="hidden mb-2 flex items-center gap-2 card px-3 py-1.5 text-sm text-discord-300">
+        <span class="text-xs text-blurple font-semibold">↪ Replying to</span>
+        <span id="reply-chip-name" class="font-semibold text-white truncate"></span>
+        <span id="reply-chip-excerpt" class="truncate text-discord-400"></span>
+        <button type="button" id="reply-cancel" class="ml-auto text-discord-400 hover:text-white text-xs px-1" title="Cancel reply">✕</button>
+      </div>
       <form id="send-form" method="post" action="/api/send" class="relative">
         <?= Csrf::field() ?>
         <?php if ($dm): ?>
@@ -369,14 +420,17 @@ function member_html(array $m, bool $online): string {
         <?php elseif ($channel): ?>
         <input type="hidden" name="channel" value="<?= h($channel['slug']) ?>">
         <?php endif; ?>
-        <input id="chat-input" name="content" type="text" autocomplete="off" spellcheck="false"
-               class="input pr-28 bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow"
+        <input type="hidden" id="reply-to-input" name="reply_to" value="">
+        <textarea id="chat-input" name="content" rows="1" autocomplete="off" spellcheck="false"
+               class="input pr-28 py-2.5 resize-none bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow align-middle max-h-40 overflow-y-auto"
                placeholder="<?= h($channel ? "Message #" . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
-               <?= ($channel || $dm) ? '' : 'disabled' ?>>
+               <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
+        <button type="button" id="upload-btn" class="absolute right-24 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
+        <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
         <button type="button" id="emoji-btn" class="absolute right-12 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji">😀</button>
         <button type="submit" class="absolute right-2 top-1/2 -translate-y-1/2 btn-primary !p-1.5 !rounded-md" title="Send">➤</button>
       </form>
-      <div class="text-[11px] text-discord-400 mt-1.5 px-1">Type <span class="text-discord-200">/</span> for commands · <span class="text-discord-200">@nick</span> to mention · <span class="text-discord-200">Enter</span> to send</div>
+      <div class="text-[11px] text-discord-400 mt-1.5 px-1">Type <span class="text-discord-200">/</span> for commands · <span class="text-discord-200">@nick</span> to mention · <span class="text-discord-200">Enter</span> to send · <span class="text-discord-200">Shift+Enter</span> newline · <span class="text-discord-200">**bold**</span> <span class="text-discord-200">*italic*</span> <span class="text-discord-200">```code```</span></div>
     </div>
   </section>
 
@@ -481,6 +535,12 @@ function member_html(array $m, bool $online): string {
 
   <!-- Right-click context menu -->
   <div id="ctx-menu" class="hidden fixed z-[100] min-w-52 max-w-72 card p-1.5 shadow-2xl text-sm"></div>
+
+  <!-- Image lightbox -->
+  <div id="lightbox" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/85">
+    <button data-lightbox-close class="absolute top-3 right-3 text-white text-2xl leading-none p-2">✕</button>
+    <img id="lightbox-img" src="" alt="" class="max-h-[90vh] max-w-full object-contain rounded-lg">
+  </div>
 
   <!-- JS-health watchdog: shows if the chat scripts failed to load (stale/broken deploy) -->
   <div id="js-warning" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] card px-4 py-2.5 text-xs text-amber-300 border border-amber-500/40 shadow-2xl max-w-md"></div>

@@ -340,6 +340,10 @@ DESC LIMIT 100;"`).
 | `registration_enabled` | `1` | `0` closes registration |
 | `motd` | *welcome text* | Shown in chat |
 | `spamfilter_enabled` | `1` | Master switch for spam filters |
+| `uploads_enabled` | `1` | Allow image uploads in channels |
+| `reactions_enabled` | `1` | Allow message reactions |
+| `webhooks_enabled` | `1` | Master switch for incoming webhooks |
+| `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |
 | `max_channels_per_user` | `100` | Owned-channel cap |
 
 There is **no `oper_password` key anymore** — operator access lives in the
@@ -348,6 +352,47 @@ classes are maintained in code and re-seeded on boot if removed.
 
 Override file-level values by setting `CHAT_DB` to relocate the database (see
 installation guide); all else is managed from the dashboard.
+
+---
+
+## 6.5 Incoming webhook API
+
+Webhooks let external systems (forums, CI, monitoring) post into a channel as a
+bot without an account. Manage them under **Admin → Webhooks**: pick a channel
+and a bot name, and you get a one-time URL.
+
+```
+POST /api/webhooks/<token>
+```
+
+The token is a random 48-char secret; only its SHA-256 hash is stored. The URL
+is shown once after creation — if you lose it, delete and recreate the webhook.
+
+**Payloads (Discord-compatible JSON or form-encoded):**
+
+| Field | Notes |
+|---|---|
+| `content` | The message text (≤ 2000 chars). |
+| `username` | Override the bot name shown in chat (≤ 32 chars). |
+| `avatar_url` | Override the bot avatar (must be `https://`). |
+| `embeds[]` | Optional; `title`, `url`, `description`, `author.name`, `color` — flattened into formatted text. |
+
+Example:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"content":"New discussion: **My thread** — https://forum.example.com/t/123","username":"Forum Bot"}' \
+  https://your.chat/api/webhooks/9f2c...8a1
+```
+
+Webhook posts run through the same spam filters, word filter, and rate limits as
+normal sends, and land in the append-only `chat_logs` archive like any message.
+
+**FriendsOfFlarum/webhooks** (`composer require fof/webhooks`): install the
+extension, add a webhook with the **Discord** service type, paste the LVChat
+webhook URL, and pick the forum events (Discussion Started, Post Created, User
+Registered) to forward. Each LVChat webhook is scoped to one channel, so create
+one per tag/channel pairing you want mirrored.
 
 ---
 

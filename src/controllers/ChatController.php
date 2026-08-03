@@ -65,13 +65,17 @@ final class ChatController
 
         $messages = [];
         $members = [];
+        $notifyMode = 'all';
         if ($channel) {
-            $messages = MessageService::history((int) $channel['id']);
+            $messages = MessageService::hydrateReactions(MessageService::history((int) $channel['id']), $user);
             $members = ChannelService::members((string) $channel['id']);
             foreach ($members as &$m) {
                 $m['is_online'] = Auth::isOnline($m) ? 1 : 0;
             }
             unset($m);
+            // Viewing a channel marks its unread badge read.
+            ChannelService::markRead((int) $channel['id'], $user);
+            $notifyMode = ChannelService::notifyMode((int) $channel['id'], $user);
         } elseif ($dm) {
             $messages = MessageService::forDm($user, $dm);
             MessageService::markDmRead($user, $dm);
@@ -93,6 +97,7 @@ final class ChatController
             'members' => $members,
             'commands' => CommandRegistry::names(),
             'joinModal' => $joinModal,
+            'notifyMode' => $notifyMode,
         ], null);
     }
 
@@ -230,13 +235,22 @@ final class ChatController
         if ($blocked) {
             self::finish(['error' => $blocked], $back, 403);
         }
+        // Reply-to: validate the parent message exists in the same channel.
+        $replyTo = null;
+        if (isset($_POST['reply_to']) && $_POST['reply_to'] !== '') {
+            $rtId = (int) $_POST['reply_to'];
+            $parent = Database::row('SELECT id FROM messages WHERE id = ? AND channel_id = ? AND deleted = 0', [$rtId, (int) $channel['id']]);
+            if ($parent) {
+                $replyTo = $rtId;
+            }
+        }
         // Global word filter applies only when the channel has +C set.
         $censor = CensorService::check($content, CensorService::isChannelFiltered($channel));
         if ($censor) {
             if ($censor['action'] === 'censor') {
                 $content = $censor['censored'];
             } else {
-                $msg = MessageService::send((int) $channel['id'], $user, $content, 'message');
+                $msg = MessageService::send((int) $channel['id'], $user, $content, 'message', $replyTo);
                 Database::query('UPDATE messages SET deleted = 1 WHERE id = ?', [$msg['id']]);
                 $notice = 'Chanserv removed message from ' . $user['username'] . ' due to prohibited words';
                 MessageService::system((int) $channel['id'], 'system', $notice);
@@ -244,9 +258,52 @@ final class ChatController
                 self::finish(['ok' => true, 'message' => $msg, 'blocked' => true, 'notice' => $notice], $back);
             }
         }
-        $msg = MessageService::send((int) $channel['id'], $user, $content, 'message');
+        $msg = MessageService::send((int) $channel['id'], $user, $content, 'message', $replyTo);
         $msg['channel'] = $channel['slug'];
         self::finish(['ok' => true, 'message' => $msg], $back);
+    }
+
+    /** POST /api/upload — upload an image and post it as an image message. */
+    public static function upload(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        if (config_get('uploads_enabled', '1') !== '1') {
+            json_out(['error' => 'Image uploads are disabled on this server.'], 403);
+        }
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        $member = AccessService::member($channel['id'], $user);
+        if (!$member) {
+            json_out(['error' => 'You are not a member of this channel.'], 403);
+        }
+        $blocked = BanService::canPost($channel, $user, $member);
+        if ($blocked) {
+            json_out(['error' => $blocked], 403);
+        }
+        if (self::rateLimited($user)) {
+            json_out(['error' => 'You are sending messages too quickly. Slow down.'], 429);
+        }
+        if (!isset($_FILES['file']) || !UploadService::isImageUpload($_FILES['file'])) {
+            json_out(['error' => 'Choose an image file first.'], 400);
+        }
+        $stored = UploadService::store($_FILES['file'], 'upload');
+        if (!$stored['ok']) {
+            json_out(['error' => $stored['error']], 400);
+        }
+        // Downscale to a max 1600px image (keeps large photos manageable).
+        $abs = UploadService::dir('upload') . '/' . basename($stored['url']);
+        $scaled = UploadService::downscale($abs, (string) $stored['ext'], 1600);
+        $url = $scaled === false
+            ? $stored['url']
+            : str_replace('\\', '/', substr($scaled, strlen(ROOT . '/public')));
+        $caption = mb_substr(trim((string) ($_POST['caption'] ?? '')), 0, 300);
+        $content = $url . ($caption !== '' ? "\n" . $caption : '');
+        $msg = MessageService::send((int) $channel['id'], $user, $content, 'image');
+        $msg['channel'] = $channel['slug'];
+        json_out(['ok' => true, 'message' => $msg]);
     }
 
     public static function command(): void
@@ -269,10 +326,9 @@ final class ChatController
         redirect($result['redirect'] ?? ($channel ? '/app?channel=' . rawurlencode($channel['slug']) : '/app'));
     }
 
-    public static function poll(): void
+    /** Build the JSON payload the poll endpoint returns (shared with SSE). */
+    private static function pollPayload(array $user, int $since, bool $markRead = true): array
     {
-        $user = self::requireUser();
-        $since = max(0, (int) ($_GET['since'] ?? 0));
         $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => []];
 
         $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? OR guest_user_id = ?', [$user['id'], $user['id']]);
@@ -280,12 +336,18 @@ final class ChatController
         // Live DM sidebar data — returned on every poll regardless of which page
         // the user is on, so a DM sent to someone sitting in a channel surfaces.
         $out['dm_list'] = MessageService::dmSummaries($user);
+        // Live unread badges for the channel sidebar (cleared when a channel is
+        // opened; the client updates the sidebar from this on every poll).
+        $out['channel_unread'] = array_map(
+            fn ($c) => ['slug' => $c['slug'], 'unread' => (int) $c['unread']],
+            ChannelService::joinedChannelNames($user)
+        );
 
         if (isset($_GET['dm'])) {
             $t = Auth::findActor((string) $_GET['dm']);
             if ($t) {
                 $out['messages'] = MessageService::forDm($user, $t, $since);
-                if (MessageService::hasUnreadDm($user, $t)) {
+                if ($markRead && MessageService::hasUnreadDm($user, $t)) {
                     MessageService::markDmRead($user, $t);
                 }
                 $out['dm'] = $t['username'];
@@ -298,7 +360,7 @@ final class ChatController
                     'guest' => MessageService::isGuest($t) ? 1 : 0,
                 ];
             }
-            json_out($out);
+            return $out;
         }
 
         if (isset($_GET['channel']) && $_GET['channel'] !== '') {
@@ -308,9 +370,9 @@ final class ChatController
             }
             $member = AccessService::member($channel['id'], $user);
             if (!$member) {
-                json_out(['ok' => true, 'redirect' => '/app', 'reason' => 'You are no longer in this channel.']);
+                return ['ok' => true, 'redirect' => '/app', 'reason' => 'You are no longer in this channel.'];
             }
-            $out['messages'] = MessageService::forChannel((int) $channel['id'], $since);
+            $out['messages'] = MessageService::hydrateReactions(MessageService::forChannel((int) $channel['id'], $since), $user);
             $out['channel'] = $channel['slug'];
             $out['topic'] = $channel['topic'];
             foreach (ChannelService::members((string) $channel['id']) as $m) {
@@ -323,6 +385,7 @@ final class ChatController
                     'bot' => (int) $m['bot'],
                     'guest' => (int) $m['guest'],
                     'role_color' => $m['role_color'] ?? null,
+                    'avatar' => $m['avatar'] ?? null,
                 ];
             }
             // Recent notifications for this channel to surface mentions/invites in a toast.
@@ -333,10 +396,132 @@ final class ChatController
                  WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.channel_id = ? AND n.read = 0',
                 [$user['id'], $user['id'], $channel['id']]
             );
-            json_out($out);
+            return $out;
         }
 
-        json_out($out);
+        return $out;
+    }
+
+    public static function poll(): void
+    {
+        $user = self::requireUser();
+        $since = max(0, (int) ($_GET['since'] ?? 0));
+        json_out(self::pollPayload($user, $since));
+    }
+
+    /**
+     * GET /api/stream — Server-Sent Events realtime. Opt-in via the `realtime`
+     * setting (poll is the shared-hosting default). Each iteration pushes the
+     * same payload the poll endpoint returns, so the client reuses one handler.
+     * Long-lived connections hold a PHP worker, so this targets php-fpm/VPS.
+     */
+    public static function stream(): void
+    {
+        $user = self::requireUser();
+        $since = max(0, (int) ($_GET['since'] ?? 0));
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no'); // nginx: disable proxy buffering for streaming
+        header('Connection: keep-alive');
+        if (function_exists('ini_set')) {
+            @ini_set('zlib.output_compression', '0');
+        }
+        // Let the script die when the client disconnects (connection_aborted()
+        // then turns true), so idle streams never pin a worker forever.
+
+        $interval = max(1, (int) (config_get('poll_interval', '2') ?? 2));
+        $start = time();
+        $last = 0;
+
+        $send = function (string $data): void {
+            echo "data: " . $data . "\n\n";
+            @ob_flush();
+            flush();
+        };
+
+        // Send a heartbeat every ~15s so proxies don't time the connection out.
+        $heartbeat = $start;
+        while (true) {
+            if (connection_aborted() || time() - $start > 3600) {
+                break;
+            }
+            $out = self::pollPayload($user, $since, false);
+            $json = json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($json !== false && $json !== $last) {
+                $send($json);
+                $last = $json;
+            } elseif (time() - $heartbeat >= 15) {
+                $send(': keepalive');
+                $heartbeat = time();
+            }
+            sleep($interval);
+        }
+        exit;
+    }
+
+    public static function historyApi(): void
+    {
+        $user = self::requireUser();
+        $before = max(0, (int) ($_GET['before'] ?? 0));
+        $channel = null;
+        if (isset($_GET['channel']) && $_GET['channel'] !== '') {
+            $channel = ChannelService::findBySlug((string) $_GET['channel']);
+            if (!$channel) {
+                json_out(['error' => 'Channel not found.'], 404);
+            }
+            if (!AccessService::member($channel['id'], $user)) {
+                json_out(['error' => 'You are not a member of this channel.'], 403);
+            }
+            $messages = MessageService::hydrateReactions(MessageService::historyBefore((int) $channel['id'], $before), $user);
+            json_out(['ok' => true, 'messages' => $messages, 'channel' => $channel['slug']]);
+        }
+        if (isset($_GET['dm']) && $_GET['dm'] !== '') {
+            $t = Auth::findActor((string) $_GET['dm']);
+            if (!$t) {
+                json_out(['error' => 'No such user.'], 404);
+            }
+            // Reuse forChannel-style pagination for DMs (older than $before).
+            $messages = MessageService::dmHistoryBefore($user, $t, $before);
+            json_out(['ok' => true, 'messages' => $messages, 'dm' => $t['username']]);
+        }
+        json_out(['error' => 'Missing channel or dm.'], 400);
+    }
+
+    public static function reaction(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        if (!MessageService::reactionsEnabled()) {
+            json_out(['error' => 'Reactions are disabled on this server.'], 403);
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $emoji = trim((string) ($_POST['emoji'] ?? ''));
+        $r = MessageService::toggleReaction($id, $user, $emoji);
+        if (is_string($r)) {
+            json_out(['error' => $r], 400);
+        }
+        json_out(['ok' => true, 'added' => $r['added'], 'reactions' => $r['reactions']]);
+    }
+
+    public static function search(): void
+    {
+        $user = self::requireUser();
+        $term = trim((string) ($_GET['q'] ?? ''));
+        if ($term === '') {
+            json_out(['ok' => true, 'results' => []]);
+        }
+        $channels = MessageService::searchChannels($user, $term);
+        $dms = MessageService::searchDm($user, $term);
+        foreach ($channels as &$r) {
+            $r['snippet'] = MessageService::snippet($r['content'], $term);
+        }
+        unset($r);
+        foreach ($dms as &$r) {
+            $r['snippet'] = MessageService::snippet($r['content'], $term);
+        }
+        unset($r);
+        json_out(['ok' => true, 'results' => ['channels' => $channels, 'dms' => $dms]]);
     }
 
     public static function notifications(): void

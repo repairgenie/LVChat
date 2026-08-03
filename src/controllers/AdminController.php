@@ -136,6 +136,7 @@ final class AdminController
     {
         $admin = self::require();
         $channel = trim((string) ($_GET['channel'] ?? ''));
+        $q = trim((string) ($_GET['q'] ?? ''));
         $sql = "SELECT channel_name, substr(created_at,1,10) AS day, COUNT(*) AS entries
                 FROM chat_logs WHERE channel_name IS NOT NULL";
         $params = [];
@@ -143,10 +144,14 @@ final class AdminController
             $sql .= ' AND channel_name = ?';
             $params[] = $channel;
         }
+        if ($q !== '') {
+            $sql .= ' AND content LIKE ? ESCAPE "\\"';
+            $params[] = '%' . str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $q) . '%';
+        }
         $sql .= ' GROUP BY channel_name, day ORDER BY day DESC, channel_name COLLATE NOCASE LIMIT 1000';
         $rows = Database::all($sql, $params);
         $channels = MessageService::loggedChannels();
-        render_view('admin/logs', ['admin' => $admin, 'rows' => $rows, 'channel' => $channel, 'channels' => $channels]);
+        render_view('admin/logs', ['admin' => $admin, 'rows' => $rows, 'channel' => $channel, 'channels' => $channels, 'q' => $q]);
     }
 
     public static function logDay(): void
@@ -245,7 +250,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'logo_url', 'registration_enabled', 'spamfilter_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'motd'];
+        $keys = ['site_name', 'logo_url', 'registration_enabled', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'webhooks_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -512,9 +517,13 @@ final class AdminController
                 config_set('logo_url', trim((string) ($_POST['logo_url'] ?? '')));
                 config_set('registration_enabled', ($_POST['registration_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('spamfilter_enabled', ($_POST['spamfilter_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('uploads_enabled', ($_POST['uploads_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('reactions_enabled', ($_POST['reactions_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('webhooks_enabled', ($_POST['webhooks_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('max_channels_per_user', (string) max(1, (int) ($_POST['max_channels_per_user'] ?? 100)));
                 config_set('presence_throttle', (string) max(5, (int) ($_POST['presence_throttle'] ?? 30)));
                 config_set('poll_interval', (string) max(1, (int) ($_POST['poll_interval'] ?? 2)));
+                config_set('realtime', ($_POST['realtime'] ?? 'poll') === 'sse' ? 'sse' : 'poll');
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 break;
