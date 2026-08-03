@@ -3,14 +3,27 @@
 declare(strict_types=1);
 
 /**
- * Ticket-based support system. Emails go out through the system-wide SMTP
- * settings (Mailer) whenever a staff member replies to a ticket.
+ * Ticket-based support system. Tickets are opened by a registered user, or by
+ * staff on behalf of either a registered user OR an external email address.
+ * Staff may assign a ticket to any admin/staff member. Emails go out through
+ * the system-wide SMTP settings (Mailer) whenever a staff member replies.
  */
 final class SupportService
 {
     public const STATUS_LABELS = ['open' => 'Open', 'answered' => 'Answered', 'closed' => 'Closed'];
 
+    /** Create a ticket for a registered user (user-facing form). */
     public static function create(array $user, string $subject, string $content): array
+    {
+        return self::createTicket($user['id'], null, $user['id'], $subject, $content, null);
+    }
+
+    /**
+     * Create a ticket from the staff dashboard. Either $userId or $email must
+     * resolve to a contact; if an email matches a registered user, it links to
+     * that account. Returns ['ok' => bool, 'id' => int, 'error' => ?string].
+     */
+    public static function createStaff(?int $userId, string $email, int $openedBy, string $subject, string $content, ?int $assignedTo): array
     {
         $subject = trim($subject);
         $content = trim($content);
@@ -18,31 +31,57 @@ final class SupportService
             return ['ok' => false, 'error' => 'A subject is required.'];
         }
         if ($content === '') {
-            return ['ok' => false, 'error' => 'Please describe your issue.'];
+            return ['ok' => false, 'error' => 'Please describe the issue.'];
         }
+        $userId = $userId ? (int) $userId : null;
+        $email = trim($email);
+        // Prefer linking by email when the address belongs to a registered user.
+        if (!$userId && $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $byEmail = Database::scalar('SELECT id FROM users WHERE email = ? COLLATE NOCASE', [$email]);
+            if ($byEmail) {
+                $userId = (int) $byEmail;
+                $email = '';
+            }
+        }
+        if (!$userId && $email === '') {
+            return ['ok' => false, 'error' => 'Provide a registered user or an email address.'];
+        }
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'error' => 'That email address is not valid.'];
+        }
+        return self::createTicket($userId, $email !== '' ? mb_substr($email, 0, 254) : null, $openedBy, $subject, $content, $assignedTo);
+    }
+
+    /** Shared insert: opens the ticket and adds the opening message as a reply. */
+    private static function createTicket(?int $userId, ?string $email, int $authorId, string $subject, string $content, ?int $assignedTo): array
+    {
         Database::query(
-            'INSERT INTO support_tickets (user_id, subject) VALUES (?, ?)',
-            [$user['id'], mb_substr($subject, 0, 120)]
+            'INSERT INTO support_tickets (user_id, email, subject, assigned_to, opened_by) VALUES (?, ?, ?, ?, ?)',
+            [$userId, $email, mb_substr($subject, 0, 120), $assignedTo ? (int) $assignedTo : null, $authorId]
         );
         $id = (int) Database::lastId();
         Database::query(
-            'INSERT INTO support_ticket_replies (ticket_id, author_id, is_staff, content) VALUES (?, ?, 0, ?)',
-            [$id, (int) $user['id'], $content]
+            'INSERT INTO support_ticket_replies (ticket_id, author_id, is_staff, content) VALUES (?, ?, 1, ?)',
+            [$id, $authorId, $content]
         );
+        log_audit('support_ticket_staff_open', 'ticket#' . $id, $subject);
         return ['ok' => true, 'id' => $id];
     }
 
+    /** Tickets for a registered user (their own + any email ticket matching their address). */
     public static function mine(array $user): array
     {
         return Database::all(
-            'SELECT t.*, u.username FROM support_tickets t JOIN users u ON u.id = t.user_id
+            'SELECT t.*, u.username, a.username AS assignee_name FROM support_tickets t
+             JOIN users u ON u.id = t.user_id
+             LEFT JOIN users a ON a.id = t.assigned_to
              WHERE t.user_id = ? ORDER BY t.updated_at DESC LIMIT 100',
             [$user['id']]
         );
     }
 
-    /** All tickets for staff, newest activity first. */
-    public static function all(string $status = ''): array
+    /** All tickets for staff. Filters: status and/or assignee ("mine"/"unassigned"). */
+    public static function all(string $status = '', string $assignee = '', ?int $currentStaffId = null): array
     {
         $sql = 'SELECT t.*, u.username, a.username AS assignee_name,
                        (SELECT COUNT(*) FROM support_ticket_replies r WHERE r.ticket_id = t.id) AS replies
@@ -50,9 +89,19 @@ final class SupportService
                 LEFT JOIN users u ON u.id = t.user_id
                 LEFT JOIN users a ON a.id = t.assigned_to';
         $params = [];
+        $where = [];
         if ($status !== '' && in_array($status, ['open', 'answered', 'closed'], true)) {
-            $sql .= ' WHERE t.status = ?';
+            $where[] = 't.status = ?';
             $params[] = $status;
+        }
+        if ($assignee === 'mine' && $currentStaffId !== null) {
+            $where[] = 't.assigned_to = ?';
+            $params[] = $currentStaffId;
+        } elseif ($assignee === 'unassigned') {
+            $where[] = 't.assigned_to IS NULL';
+        }
+        if ($where) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
         }
         $sql .= ' ORDER BY t.updated_at DESC LIMIT 300';
         return Database::all($sql, $params);
@@ -81,10 +130,22 @@ final class SupportService
 
     public static function canView(array $ticket, array $user): bool
     {
-        if ((int) $ticket['user_id'] === (int) $user['id']) {
+        if ($ticket['user_id'] !== null && (int) $ticket['user_id'] === (int) $user['id']) {
             return true;
         }
         return ModerationService::isStaff($user);
+    }
+
+    /** The contact address to reach about a ticket: user's email, else ticket email. */
+    public static function contactEmail(array $ticket): ?string
+    {
+        if ($ticket['email']) {
+            return (string) $ticket['email'];
+        }
+        if ($ticket['user_id'] !== null) {
+            return (string) (Database::scalar('SELECT email FROM users WHERE id = ?', [(int) $ticket['user_id']]) ?? '');
+        }
+        return null;
     }
 
     public static function reply(int $ticketId, array $user, string $content): array
@@ -98,7 +159,8 @@ final class SupportService
             return ['ok' => false, 'error' => 'Ticket not found.'];
         }
         $isStaff = ModerationService::isStaff($user);
-        if (!$isStaff && (int) $ticket['user_id'] !== (int) $user['id']) {
+        $isOwner = $ticket['user_id'] !== null && (int) $ticket['user_id'] === (int) $user['id'];
+        if (!$isStaff && !$isOwner) {
             return ['ok' => false, 'error' => 'You cannot reply to this ticket.'];
         }
         Database::query(
@@ -113,12 +175,12 @@ final class SupportService
             "UPDATE support_tickets SET updated_at = datetime('now'), status = ? WHERE id = ?",
             [$status, $ticketId]
         );
-        // Email the owner whenever staff reply.
-        if ($isStaff && (int) $ticket['user_id'] !== (int) $user['id']) {
-            $owner = Database::row('SELECT * FROM users WHERE id = ?', [(int) $ticket['user_id']]);
-            if ($owner) {
+        // Email the owner whenever staff reply (registered user or email-only).
+        if ($isStaff && !$isOwner) {
+            $to = self::contactEmail($ticket);
+            if ($to) {
                 Mailer::sendSupportReply(
-                    (string) $owner['email'],
+                    $to,
                     $ticket['subject'],
                     $content,
                     (string) $user['username'],
@@ -129,6 +191,24 @@ final class SupportService
         return ['ok' => true];
     }
 
+    /** Assign a ticket to an admin/staff member (or unassign). */
+    public static function assign(int $ticketId, ?int $staffId): array
+    {
+        Database::query(
+            'UPDATE support_tickets SET assigned_to = ? WHERE id = ?',
+            [$staffId, $ticketId]
+        );
+        return ['ok' => true];
+    }
+
+    /** All admins and staff users, for the assignment dropdown. */
+    public static function staff(): array
+    {
+        return Database::all(
+            "SELECT id, username, role FROM users WHERE role IN ('admin', 'staff') ORDER BY role DESC, username COLLATE NOCASE"
+        );
+    }
+
     public static function setStatus(int $ticketId, string $status, array $user): array
     {
         $ticket = self::get($ticketId);
@@ -136,7 +216,7 @@ final class SupportService
             return ['ok' => false, 'error' => 'Ticket not found.'];
         }
         $isStaff = ModerationService::isStaff($user);
-        $owner = (int) $ticket['user_id'] === (int) $user['id'];
+        $owner = $ticket['user_id'] !== null && (int) $ticket['user_id'] === (int) $user['id'];
         if ($status === 'closed' && !$isStaff && !$owner) {
             return ['ok' => false, 'error' => 'You cannot close this ticket.'];
         }

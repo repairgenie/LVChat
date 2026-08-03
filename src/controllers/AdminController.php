@@ -129,8 +129,16 @@ final class AdminController
     {
         $staff = ModerationService::requireStaff();
         $status = trim((string) ($_GET['status'] ?? ''));
-        $tickets = SupportService::all($status);
-        render_view('admin/support', ['admin' => $staff, 'tickets' => $tickets, 'status' => $status]);
+        $assignee = trim((string) ($_GET['assignee'] ?? ''));
+        $tickets = SupportService::all($status, $assignee, (int) $staff['id']);
+        render_view('admin/support', [
+            'admin' => $staff,
+            'tickets' => $tickets,
+            'status' => $status,
+            'assignee' => $assignee,
+            'staff' => SupportService::staff(),
+            'users' => Database::all("SELECT id, username, email FROM users WHERE guest = 0 ORDER BY username COLLATE NOCASE LIMIT 500"),
+        ]);
     }
 
     /** GET /admin/legal — tiptap editors for the ToS and Privacy Policy (admin only). */

@@ -239,7 +239,7 @@ check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found
 
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
-foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks'] as $p) {
+foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks', '/admin/support'] as $p) {
     [$s] = req('GET', $p, [], $cjA);
     check("GET $p 200", $s === 200, (string) $s);
 }
@@ -267,6 +267,20 @@ $j = jsonDecode($b);
 check('webhook POST posts a message', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
 [$s] = req('POST', '/api/webhooks/' . str_repeat('0', 48), ['content' => 'x']);
 check('webhook unknown token 404', $s === 404, (string) $s);
+
+// Staff-created support tickets (user + email) and assignment.
+$tA = csrf(req('GET', '/admin/support', [], $cjA)[2]);
+[$s, $h, $b] = req('POST', '/admin/support/create', ['csrf' => $tA, 'user_id' => '1', 'email' => '', 'subject' => 'Staff ticket for alice', 'content' => 'body', 'assigned_to' => '1'], $cjA);
+check('staff creates user ticket', $s === 302 && preg_match('#/admin/support/\d+#', $h['location'] ?? ''), "$s " . ($h['location'] ?? ''));
+[$s, , $b] = req('POST', '/admin/support/create', ['csrf' => $tA, 'user_id' => '', 'email' => 'customer@ext.com', 'subject' => 'Email ticket', 'content' => 'body', 'assigned_to' => ''], $cjA);
+check('staff creates email ticket', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/admin/support', [], $cjA);
+check('admin support lists email ticket', $s === 200 && str_contains($b, 'customer@ext.com'), $b);
+$tA = csrf(req('GET', '/admin/support/1', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/admin/support/1/assign', ['csrf' => $tA, 'assigned_to' => '1'], $cjA);
+check('staff assigns ticket', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/admin/support?assignee=mine', [], $cjA);
+check('mine filter shows assigned ticket', $s === 200 && str_contains($b, 'Staff ticket'), $b);
 
 // Site logo: save a logo URL, verify it renders in place of the site name.
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);

@@ -54,12 +54,59 @@ final class SupportController
         if (!$ticket || !SupportService::canView($ticket, $user)) {
             render_view('errors/notfound', [], null);
         }
+        $isStaff = ModerationService::isStaff($user);
         render_view('support/show', [
             'user' => $user,
             'ticket' => $ticket,
             'replies' => SupportService::replies((int) $ticket['id']),
             'error' => flash(),
+            'isStaffView' => $isStaff,
+            'staff' => $isStaff ? SupportService::staff() : [],
+            'contactEmail' => $isStaff ? SupportService::contactEmail($ticket) : null,
         ]);
+    }
+
+    /** POST /admin/support/create — staff opens a ticket for a user or an email. */
+    public static function staffCreate(): void
+    {
+        $staff = ModerationService::requireStaff();
+        Csrf::verify();
+        $userId = (int) ($_POST['user_id'] ?? 0);
+        $email = trim((string) ($_POST['email'] ?? ''));
+        $assignedTo = (int) ($_POST['assigned_to'] ?? 0);
+        $subject = (string) ($_POST['subject'] ?? '');
+        $content = (string) ($_POST['content'] ?? '');
+        $result = SupportService::createStaff(
+            $userId > 0 ? $userId : null,
+            $email,
+            (int) $staff['id'],
+            $subject,
+            $content,
+            $assignedTo > 0 ? $assignedTo : null
+        );
+        if (!$result['ok']) {
+            flash($result['error']);
+            redirect('/admin/support');
+        }
+        log_audit('support_ticket_staff_open', 'ticket#' . $result['id'], $subject);
+        flash('Ticket opened.');
+        redirect('/admin/support/' . $result['id']);
+    }
+
+    /** POST /admin/support/{id}/assign — assign a ticket to an admin/staff member. */
+    public static function assign(array $params): void
+    {
+        $staff = ModerationService::requireStaff();
+        Csrf::verify();
+        $ticket = SupportService::get((int) $params['id']);
+        if (!$ticket) {
+            render_view('errors/notfound', [], null);
+        }
+        $assignedTo = (int) ($_POST['assigned_to'] ?? 0);
+        SupportService::assign((int) $ticket['id'], $assignedTo > 0 ? $assignedTo : null);
+        log_audit('support_ticket_assign', 'ticket#' . $ticket['id'], $assignedTo > 0 ? 'staff#' . $assignedTo : 'unassigned');
+        flash('Assignment updated.');
+        redirect('/admin/support/' . (int) $ticket['id']);
     }
 
     /** POST /support/{id}/reply — add a reply to a ticket. */

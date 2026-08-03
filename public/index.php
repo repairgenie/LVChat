@@ -77,6 +77,8 @@ $router->get('/admin/moderation', [AdminController::class, 'moderation']);
 $router->get('/admin/reports', [AdminController::class, 'reports']);
 $router->get('/admin/support', [AdminController::class, 'support']);
 $router->get('/admin/support/{id}', [SupportController::class, 'show']);
+$router->post('/admin/support/create', [SupportController::class, 'staffCreate']);
+$router->post('/admin/support/{id}/assign', [SupportController::class, 'assign']);
 $router->get('/admin/legal', [AdminController::class, 'legal']);
 $router->get('/admin/channels', [AdminController::class, 'channels']);
 $router->get('/admin/bans', [AdminController::class, 'bans']);

@@ -27,13 +27,16 @@ services from Anope.
 - **Staff account timeline** — **Admin → Users → moderation history** keeps a staff-only record
   of every action taken against an account plus free-form staff notes; visible only to admins/staff
 - **Support tickets** — registered users open tickets from the account menu (**Support**);
-  staff reply from **Admin → Support**, and the user is emailed via the system SMTP settings
+  staff open tickets for a registered user **or an external email address**, assign them to
+  any admin/staff member, filter by status/assignee (**Admin → Support**), and the contact
+  is emailed via the system SMTP settings on each staff reply
 - **Age gate** — registering (or joining as a guest) requires certifying you are 18+, recorded
   on the account; registrations can be set to require **admin approval** (pending users can
   browse but not chat), and any account can be set **pending** or **suspended** with a reason
 - **Legal pages** — **Terms of Service** and **Privacy Policy** (US + Nevada boilerplate) are
-  editable in **Admin → Terms & Privacy** with a tiptap rich-text editor and linked from the
-  account menu in the chat sidebar and the login/register pages
+  editable in **Admin → Terms & Privacy** with a full kitchen-sink rich-text editor (headings,
+  colours, tables, task lists, images, alignment and more), sanitized on save, and linked from
+  the account menu in the chat sidebar and the login/register pages
 - **Realtime** — 2s AJAX polling with presence + mention/direct-message notification bell
 - **Sound alerts** — audio pings for DMs and for messages in channels you're not
   viewing, with per-context sounds, @mention pings, and per-user overrides

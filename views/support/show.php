@@ -1,6 +1,6 @@
 <?php
 $isStaff = ModerationService::isStaff($user);
-$isOwner = (int) $ticket['user_id'] === (int) $user['id'];
+$isOwner = $ticket['user_id'] !== null && (int) $ticket['user_id'] === (int) $user['id'];
 $back = $isStaff ? '/admin/support' : '/support';
 ?>
 <div class="max-w-3xl mx-auto">
@@ -13,13 +13,35 @@ $back = $isStaff ? '/admin/support' : '/support';
   <div class="mb-4 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-2.5 text-sm"><?= h($error) ?></div>
   <?php endif; ?>
 
-  <div class="card p-4 mb-4 text-sm flex flex-wrap gap-x-4 gap-y-1">
+  <div class="card p-4 mb-4 text-sm flex flex-wrap gap-x-4 gap-y-2 items-center">
     <span>Status:
       <span class="px-1.5 py-0.5 rounded text-[11px] <?= $ticket['status'] === 'open' ? 'bg-red-500/20 text-red-400' : ($ticket['status'] === 'answered' ? 'bg-amber-500/20 text-amber-300' : 'bg-discord-700 text-discord-400') ?>"><?= h($ticket['status']) ?></span>
     </span>
     <?php if ($isStaff): ?>
-    <span>Opened by <a class="text-blurple hover:underline" href="/admin/users/<?= (int) $ticket['user_id'] ?>"><?= h($ticket['username']) ?></a></span>
+    <span>
+      Contact:
+      <?php if ($ticket['user_id'] !== null): ?>
+      <a class="text-blurple hover:underline" href="/admin/users/<?= (int) $ticket['user_id'] ?>"><?= h($ticket['username']) ?></a>
+      <?php else: ?>
+      <span class="text-blurple"><?= h($ticket['email']) ?></span>
+      <?php endif; ?>
+      <?php if ($contactEmail && ($ticket['user_id'] === null || ($ticket['email'] ?? '') !== '')): ?>
+      <span class="text-discord-500">· emails to <?= h($contactEmail) ?></span>
+      <?php endif; ?>
+    </span>
     <span class="text-discord-400"><?= h(gmdate('M j Y H:i', strtotime($ticket['created_at'] . ' UTC'))) ?></span>
+    <?php if ($isStaff && $staff): ?>
+    <form method="post" action="/admin/support/<?= (int) $ticket['id'] ?>/assign" class="flex items-center gap-1 ml-auto">
+      <?= Csrf::field() ?>
+      <label class="text-discord-400 text-xs">Assignee</label>
+      <select name="assigned_to" class="text-xs bg-discord-750 border border-discord-600 rounded px-1.5 py-0.5" onchange="this.form.submit()">
+        <option value="">Unassigned</option>
+        <?php foreach ($staff as $s): ?>
+        <option value="<?= (int) $s['id'] ?>" <?= (int) $ticket['assigned_to'] === (int) $s['id'] ? 'selected' : '' ?>><?= h($s['username']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </form>
+    <?php endif; ?>
     <?php endif; ?>
     <?php if ($ticket['closed_at']): ?><span class="text-discord-400">Closed <?= h(gmdate('M j Y H:i', strtotime($ticket['closed_at'] . ' UTC'))) ?></span><?php endif; ?>
   </div>

@@ -984,12 +984,47 @@ check('owner cannot view someone else', SupportService::canView(SupportService::
 check('close ticket', SupportService::setStatus((int) $t['id'], 'closed', $alice)['ok'] === true);
 check('ticket closed', (SupportService::get((int) $t['id'])['status'] ?? '') === 'closed');
 
+// Staff-created tickets for an email address + assignment.
+$te = SupportService::createStaff(null, 'customer@ext.com', (int) $alice['id'], 'Email-only ticket', 'Please help', null);
+check('staff creates email ticket', $te['ok'] === true && $te['id'] > 0, json_encode($te));
+$teRow = SupportService::get($te['id']);
+check('email ticket stores email', $teRow['email'] === 'customer@ext.com' && $teRow['user_id'] === null);
+check('email ticket emails back to address', SupportService::contactEmail($teRow) === 'customer@ext.com');
+check('staff assign ticket', SupportService::assign((int) $te['id'], (int) $alice['id'])['ok'] === true);
+check('assignment persisted', (int) SupportService::get($te['id'])['assigned_to'] === (int) $alice['id']);
+check('staff can unassign', SupportService::assign((int) $te['id'], null)['ok'] === true);
+check('unassigned persists', SupportService::get($te['id'])['assigned_to'] === null);
+// Staff create for a user id (bob).
+$tu = SupportService::createStaff((int) $bob['id'], '', (int) $alice['id'], 'Staff opened for bob', 'Body', null);
+check('staff creates user ticket', $tu['ok'] === true && (int) SupportService::get($tu['id'])['user_id'] === (int) $bob['id']);
+// Email that matches a registered user auto-links.
+$bobEmail = (string) Database::scalar('SELECT email FROM users WHERE id = ?', [(int) $bob['id']]);
+$tl = SupportService::createStaff(null, strtoupper($bobEmail), (int) $alice['id'], 'Auto-link', 'Body', null);
+check('email matching user auto-links', (int) SupportService::get($tl['id'])['user_id'] === (int) $bob['id']);
+check('invalid staff ticket rejected', SupportService::createStaff(null, '', (int) $alice['id'], 'x', 'y', null)['ok'] === false);
+check('bad email rejected', SupportService::createStaff(null, 'not-an-email', (int) $alice['id'], 'x', 'y', null)['ok'] === false);
+check('staff list returns admins+staff', count(SupportService::staff()) >= 1);
+
 // ── Legal pages (ToS / Privacy) ──────────────────────────────────────────────
 echo "== legal pages ==\n";
 $terms = LegalService::get('terms');
 check('legal boilerplate generated', str_contains($terms, 'Terms of Service') && str_contains($terms, 'Nevada'));
 $clean = LegalService::sanitize('<p>Hello <script>alert(1)</script></p><p onclick="x()">ok</p><a href="javascript:evil()">x</a>');
 check('legal sanitizer strips script/events/js', !str_contains($clean, 'script') && !str_contains($clean, 'onclick') && !str_contains($clean, 'javascript:'), $clean);
+// Kitchen-sink: tables, task lists, images, colors, sub/sup, headings.
+$ks = LegalService::sanitize(
+    '<h3 style="color: red; position: fixed">Head</h3>'
+    . '<table><thead><tr><th colspan="2">A</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>'
+    . '<ul data-type="taskList"><li data-type="taskItem" data-checked="true"><label><input type="checkbox" checked><span>Do</span></label></li></ul>'
+    . '<img src="https://x.com/i.png" onerror="x()" alt="pic">'
+    . '<p>a<sub>1</sub> b<sup>2</sup> <mark>hl</mark></p>'
+);
+check('kitchen-sink keeps table', str_contains($ks, '<table>') && str_contains($ks, '<th colspan="2">'));
+check('kitchen-sink keeps task list', str_contains($ks, 'type="checkbox"') && str_contains($ks, 'data-type="taskItem"'));
+check('kitchen-sink keeps image', str_contains($ks, '<img src="https://x.com/i.png"'));
+check('kitchen-sink strips img onerror', !str_contains($ks, 'onerror'));
+check('kitchen-sink keeps sub/sup/mark', str_contains($ks, '<sub>') && str_contains($ks, '<sup>') && str_contains($ks, '<mark>'));
+check('kitchen-sink keeps safe color, strips position', str_contains($ks, 'color: red') && !str_contains($ks, 'position'));
 LegalService::save('terms', '<h1>Custom terms</h1><p>Body</p>');
 check('legal save/get round-trip', str_contains(LegalService::get('terms'), 'Custom terms'));
 

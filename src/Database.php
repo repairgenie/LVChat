@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '13';
+    private const SCHEMA_VERSION = '14';
 
     public static function init(): void
     {
@@ -156,6 +156,19 @@ final class Database
         if (!in_array('support_tickets', $tables, true)) {
             $pdo->exec('CREATE TABLE support_tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT "open", assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")), updated_at TEXT NOT NULL DEFAULT (datetime("now")), closed_at TEXT)');
             $pdo->exec('CREATE INDEX idx_support_tickets_status ON support_tickets(status, id)');
+        } else {
+            // v14: support email-only tickets (user_id nullable + email column +
+            // opened_by). SQLite can't alter NOT NULL, so rebuild the table.
+            $stCols = array_column($pdo->query('PRAGMA table_info(support_tickets)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('email', $stCols, true)) {
+                $pdo->exec('PRAGMA foreign_keys = OFF');
+                $pdo->exec('CREATE TABLE support_tickets_new (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, email TEXT, subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT "open", assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL, opened_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')), closed_at TEXT)');
+                $pdo->exec('INSERT INTO support_tickets_new (id, user_id, subject, status, assigned_to, created_at, updated_at, closed_at) SELECT id, user_id, subject, status, assigned_to, created_at, updated_at, closed_at FROM support_tickets');
+                $pdo->exec('DROP TABLE support_tickets');
+                $pdo->exec('ALTER TABLE support_tickets_new RENAME TO support_tickets');
+                $pdo->exec('CREATE INDEX idx_support_tickets_status ON support_tickets(status, id)');
+                $pdo->exec('PRAGMA foreign_keys = ON');
+            }
         }
         if (!in_array('support_ticket_replies', $tables, true)) {
             $pdo->exec('CREATE TABLE support_ticket_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, author_id INTEGER REFERENCES users(id) ON DELETE SET NULL, is_staff INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');

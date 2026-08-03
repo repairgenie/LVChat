@@ -402,10 +402,12 @@ CREATE INDEX IF NOT EXISTS idx_user_notes_user ON user_notes(user_id, id);
 -- Ticket-based support system.
 CREATE TABLE IF NOT EXISTS support_tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT,
   subject TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',
   assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opened_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   closed_at TEXT

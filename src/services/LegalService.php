@@ -13,7 +13,16 @@ declare(strict_types=1);
  */
 final class LegalService
 {
-    public const TAGS = ['p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'strong', 'em', 'u', 's', 'a', 'blockquote', 'code', 'pre', 'hr', 'br'];
+    /** Tags emitted by the kitchen-sink tiptap editor. */
+    public const TAGS = [
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li',
+        'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'mark', 'span',
+        'sub', 'sup',
+        'a', 'blockquote', 'code', 'pre', 'hr', 'br',
+        'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup', 'col',
+        'img', 'input', 'label',
+    ];
 
     public static function get(string $which): string
     {
@@ -28,14 +37,15 @@ final class LegalService
 
     /**
      * Whitelist HTML from the tiptap editor. Only allowed tags survive;
-     * event-handler attributes and javascript: URLs are stripped.
+     * event-handler attributes and javascript:/data: URLs are stripped, and the
+     * `style` attribute is rebuilt from a safe allow-list of CSS properties.
      */
     public static function sanitize(string $html): string
     {
         $html = (string) $html;
         // Drop dangerous whole elements (and their content).
-        $html = preg_replace('#<(script|style|iframe|object|embed|form|input|textarea|select|link|meta|base)[^>]*>.*?</\1>#is', '', $html);
-        $html = preg_replace('#<(script|style|iframe|object|embed|form|input|textarea|select|link|meta|base)[^>]*/?>#is', '', $html);
+        $html = preg_replace('#<(script|style|iframe|object|embed|form|textarea|select|link|meta|base)[^>]*>.*?</\1>#is', '', $html);
+        $html = preg_replace('#<(script|style|iframe|object|embed|form|textarea|select|link|meta|base)[^>]*/?>#is', '', $html);
         // Allow a bare <a> name only if it is a safe http(s) or relative link.
         $html = preg_replace_callback(
             '#<(/?)([a-zA-Z0-9]+)((?:\s+[a-zA-Z][a-zA-Z0-9:]*\s*=\s*(?:"[^"]*"|\'[^\']*\'))*)(\s*/?)>#',
@@ -51,14 +61,25 @@ final class LegalService
                         if (in_array($name, ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'onchange', 'onkeydown', 'onkeyup', 'onkeypress', 'oncontextmenu', 'oncopy', 'oncut', 'onpaste', 'ondrag', 'ondrop', 'onsubmit', 'onreset', 'onselect', 'onwheel'], true)) {
                             continue;
                         }
+                        $val = trim($am[2][$i], "\"'");
                         if ($name === 'href' || $name === 'src') {
-                            $val = trim($am[2][$i], "\"'");
                             if (preg_match('#^(javascript|data|vbscript)\s*:#i', $val)) {
                                 continue;
                             }
                             $attrs .= ' ' . $name . '="' . h($val) . '"';
                         } elseif ($tag === 'a' && $name === 'target' && $am[2][$i] === '"blank"') {
                             $attrs .= ' target="_blank" rel="noopener"';
+                        } elseif ($name === 'style') {
+                            $style = self::safeStyle($val);
+                            if ($style !== '') {
+                                $attrs .= ' style="' . h($style) . '"';
+                            }
+                        } elseif ($name === 'class') {
+                            $attrs .= ' class="' . h($val) . '"';
+                        } elseif (in_array($name, ['alt', 'title', 'width', 'height', 'colspan', 'rowspan', 'checked', 'disabled', 'data-type', 'data-checked'], true)) {
+                            $attrs .= ' ' . $name . '="' . h($val) . '"';
+                        } elseif ($name === 'type' && $val === 'checkbox') {
+                            $attrs .= ' type="checkbox"';
                         }
                     }
                 }
@@ -67,6 +88,29 @@ final class LegalService
             $html
         );
         return trim((string) $html);
+    }
+
+    /** Rebuild a `style` value from a safe CSS allow-list (color/align only). */
+    private static function safeStyle(string $css): string
+    {
+        $kept = [];
+        foreach (explode(';', $css) as $decl) {
+            if (strpos($decl, ':') === false) {
+                continue;
+            }
+            [$prop, $value] = array_map('trim', explode(':', $decl, 2));
+            $prop = strtolower($prop);
+            $value = preg_replace('/\s+/', ' ', $value);
+            if (!in_array($prop, ['color', 'background-color', 'text-align'], true)) {
+                continue;
+            }
+            // Allow hex/rgb/named colors and alignment keywords; strip anything risky.
+            if (!preg_match('~^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s,%.]+\)|[a-zA-Z]+)$~', $value)) {
+                continue;
+            }
+            $kept[] = $prop . ': ' . $value;
+        }
+        return implode('; ', $kept);
     }
 
     /** Nevada + US boilerplate, authored in the same tags tiptap emits. */

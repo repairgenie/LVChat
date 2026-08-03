@@ -298,6 +298,41 @@ is offered to **every user** in their Profile → **Notification sounds** settin
   are regenerated automatically on boot if missing, so there are always alerts
   to pick from. Upload actions are audited (`sound_add`, `sound_del`).
 
+### 2.15 Support tickets (`/admin/support`)
+
+Staff and admins manage the support inbox. The **＋ Open a ticket** button
+starts a ticket for either:
+
+- a **registered user** (pick them from the linked-user dropdown), or
+- an **email address** (for people without an account — e.g. forum visitors).
+  If the email belongs to a registered account it links automatically.
+
+Tickets can be **assigned** to any admin or staff member from the list (inline
+dropdown) or the ticket detail page. Filters group the inbox by **status**
+(All / Open / Answered / Closed) and by **Assignee** (All / Mine / Unassigned),
+so staff can work their own queue.
+
+When a staff member replies, the contact is **emailed** through the configured
+SMTP (see §6) — to the ticket's email for email-only tickets, or to the linked
+account's address. Users see their own tickets at `/support` in the app; an
+email-only ticket is never visible to another user.
+
+### 2.16 Terms & Privacy (`/admin/legal`)
+
+Edit the public **Terms of Service** and **Privacy Policy** with the full
+kitchen-sink rich-text editor — headings (H1–H6), bold/italic/underline/
+strikethrough, subscript/superscript, text and highlight colour, bulleted/
+numbered/task lists, blockquotes, inline & fenced code, text alignment,
+horizontal rules, links, images, and tables. Both documents render at
+`/terms` and `/privacy`.
+
+- **Save legal pages** stores a sanitized copy. The sanitizer whitelists only
+  safe tags/attributes, strips event handlers and `javascript:`/`data:` URLs,
+  and rebuilds `style` from a safe allow-list (`color`, `background-color`,
+  `text-align`) — so formatting survives but scripts never do.
+- **Reset to boilerplate** replaces the selected document with the built-in
+  US-federal / Nevada boilerplate (COPPA, NRS 597.790/597.795).
+
 ---
 
 ## 3. OperServ / IRCop command reference
