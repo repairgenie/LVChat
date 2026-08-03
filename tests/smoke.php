@@ -121,6 +121,39 @@ $img = MessageService::send((int) $ch['id'], $alice, '/uploads/abc123.jpg' . "\n
 check('image message inserted', $img['kind'] === 'image');
 check('image message has avatar key', array_key_exists('avatar', $img));
 
+// --- GIF messages + Giphy service ---
+echo "== gif ==\n";
+$gif = MessageService::send((int) $ch['id'], $alice, 'https://media.giphy.com/media/abc123/giphy.gif' . "\n" . 'a dancing cat', 'gif');
+check('gif message inserted', $gif['kind'] === 'gif' && str_contains((string) $gif['content'], 'media.giphy.com'));
+$gifHist = MessageService::history((int) $ch['id']);
+$gifInHist = false;
+foreach ($gifHist as $m) { if ((int) $m['id'] === (int) $gif['id'] && $m['kind'] === 'gif') $gifInHist = true; }
+check('gif message appears in history', $gifInHist);
+$gifSearch = MessageService::searchChannels($alice, 'dancing');
+check('gif searchable by title', in_array((int) $gif['id'], array_map(fn ($x) => (int) $x['id'], $gifSearch), true));
+check('gif content renders img', str_contains(chat_content_html(['kind' => 'gif', 'content' => "https://media.giphy.com/media/abc/giphy.gif\ncaption"]), '<img'));
+check('gif caption escaped', str_contains(chat_content_html(['kind' => 'gif', 'content' => "https://media.giphy.com/media/abc/giphy.gif\n<script>"]), '&lt;script&gt;'));
+check('validMediaUrl accepts giphy media', GifService::validMediaUrl('https://media.giphy.com/media/x/giphy.gif'));
+check('validMediaUrl accepts giphy media1', GifService::validMediaUrl('https://media1.giphy.com/media/x/giphy.gif'));
+check('validMediaUrl accepts i.giphy', GifService::validMediaUrl('https://i.giphy.com/x.gif'));
+check('validMediaUrl rejects http', !GifService::validMediaUrl('http://media.giphy.com/x.gif'));
+check('validMediaUrl rejects foreign host', !GifService::validMediaUrl('https://evil.example/x.gif'));
+check('validMediaUrl rejects non-url', !GifService::validMediaUrl('not a url'));
+$fixture = [
+    'data' => [
+        ['id' => 'abc', 'title' => 'Cat GIF', 'url' => 'https://giphy.com/gifs/abc', 'images' => [
+            'preview_gif' => ['url' => 'https://media.giphy.com/media/abc/preview.gif'],
+            'downsized' => ['url' => 'https://media.giphy.com/media/abc/downsized.gif'],
+        ]],
+        ['id' => '', 'title' => 'skip me', 'images' => []],
+    ],
+];
+$items = GifService::itemsFrom($fixture);
+check('itemsFrom normalizes giphy payload', count($items) === 1);
+check('item preview/url mapped', ($items[0]['preview'] ?? '') === 'https://media.giphy.com/media/abc/preview.gif' && ($items[0]['url'] ?? '') === 'https://media.giphy.com/media/abc/downsized.gif');
+check('item carries provider', ($items[0]['provider'] ?? '') === 'giphy');
+check('itemsFrom empty on malformed', GifService::itemsFrom([]) === []);
+
 // --- Reactions ---
 echo "== reactions ==\n";
 $r = MessageService::toggleReaction((int) $msg['id'], $alice, '👍');
@@ -227,6 +260,11 @@ foreach ($histRows as $r) { if (($r['kind'] ?? '') === 'image' && str_contains((
 check('dmHistoryBefore returns DM image kind', $histKind, json_encode($histRows));
 $plain = MessageService::insertPm($bob, $alice, 'plain dm');
 check('plain DM defaults to kind message', (Database::row('SELECT kind FROM private_messages WHERE id = ?', [$plain])['kind'] ?? '') === 'message');
+
+// GIFs post into DMs with kind gif, exactly like image attachments.
+$gifDm = MessageService::insertPm($alice, $bob, "https://media.giphy.com/media/dm/giphy.gif\nDM GIF", 'gif');
+check('DM gif inserted', $gifDm > 0);
+check('DM gif stored with kind gif', (Database::row('SELECT kind FROM private_messages WHERE id = ?', [$gifDm])['kind'] ?? '') === 'gif');
 
 // --- Keyed / private channel + share link flow ---
 echo "== private channel / share link ==\n";

@@ -45,6 +45,10 @@ services from Anope.
   sound is available to all users
 - **Resilient sending** — the composer posts via AJAX, with a native no-JS fallback that
   still delivers the message and returns you to the channel
+- **GIF search** — a Giphy-backed GIF picker in the composer (channels and DMs) with
+  live search and trending; the API key is set under **Admin → Settings** and all
+  search/trending calls are proxied through this server so the key never reaches browsers.
+  Posted GIFs render inline and stay searchable by their title in chat history
 - **Slash commands** — full parser + Discord-style autocomplete for the entire IRC/Anope command set (see `/help`)
 - **Shareable channel links** — `/c/gaming` links that land a logged-out friend on login/register
   and bounce them back into the channel; logged-in users with the link are auto-joined
@@ -155,6 +159,11 @@ against their own nick and gain that class's permissions. Default classes: `neta
 `serveradmin`, `globalop`, `localop` (custom classes via **Admin → Operclasses**). There is
 no shared operator password. (You can also set the `users.role` column directly in SQLite
 if you ever need to recover admin access.)
+
+**GIF search** needs a free [Giphy API key](https://developers.giphy.com) — add it under
+**Admin → Settings → Giphy API key** and tick **GIF search (Giphy)**. Until a key is added,
+the picker explains that GIF search isn't configured. The picker shows trending GIFs on
+open and searches Giphy as you type; clicking one posts it to the current channel or DM.
 
 ## Scaling on shared hosting
 

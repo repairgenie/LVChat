@@ -138,6 +138,17 @@
   }
 
   function msgContentHtml(m) {
+    if (m.kind === 'gif') {
+      const parts = String(m.content || '').split('\n');
+      const url = (parts.shift() || '').trim();
+      const caption = parts.join('\n').trim();
+      let html = '';
+      if (url) {
+        html += `<a href="${esc(url)}" class="inline-block mt-1" target="_blank" rel="noopener"><img src="${esc(url)}" alt="${esc(caption || 'GIF')}" loading="lazy" class="max-h-72 max-w-full rounded-lg border border-discord-700 object-contain hover:opacity-90 transition-opacity"></a>`;
+      }
+      if (caption) html += `<div class="mt-1">${linkify(caption)}</div>`;
+      return html;
+    }
     if (m.kind === 'image') {
       const parts = String(m.content || '').split('\n');
       const path = (parts.shift() || '').trim();
@@ -878,6 +889,109 @@
     hideEmojiPanel();
   });
 
+  // ── GIF picker (Giphy, proxied through the server so the key stays private) ─
+  const gifBtn = document.getElementById('gif-btn');
+  const gifPanel = document.getElementById('gif-panel');
+  const gifGrid = document.getElementById('gif-grid');
+  const gifSearch = document.getElementById('gif-search');
+  const gifMore = document.getElementById('gif-more');
+  const gifStatus = document.getElementById('gif-status');
+  let gifOffset = 0;
+  let gifQuery = '';
+  let gifLoading = false;
+
+  function gifSetStatus(t) {
+    if (!gifStatus) return;
+    if (t) { gifStatus.textContent = t; gifStatus.classList.remove('hidden'); }
+    else gifStatus.classList.add('hidden');
+  }
+  function gifClose() { if (gifPanel) gifPanel.classList.add('hidden'); }
+  function loadGifs(reset) {
+    if (!gifGrid || gifLoading) return;
+    gifLoading = true;
+    const q = new URLSearchParams({ limit: '24' });
+    if (gifQuery) q.set('q', gifQuery);
+    if (!reset && gifOffset) q.set('offset', gifOffset);
+    if (gifMore) gifMore.classList.add('hidden');
+    gifSetStatus(gifQuery ? 'Searching…' : 'Loading…');
+    fetch('/api/gifs?' + q.toString())
+      .then((r) => r.json().catch(() => ({ error: 'Server error' })))
+      .then((j) => {
+        gifLoading = false;
+        if (!j.ok) {
+          if (gifGrid) gifGrid.innerHTML = '';
+          gifSetStatus(j.error || 'GIF search unavailable.');
+          return;
+        }
+        const items = j.gifs || [];
+        if (gifGrid) {
+          const html = items.map((g) =>
+            `<button type="button" class="gif-item rounded-md overflow-hidden border border-discord-700 hover:border-blurple/60 transition-colors aspect-video bg-discord-850" data-url="${esc(g.url)}" data-title="${esc(g.title)}" title="${esc(g.title || 'GIF')}">
+              <img src="${esc(g.preview)}" alt="${esc(g.title || 'GIF')}" loading="lazy" class="w-full h-full object-cover">
+            </button>`).join('');
+          if (reset) gifGrid.innerHTML = html;
+          else gifGrid.insertAdjacentHTML('beforeend', html);
+        }
+        gifOffset = parseInt(j.next || '0', 10) || 0;
+        if (gifMore) {
+          if (items.length && gifOffset) gifMore.classList.remove('hidden');
+          else gifMore.classList.add('hidden');
+        }
+        gifSetStatus(items.length ? '' : (gifQuery ? 'No GIFs found for “' + gifQuery + '”.' : 'No trending GIFs right now.'));
+        bindGifItems();
+      })
+      .catch(() => {
+        gifLoading = false;
+        gifSetStatus('GIF search failed. Try again.');
+      });
+  }
+  function bindGifItems() {
+    if (!gifGrid) return;
+    gifGrid.querySelectorAll('.gif-item').forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = '1';
+      b.addEventListener('click', () => {
+        const url = b.dataset.url;
+        if (!url) return;
+        const payload = DM
+          ? { recipient: DM, gif_url: url, gif_title: b.dataset.title || '' }
+          : { channel: CHANNEL, gif_url: url, gif_title: b.dataset.title || '' };
+        post('/api/send', payload, (j) => {
+          if (j.message) appendMsg(j.message);
+          gifClose();
+        });
+      });
+    });
+  }
+  if (gifBtn) gifBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (gifPanel.classList.contains('hidden')) {
+      gifPanel.classList.remove('hidden');
+      if (!gifGrid.children.length) loadGifs(true);
+      if (gifSearch) gifSearch.focus();
+    } else {
+      gifClose();
+    }
+  });
+  const gifCloseBtn = document.getElementById('gif-close');
+  if (gifCloseBtn) gifCloseBtn.addEventListener('click', gifClose);
+  if (gifMore) gifMore.addEventListener('click', () => loadGifs(false));
+  if (gifSearch) {
+    let gifTimer = null;
+    gifSearch.addEventListener('input', () => {
+      clearTimeout(gifTimer);
+      gifTimer = setTimeout(() => { gifQuery = gifSearch.value.trim(); loadGifs(true); }, 350);
+    });
+    gifSearch.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); gifQuery = gifSearch.value.trim(); loadGifs(true); }
+      else if (e.key === 'Escape') gifClose();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#gif-panel') || e.target.closest('#gif-btn')) return;
+    gifClose();
+  });
+
   // ── Image upload (composer 📎) ─────────────────────────────────────────────
   const uploadBtn = document.getElementById('upload-btn');
   const uploadFile = document.getElementById('upload-file');
@@ -1153,7 +1267,7 @@
     }
     if (content) items.push({ label: 'Copy text', onClick: () => copyText(content) });
     const kind = el.dataset.kind || '';
-    if (kind === 'message' || kind === 'image') {
+    if (kind === 'message' || kind === 'image' || kind === 'gif') {
       items.push({ label: 'Report message', onClick: () => openReport(id, el.dataset.isPm === '1', content) });
     }
     const mine = author && author.toLowerCase() === MY_NICK;

@@ -25,6 +25,7 @@ require ROOT . '/src/services/MessageService.php';
 require ROOT . '/src/services/BanService.php';
 require ROOT . '/src/services/CensorService.php';
 require ROOT . '/src/services/UploadService.php';
+require ROOT . '/src/services/GifService.php';
 require ROOT . '/src/services/SoundService.php';
 require ROOT . '/src/services/WebhookService.php';
 require ROOT . '/src/services/Mailer.php';

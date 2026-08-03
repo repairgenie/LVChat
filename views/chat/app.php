@@ -430,6 +430,16 @@ function member_html(array $m, bool $online): string {
     <div class="px-4 pt-2 pb-4 shrink-0 bg-discord-750">
       <div id="autocomplete" class="hidden mb-2 card max-h-56 overflow-y-auto scrollbar-thin"></div>
       <div id="emoji-panel" class="hidden mb-2 card p-2 grid grid-cols-8 gap-1 max-h-56 overflow-y-auto scrollbar-thin"></div>
+      <div id="gif-panel" class="hidden mb-2 card max-h-96 flex flex-col">
+        <div class="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b border-discord-700 shrink-0">
+          <span class="text-xs font-bold uppercase tracking-wide text-discord-400">GIF</span>
+          <input id="gif-search" type="search" placeholder="Search Giphy…" autocomplete="off" class="input flex-1 !py-1.5 !text-xs">
+          <button type="button" id="gif-close" class="text-discord-400 hover:text-white text-xs px-1" title="Close">✕</button>
+        </div>
+        <div id="gif-grid" class="grid grid-cols-4 gap-1.5 overflow-y-auto scrollbar-thin p-2"></div>
+        <div id="gif-status" class="hidden px-3 py-2 text-xs text-discord-400 border-t border-discord-700 shrink-0"></div>
+        <button type="button" id="gif-more" class="hidden py-2 text-xs text-blurple hover:text-white hover:bg-blurple/10 transition-colors shrink-0">Load more GIFs</button>
+      </div>
       <div id="reply-chip" class="hidden mb-2 flex items-center gap-2 card px-3 py-1.5 text-sm text-discord-300">
         <span class="text-xs text-blurple font-semibold">↪ Replying to</span>
         <span id="reply-chip-name" class="font-semibold text-white truncate"></span>
@@ -445,11 +455,12 @@ function member_html(array $m, bool $online): string {
         <?php endif; ?>
         <input type="hidden" id="reply-to-input" name="reply_to" value="">
         <textarea id="chat-input" name="content" rows="1" autocomplete="off" spellcheck="false"
-               class="input pr-28 py-2.5 resize-none bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow align-middle max-h-40 overflow-y-auto"
+               class="input pr-48 py-2.5 resize-none bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow align-middle max-h-40 overflow-y-auto"
                placeholder="<?= h($channel ? "Message #" . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
                <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
-        <button type="button" id="upload-btn" class="absolute right-24 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
+        <button type="button" id="upload-btn" class="absolute right-36 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
         <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+        <button type="button" id="gif-btn" class="absolute right-24 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-xs font-bold <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Send a GIF">GIF</button>
         <button type="button" id="emoji-btn" class="absolute right-12 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji">😀</button>
         <button type="submit" class="absolute right-2 top-1/2 -translate-y-1/2 btn-primary !p-1.5 !rounded-md" title="Send">➤</button>
       </form>

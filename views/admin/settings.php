@@ -52,6 +52,18 @@
   </div>
   <div class="flex items-center justify-between card p-4">
     <div>
+      <div class="text-sm font-medium text-white">GIF search (Giphy)</div>
+      <div class="text-xs text-discord-400">Allow members to search and post GIFs in channels and DMs</div>
+    </div>
+    <input type="checkbox" name="gifs_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['gifs_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
+  <div>
+    <label class="label">Giphy API key</label>
+    <input class="input font-mono" name="giphy_api_key" value="<?= h($settings['giphy_api_key'] ?? '') ?>" placeholder="Get a free key at developers.giphy.com" autocomplete="off" spellcheck="false">
+    <p class="text-xs text-discord-400 mt-1">Required for GIF search. Search/trending is proxied through this server, so the key is never exposed to browsers.</p>
+  </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
       <div class="text-sm font-medium text-white">Realtime mode</div>
       <div class="text-xs text-discord-400">SSE streams live updates but holds a PHP worker per client — best on a VPS/php-fpm. Polling is the shared-hosting default.</div>
     </div>

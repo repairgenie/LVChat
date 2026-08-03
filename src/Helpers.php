@@ -399,6 +399,21 @@ function chat_markup_rich(string $text): string
  */
 function chat_content_html(array $m): string
 {
+    if (($m['kind'] ?? '') === 'gif') {
+        $lines = explode("\n", (string) $m['content'], 2);
+        $url = trim($lines[0] ?? '');
+        $caption = trim($lines[1] ?? '');
+        $html = '';
+        if ($url !== '') {
+            $html .= '<a href="' . h($url) . '" class="inline-block mt-1" target="_blank" rel="noopener">'
+                . '<img src="' . h($url) . '" alt="' . h($caption !== '' ? $caption : 'GIF') . '" loading="lazy" class="max-h-72 max-w-full rounded-lg border border-discord-700 object-contain hover:opacity-90 transition-opacity">'
+                . '</a>';
+        }
+        if ($caption !== '') {
+            $html .= '<div class="mt-1">' . chat_markup_rich($caption) . '</div>';
+        }
+        return $html;
+    }
     if (($m['kind'] ?? '') === 'image') {
         $lines = explode("\n", (string) $m['content'], 2);
         $path = trim($lines[0] ?? '');

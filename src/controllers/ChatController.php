@@ -167,6 +167,19 @@ final class ChatController
             self::finish(['error' => $restriction], '/app', 403);
         }
         $content = trim((string) ($_POST['content'] ?? ''));
+        // GIF messages: the picker posts gif_url (+ optional gif_title) instead
+        // of free text. The media URL is validated against known Giphy CDN hosts,
+        // and the title is stored beneath it so chat search finds it by caption.
+        $gifKind = false;
+        $gifUrl = trim((string) ($_POST['gif_url'] ?? ''));
+        if ($gifUrl !== '') {
+            if (!GifService::validMediaUrl($gifUrl)) {
+                self::finish(['error' => 'Invalid GIF URL.'], '/app', 400);
+            }
+            $gifTitle = mb_substr(trim((string) ($_POST['gif_title'] ?? '')), 0, 300);
+            $content = $gifUrl . ($gifTitle !== '' ? "\n" . $gifTitle : '');
+            $gifKind = true;
+        }
         if ($content === '') {
             self::finish(['error' => 'Message is empty.'], '/app', 400);
         }
@@ -212,7 +225,7 @@ final class ChatController
                     self::finish(['ok' => true, 'blocked' => true, 'notice' => $notice], $backPm);
                 }
             }
-            $pmId = MessageService::insertPm($user, $t, $content);
+            $pmId = MessageService::insertPm($user, $t, $content, $gifKind ? 'gif' : 'message');
             MessageService::notifyDm($t, $user, $pmId);
             MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
             $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
@@ -266,7 +279,7 @@ final class ChatController
             if ($censor['action'] === 'censor') {
                 $content = $censor['censored'];
             } else {
-                $msg = MessageService::send((int) $channel['id'], $user, $content, 'message', $replyTo);
+                $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
                 Database::query('UPDATE messages SET deleted = 1 WHERE id = ?', [$msg['id']]);
                 $notice = 'Chanserv removed message from ' . $user['username'] . ' due to prohibited words';
                 MessageService::system((int) $channel['id'], 'system', $notice);
@@ -274,9 +287,46 @@ final class ChatController
                 self::finish(['ok' => true, 'message' => $msg, 'blocked' => true, 'notice' => $notice], $back);
             }
         }
-        $msg = MessageService::send((int) $channel['id'], $user, $content, 'message', $replyTo);
+        $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
         $msg['channel'] = $channel['slug'];
         self::finish(['ok' => true, 'message' => $msg], $back);
+    }
+
+    /**
+     * GET /api/gifs — proxy for Giphy search/trending so the API key never
+     * reaches the browser. `q` empty = trending. Returns normalized items plus
+     * the next pagination offset.
+     */
+    public static function gifSearch(): void
+    {
+        $user = self::requireUser();
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            json_out(['error' => $restriction], 403);
+        }
+        if (!GifService::enabled()) {
+            json_out(['error' => 'GIF search is disabled on this server.'], 403);
+        }
+        if (!GifService::configured()) {
+            json_out(['ok' => false, 'error' => 'GIF search is not configured by the admin yet. Add a Giphy API key in Admin → Settings.', 'gifs' => [], 'next' => '']);
+        }
+        $col = MessageService::isGuest($user) ? 'sender_guest_id' : 'sender_id';
+        $recent = (int) Database::scalar(
+            "SELECT COUNT(*) FROM messages WHERE $col = ? AND created_at >= datetime('now', '-10 seconds')",
+            [$user['id']]
+        );
+        if ($recent > 30) {
+            json_out(['error' => 'Too many requests. Slow down.'], 429);
+        }
+        $q = trim((string) ($_GET['q'] ?? ''));
+        $limit = max(1, min(50, (int) ($_GET['limit'] ?? 24)));
+        $offset = max(0, (int) ($_GET['offset'] ?? 0));
+        $gifs = $q !== '' ? GifService::search($q, $limit, $offset) : GifService::trending($limit, $offset);
+        json_out([
+            'ok' => true,
+            'gifs' => $gifs,
+            'next' => ($gifs && count($gifs) === $limit) ? (string) ($offset + $limit) : '',
+        ]);
     }
 
     /** POST /api/upload — upload an image and post it as an image message

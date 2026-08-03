@@ -43,6 +43,7 @@ $router->post('/api/message/reaction', [ChatController::class, 'reaction']);
 $router->post('/api/report', [ChatController::class, 'report']);
 $router->get('/api/history', [ChatController::class, 'historyApi']);
 $router->get('/api/search', [ChatController::class, 'search']);
+$router->get('/api/gifs', [ChatController::class, 'gifSearch']);
 
 // Users / profiles
 $router->get('/u/{username}', [UserController::class, 'profile']);

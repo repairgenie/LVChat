@@ -377,6 +377,7 @@ final class Database
             'spamfilter_enabled' => '1',
             'uploads_enabled' => '1',
             'reactions_enabled' => '1',
+            'gifs_enabled' => '1',
             'webhooks_enabled' => '1',
             'max_channels_per_user' => '100',
             'presence_throttle' => '30',

@@ -190,6 +190,26 @@ check('search finds channel message', $s === 200 && $found, $b);
 $j = jsonDecode($b);
 check('search handles hyphenated term', $s === 200 && !count($j['results']['channels'] ?? []), $b);
 
+// ── GIF messages ─────────────────────────────────────────────────────────────
+echo "== gif ==\n";
+$t = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => $t, 'channel' => 'gaming', 'gif_url' => 'https://media.giphy.com/media/abc123/giphy.gif', 'gif_title' => 'dancing cat'], $cjA);
+$j = jsonDecode($b);
+check('gif posted to channel (kind gif)', $s === 200 && ($j['ok'] ?? false) === true && ($j['message']['kind'] ?? '') === 'gif', $b);
+check('gif content stores url + title', str_starts_with((string) ($j['message']['content'] ?? ''), 'https://media.giphy.com/'), $b);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => $t, 'channel' => 'gaming', 'gif_url' => 'https://evil.example/x.gif', 'gif_title' => 'bad'], $cjA);
+check('gif from disallowed host rejected (400)', $s === 400, $b);
+// GIF search proxy without a configured key reports a clear error (no upstream call).
+[$s, , $b] = req('GET', '/api/gifs?q=cat', [], $cjA);
+$j = jsonDecode($b);
+check('gif search not-configured error', $s === 200 && ($j['ok'] ?? true) === false && ($j['error'] ?? '') !== '', $b);
+// The posted GIF is findable through chat search by its title.
+[$s, , $b] = req('GET', '/api/search?q=dancing', [], $cjA);
+$j = jsonDecode($b);
+$found = false;
+foreach (($j['results']['channels'] ?? []) as $r) { if (str_contains((string) ($r['content'] ?? ''), 'media.giphy.com')) $found = true; }
+check('posted gif searchable by title', $s === 200 && $found, $b);
+
 [$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0', [], $cjA);
 $j = jsonDecode($b);
 check('poll returns messages', $s === 200 && count($j['messages'] ?? []) > 0, $b);
@@ -410,6 +430,19 @@ foreach (($j['messages'] ?? []) as $m) {
     if (($m['kind'] ?? '') === 'image' && ($m['content'] ?? '') === $imgUrl && ($m['is_pm'] ?? false) === true) $found = true;
 }
 check('recipient DM poll surfaces the image PM', $s === 200 && $found, "$s $b");
+
+// GIFs post into DMs with kind gif, exactly like image attachments.
+$tA = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => $tA, 'recipient' => 'bob', 'gif_url' => 'https://media.giphy.com/media/dm/giphy.gif', 'gif_title' => 'DM GIF'], $cjA);
+$j = jsonDecode($b);
+check('gif posted to DM (kind gif)', $s === 200 && ($j['ok'] ?? false) === true && ($j['message']['kind'] ?? '') === 'gif' && ($j['message']['is_pm'] ?? false) === true, "$s $b");
+[$s, , $b] = req('GET', '/api/poll?dm=alice&since=0', [], $cjB);
+$j = jsonDecode($b);
+$gifFound = false;
+foreach (($j['messages'] ?? []) as $m) {
+    if (($m['kind'] ?? '') === 'gif' && str_contains((string) ($m['content'] ?? ''), 'media.giphy.com') && ($m['is_pm'] ?? false) === true) $gifFound = true;
+}
+check('recipient DM poll surfaces the GIF PM', $s === 200 && $gifFound, "$s $b");
 
 // SMTP settings save + graceful test failure (no SMTP server running).
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
