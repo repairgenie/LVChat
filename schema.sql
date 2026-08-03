@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen TEXT,
   last_ip TEXT,
   notify TEXT NOT NULL DEFAULT 'all',
-  avatar TEXT
+  avatar TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  status_reason TEXT,
+  age_verified_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -37,7 +40,8 @@ CREATE TABLE IF NOT EXISTS guests (
   nick TEXT NOT NULL UNIQUE COLLATE NOCASE,
   ip TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_seen TEXT
+  last_seen TEXT,
+  age_verified_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS guest_sessions (
@@ -259,6 +263,40 @@ CREATE TABLE IF NOT EXISTS channel_notify (
 );
 CREATE INDEX IF NOT EXISTS idx_channel_notify_user ON channel_notify(user_id);
 
+-- Sound alerts: audio files uploaded by admins and offered to every user for
+-- channel-message / DM notifications. Users cannot upload their own.
+CREATE TABLE IF NOT EXISTS sound_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  file TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-user sound preferences. Absence of a row means "use the default sound"
+-- (channel/DM sounds are on by default). A NULL sound id means that context is
+-- explicitly muted; a deleted sound falls back to muted via ON DELETE SET NULL.
+CREATE TABLE IF NOT EXISTS user_sound_prefs (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  dm_sound_id INTEGER REFERENCES sound_alerts(id) ON DELETE SET NULL,
+  channel_sound_id INTEGER REFERENCES sound_alerts(id) ON DELETE SET NULL
+);
+
+-- Per-user override for a specific sender: a NULL sound id mutes that person
+-- entirely (both their DMs and their channel messages). No row = follow the
+-- user's default channel/DM choices. Deleting a sound removes the override, so
+-- it reverts to the default rather than accidentally muting the person.
+CREATE TABLE IF NOT EXISTS user_sound_overrides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sound_id INTEGER REFERENCES sound_alerts(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, target_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sound_overrides_user ON user_sound_overrides(user_id);
+
 -- Incoming webhooks: POST /api/webhooks/<token> posts into a channel as a bot.
 -- token_hash stores the SHA-256 of the secret (never the raw token).
 CREATE TABLE IF NOT EXISTS webhooks (
@@ -309,6 +347,80 @@ CREATE TABLE IF NOT EXISTS notifications (
   read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Moderation queue: records every time a user trips a filter/bad-word, or is
+-- the target of a moderation action (kick, channel ban, kline/gline/zline/shun).
+CREATE TABLE IF NOT EXISTS moderation_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT 'applied',
+  match TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  target TEXT NOT NULL DEFAULT '',
+  channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_moderation_events_user ON moderation_events(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_moderation_events_guest ON moderation_events(guest_id, id);
+
+-- User-submitted message reports (right-click -> report). Content and sender are
+-- snapshotted so reports survive edits/deletes.
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+  pm INTEGER NOT NULL DEFAULT 0,
+  channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+  reporter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reporter_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+  sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+  sender_name TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  reason_other TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  handled_at TEXT,
+  resolution TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, id);
+
+-- Staff-only timeline of moderation actions and notes against an account.
+CREATE TABLE IF NOT EXISTS user_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL DEFAULT 'note',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_notes_user ON user_notes(user_id, id);
+
+-- Ticket-based support system.
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status, id);
+
+CREATE TABLE IF NOT EXISTS support_ticket_replies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+  author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  is_staff INTEGER NOT NULL DEFAULT 0,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_replies_ticket ON support_ticket_replies(ticket_id, id);
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id);
 CREATE INDEX IF NOT EXISTS idx_pm_pair ON private_messages(sender_id, recipient_id, id);

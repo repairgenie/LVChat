@@ -41,6 +41,12 @@ final class AuthController
             flash('This account is banned.' . ($reason ? ' Reason: ' . $reason : ''));
             redirect('/login');
         }
+        if (($user['status'] ?? 'active') === 'suspended') {
+            login_attempt_record();
+            $reason = trim((string) ($user['status_reason'] ?? ''));
+            flash('This account is suspended.' . ($reason !== '' ? ' Reason: ' . $reason : ''));
+            redirect('/login');
+        }
         login_attempt_clear();
         Auth::login($user);
         redirect($next);
@@ -67,6 +73,7 @@ final class AuthController
             'old' => $_SESSION['old'] ?? [],
             'invite' => $invite,
             'registration_open' => config_get('registration_enabled', '1') === '1',
+            'requires_approval' => config_get('registration_requires_approval', '0') === '1',
         ]);
     }
 
@@ -99,7 +106,8 @@ final class AuthController
             redirect('/register');
         }
 
-        $result = Auth::register($username, $email, $password);
+        $age18 = ($_POST['age18'] ?? '0') === '1';
+        $result = Auth::register($username, $email, $password, $age18);
         if (!$result['ok']) {
             $_SESSION['old'] = ['username' => $username, 'email' => $email];
             flash(implode(' ', $result['errors']));
@@ -110,6 +118,10 @@ final class AuthController
         }
         $user = Auth::attempt($username, $password);
         Auth::login($user);
+        if (($user['status'] ?? 'active') === 'pending') {
+            flash('Your account is pending admin approval. You can browse channels, but you cannot chat until an admin approves it.');
+            redirect('/app');
+        }
         redirect($next);
     }
 
@@ -125,11 +137,17 @@ final class AuthController
         Csrf::verify();
         $next = $_POST['next'] ?? '/';
         $nick = trim((string) ($_POST['nick'] ?? ''));
+        $age18 = ($_POST['age18'] ?? '0') === '1';
         if (login_attempt_count() >= login_attempt_max()) {
             flash('Too many attempts. Please wait a few minutes and try again.');
             redirect('/login?next=' . rawurlencode($next));
         }
-        $user = Auth::loginGuest($nick);
+        if (!$age18) {
+            login_attempt_record();
+            flash('You must certify that you are at least 18 years old to join as a guest.');
+            redirect('/login?next=' . rawurlencode($next));
+        }
+        $user = Auth::loginGuest($nick, true);
         if (!$user) {
             login_attempt_record();
             flash('That nickname is invalid or already in use. Try another one.');

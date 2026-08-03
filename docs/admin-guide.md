@@ -281,6 +281,23 @@ invited address. Clicking the emailed link is the proof of access, so an invite
 and still admit people you've invited. Invites are audited
 (`invite_create`, `invite_resend`, `invite_revoke`).
 
+### 2.14 Sound alerts (`/admin/sounds`)
+
+Server-wide audio alerts for channel messages and DMs. Anything you upload here
+is offered to **every user** in their Profile → **Notification sounds** settings
+(users cannot upload their own — only admins can).
+
+- **Upload** — a name plus an audio file (**MP3, WAV, OGG, WebM, M4A**, max
+  2 MB). Each upload becomes a selectable alert with a built-in preview player.
+- **Status** — disabling a sound hides it from every user's picker (existing
+  choices simply stop playing); re-enable it to restore it.
+- **Delete** — removes the sound and its file. Users who had selected it for a
+  channel/DM fall back to muted; per-user overrides pointing at it revert to
+  that user's defaults (nobody is silently muted).
+- Three built-in sounds (**Ding**, **Pop**, **Chime**) ship with the server and
+  are regenerated automatically on boot if missing, so there are always alerts
+  to pick from. Upload actions are audited (`sound_add`, `sound_del`).
+
 ---
 
 ## 3. OperServ / IRCop command reference

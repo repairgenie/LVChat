@@ -24,6 +24,13 @@
   </div>
   <div class="flex items-center justify-between card p-4">
     <div>
+      <div class="text-sm font-medium text-white">Require admin approval for new registrations</div>
+      <div class="text-xs text-discord-400">New accounts are created as "pending" and cannot chat until an admin approves them (they can still log in and browse).</div>
+    </div>
+    <input type="checkbox" name="registration_requires_approval" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['registration_requires_approval'] ?? '0') === '1' ? 'checked' : '' ?>>
+  </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
       <div class="text-sm font-medium text-white">Spam filters</div>
       <div class="text-xs text-discord-400">Apply active spam filters to messages</div>
     </div>

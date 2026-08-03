@@ -82,7 +82,7 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
         $rc = (!$isAdmin && !empty($m['role_color'])) ? ' style="color:' . h($m['role_color']) . '"' : '';
         $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
         $nameColor = $isAdmin ? 'text-red-400' : 'text-discord-100';
-        return '<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="' . (int) $m['id'] . '" data-kind="action" data-author="' . h($m['username']) . '">
+        return '<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="' . (int) $m['id'] . '" data-kind="action" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '">
             <div class="w-10 shrink-0"></div>
             <div class="text-sm ' . ($isAdmin ? 'text-red-400' : 'text-discord-200') . '"' . $rc . '><span class="italic">* <span class="font-medium ' . $nameColor . '"' . $rc . '>' . h($m['username']) . '</span>' . $guestTag . ' ' . chat_markup($m['content']) . '</span></div>
         </div>';
@@ -114,7 +114,7 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     }
 
     if ($group) {
-        return '<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="message" data-author="' . h($m['username']) . '">
+        return '<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="message" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '">
             <div class="w-10 shrink-0"></div>
             <div class="min-w-0 flex-1">
                 ' . $replyLine . '
@@ -132,7 +132,7 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
             . '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
 
-    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-author="' . h($m['username']) . '">
+    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '">
         <div class="w-10 h-10 shrink-0">' . avatar_img($m, 'w-10 h-10 rounded-full') . '</div>
         <div class="min-w-0 flex-1">
             <div class="flex items-baseline gap-2 h-[22px]">
@@ -210,7 +210,11 @@ function member_html(array $m, bool $online): string {
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-rt="<?= config_get('realtime', 'poll') === 'sse' ? 'sse' : 'poll' ?>"
-      data-commands="<?= h(json_encode($commands)) ?>">
+      data-commands="<?= h(json_encode($commands)) ?>"
+      data-sounds="<?= h(json_encode($sounds['sounds'])) ?>"
+      data-sound-prefs="<?= h(json_encode(['dm_sound_id' => $sounds['dm_sound_id'], 'channel_sound_id' => $sounds['channel_sound_id']])) ?>"
+      data-sound-overrides="<?= h(json_encode($sounds['overrides'])) ?>"
+      data-bg-last="<?= (int) $bgLast ?>">
 
   <!-- ── Left: channel sidebar ── -->
   <aside id="sidebar" class="sidebar w-60 md:w-64 bg-discord-800 flex flex-col shrink-0">
@@ -233,6 +237,12 @@ function member_html(array $m, bool $online): string {
       <nav class="px-2 pt-3">
         <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
           <span class="text-discord-400">🛡</span> Admin dashboard
+        </a>
+      </nav>
+      <?php elseif ($user['role'] === 'staff'): ?>
+      <nav class="px-2 pt-3">
+        <a href="/admin/moderation" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
+          <span class="text-discord-400">🛡</span> Moderation
         </a>
       </nav>
       <?php endif; ?>
@@ -301,13 +311,20 @@ function member_html(array $m, bool $online): string {
           <button id="user-menu-btn" class="text-discord-400 hover:text-white text-xs px-1">⚙</button>
           <div id="user-menu" class="hidden absolute bottom-9 right-0 w-56 card p-1.5 shadow-xl z-50">
             <a href="/u/<?= h(rawurlencode($user['username'])) ?>" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Profile & settings</a>
+            <a href="/support" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Support</a>
             <?php if ($channel): ?>
             <button id="set-away-btn" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Set away</button>
             <?php endif; ?>
             <?php if ($user['role'] === 'admin'): ?>
             <a href="/admin" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm text-amber-400">Admin dashboard</a>
+            <?php elseif ($user['role'] === 'staff'): ?>
+            <a href="/admin/moderation" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm text-amber-400">Moderation</a>
             <?php endif; ?>
             <button type="button" data-embed class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Get embed code</button>
+            <div class="h-px bg-discord-700 my-1"></div>
+            <a href="/terms" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Terms of Service</a>
+            <a href="/privacy" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Privacy Policy</a>
+            <div class="h-px bg-discord-700 my-1"></div>
             <form method="post" action="/logout"><?= Csrf::field() ?><button class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm text-red-400">Log out</button></form>
           </div>
         </div>
@@ -343,6 +360,12 @@ function member_html(array $m, bool $online): string {
       </div>
       <?php endif; ?>
     </header>
+
+    <?php if (($user['status'] ?? 'active') === 'pending'): ?>
+    <div class="px-4 py-2 text-xs text-amber-300 bg-amber-500/10 border-b border-amber-500/30">
+      ⏳ Your account is <strong>pending admin approval</strong> — you can browse channels, but you cannot chat until an admin approves it.
+    </div>
+    <?php endif; ?>
 
     <?php if ($channel && !ChannelService::isRegistered($channel)): ?>
     <div class="px-4 py-2 text-xs <?= (int) $channel['owner_id'] === (int) $user['id'] ? 'text-amber-300 bg-amber-500/10 border-b border-amber-500/30' : 'text-discord-400 bg-discord-850 border-b border-discord-700' ?>">
@@ -535,6 +558,36 @@ function member_html(array $m, bool $online): string {
 
   <!-- Right-click context menu -->
   <div id="ctx-menu" class="hidden fixed z-[100] min-w-52 max-w-72 card p-1.5 shadow-2xl text-sm"></div>
+
+  <!-- Report message modal -->
+  <div id="report-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-report-close></div>
+    <div class="relative card p-6 w-[min(92vw,480px)] shadow-2xl">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-lg font-bold text-white">Report message</h2>
+        <button type="button" data-report-close class="text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
+      </div>
+      <p class="text-xs text-discord-400 mb-4">This report goes to the staff. The message content is included.</p>
+      <div class="mb-3 rounded-lg bg-discord-850 border border-discord-700 px-3 py-2 text-sm text-discord-300 max-h-24 overflow-y-auto">
+        <span class="text-[10px] uppercase tracking-wide text-discord-400 font-semibold block mb-0.5"><?= h($user['username']) ?> · quoted message</span>
+        <span id="report-quote" class="line-clamp-3 break-words"></span>
+      </div>
+      <div class="space-y-2 text-sm" id="report-reasons">
+        <?php foreach (['Harassment / Bullying', 'Spam or advertising', 'Hate speech', 'Inappropriate / NSFW content', 'Threatening violence', 'Personal information (doxxing)', 'Other'] as $i => $opt): ?>
+        <label class="flex items-center gap-2 text-discord-200 cursor-pointer">
+          <input type="radio" name="report_reason" value="<?= h($opt) ?>" class="w-4 h-4 accent-blurple" <?= $i === 0 ? 'checked' : '' ?>>
+          <?= h($opt) ?>
+        </label>
+        <?php endforeach; ?>
+      </div>
+      <textarea id="report-other" class="input mt-3 hidden" rows="3" maxlength="500" placeholder="Tell us what happened…"></textarea>
+      <div id="report-error" class="hidden mt-2 text-xs text-red-400"></div>
+      <div class="flex gap-2 mt-4">
+        <button id="report-submit" class="btn-primary flex-1 justify-center">Submit report</button>
+        <button data-report-close class="btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Image lightbox -->
   <div id="lightbox" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/85">

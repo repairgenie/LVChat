@@ -50,6 +50,70 @@
     </div>
 
     <?php if ($isSelf && !(int) ($user['guest'] ?? 0)): ?>
+    <?php
+    $soundSelect = function (?int $selected, string $name) use ($sounds): string {
+        $html = '<select class="input !py-1.5" name="' . h($name) . '">';
+        $html .= '<option value="0"' . ($selected === null ? ' selected' : '') . '>Off (muted)</option>';
+        foreach ($sounds as $s) {
+            $html .= '<option value="' . (int) $s['id'] . '"' . ($selected !== null && (int) $s['id'] === $selected ? ' selected' : '') . '>' . h($s['name']) . '</option>';
+        }
+        return $html . '</select>';
+    };
+    ?>
+    <div class="card p-6">
+      <h2 class="font-semibold text-white mb-1">Notification sounds</h2>
+      <p class="text-xs text-discord-400 mb-4">Sounds play when a DM arrives or a message lands in a channel you're not viewing. Pick an alert per context, or mute each entirely.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="label">Direct messages</label>
+          <div class="flex gap-2">
+            <?= $soundSelect($soundPrefs['dm_sound_id'], 'dm') ?>
+            <button type="button" class="btn-ghost shrink-0" data-test-sound="dm">Play</button>
+          </div>
+        </div>
+        <div>
+          <label class="label">Channel messages</label>
+          <div class="flex gap-2">
+            <?= $soundSelect($soundPrefs['channel_sound_id'], 'channel') ?>
+            <button type="button" class="btn-ghost shrink-0" data-test-sound="channel">Play</button>
+          </div>
+        </div>
+      </div>
+      <div id="sounds-msg" class="mt-3 text-sm text-green-400 hidden">Saved.</div>
+
+      <div class="mt-6 pt-5 border-t border-discord-700">
+        <div class="text-sm font-medium text-white mb-1">Per-user overrides</div>
+        <p class="text-xs text-discord-400 mb-3">Give a specific person their own sound (or mute them) everywhere — DMs and channel messages.</p>
+        <?php if ($soundOverrides): ?>
+        <div class="space-y-2 mb-4">
+          <?php foreach ($soundOverrides as $uid => $o): ?>
+          <div class="flex items-center gap-2" data-override="<?= (int) $uid ?>">
+            <span class="text-sm text-discord-200 w-40 truncate"><?= h($o['username']) ?></span>
+            <?= $soundSelect($o['sound_id'], 'sound') ?>
+            <button type="button" class="btn-ghost text-xs text-red-400 !py-1 shrink-0" data-remove-override="<?= (int) $uid ?>">Remove</button>
+          </div>
+          <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+        <form id="override-form" class="flex flex-wrap items-end gap-2">
+          <?= Csrf::field() ?>
+          <div class="min-w-44 flex-1">
+            <label class="label">User</label>
+            <select name="target_user_id" class="input !py-1.5" required>
+              <?php foreach ($allUsers as $u): ?>
+              <option value="<?= (int) $u['id'] ?>"><?= h($u['username']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="min-w-40">
+            <label class="label">Sound</label>
+            <?= $soundSelect(null, 'sound') ?>
+          </div>
+          <button class="btn-ghost">Add override</button>
+        </form>
+      </div>
+    </div>
+
     <div class="card p-6">
       <h2 class="font-semibold text-white mb-4">Account settings</h2>
       <form id="pw-form" class="space-y-4">
@@ -107,5 +171,60 @@
   });
   const avRemove = document.getElementById('avatar-remove');
   if (avRemove) avRemove.addEventListener('click', () => post('/api/avatar/remove', new FormData(), () => location.reload()));
+
+  const SOUND_URLS = <?= json_encode(array_combine(array_map('intval', array_column($sounds, 'id')), array_map(fn ($s) => url($s['file']), $sounds))) ?>;
+  const sndMsg = document.getElementById('sounds-msg');
+  function sndPost(url, fd, ok) {
+    fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+      .then(r => r.json()).then(j => { if (j.error) { alert(j.error); return; } if (ok) ok(); });
+  }
+  function playSound(id) {
+    const u = SOUND_URLS[id] || '';
+    if (!u) return;
+    try { new Audio(u).play().catch(() => {}); } catch (e) {}
+  }
+  document.querySelectorAll('[data-test-sound]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sel = document.querySelector('select[name="' + btn.dataset.testSound + '"]');
+      playSound(sel ? parseInt(sel.value, 10) || 0 : 0);
+    });
+  });
+  ['dm', 'channel'].forEach(name => {
+    const sel = document.querySelector('select[name="' + name + '"]');
+    if (!sel) return;
+    sel.addEventListener('change', () => {
+      const fd = new FormData();
+      fd.append('dm_sound', document.querySelector('select[name="dm"]').value);
+      fd.append('channel_sound', document.querySelector('select[name="channel"]').value);
+      sndPost('/api/sound/prefs', fd, () => {
+        sndMsg.classList.remove('hidden');
+        setTimeout(() => sndMsg.classList.add('hidden'), 2000);
+      });
+    });
+  });
+  document.querySelectorAll('[data-override] select[name="sound"]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const row = sel.closest('[data-override]');
+      const fd = new FormData();
+      fd.append('target_user_id', row.dataset.override);
+      fd.append('sound', sel.value);
+      sndPost('/api/sound/override', fd);
+    });
+  });
+  document.querySelectorAll('[data-remove-override]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const fd = new FormData();
+      fd.append('target_user_id', btn.dataset.removeOverride);
+      sndPost('/api/sound/override/remove', fd, () => {
+        const row = btn.closest('[data-override]');
+        if (row) row.remove();
+      });
+    });
+  });
+  const ovForm = document.getElementById('override-form');
+  if (ovForm) ovForm.addEventListener('submit', e => {
+    e.preventDefault();
+    sndPost('/api/sound/override', new FormData(ovForm), () => location.reload());
+  });
 })();
 </script>

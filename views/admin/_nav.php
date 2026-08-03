@@ -5,24 +5,35 @@ $title = 'Admin dashboard';
 $active = $active ?? '';
 $user = $admin ?? null;
 function admin_nav(string $active): void {
+  // Moderation-facing pages are available to staff too; the rest are admin-only.
+  $isStaff = ModerationService::isStaff($user ?? []);
+  $isAdmin = ($user['role'] ?? '') === 'admin';
   $items = [
-    'overview' => ['/admin', 'Overview'],
-    'users' => ['/admin/users', 'Users'],
-    'channels' => ['/admin/channels', 'Channels'],
-    'bans' => ['/admin/bans', 'Bans'],
-    'spamfilters' => ['/admin/spamfilters', 'Spam filters'],
-    'badwords' => ['/admin/badwords', 'Bad words'],
-    'roles' => ['/admin/roles', 'Roles'],
-    'opers' => ['/admin/opers', 'O-lines'],
-    'operclasses' => ['/admin/operclasses', 'Operclasses'],
-    'motd' => ['/admin/motd', 'MOTD'],
-    'logs' => ['/admin/logs', 'Chat logs'],
-    'webhooks' => ['/admin/webhooks', 'Webhooks'],
-    'invites' => ['/admin/invites', 'Invites'],
-    'settings' => ['/admin/settings', 'Settings'],
+    'overview' => ['/admin', 'Overview', $isAdmin],
+    'moderation' => ['/admin/moderation', 'Moderation', $isStaff],
+    'reports' => ['/admin/reports', 'Reports', $isStaff],
+    'support' => ['/admin/support', 'Support', $isStaff],
+    'users' => ['/admin/users', 'Users', $isAdmin],
+    'channels' => ['/admin/channels', 'Channels', $isAdmin],
+    'bans' => ['/admin/bans', 'Bans', $isAdmin],
+    'spamfilters' => ['/admin/spamfilters', 'Spam filters', $isAdmin],
+    'badwords' => ['/admin/badwords', 'Bad words', $isAdmin],
+    'roles' => ['/admin/roles', 'Roles', $isAdmin],
+    'opers' => ['/admin/opers', 'O-lines', $isAdmin],
+    'operclasses' => ['/admin/operclasses', 'Operclasses', $isAdmin],
+    'motd' => ['/admin/motd', 'MOTD', $isAdmin],
+    'sounds' => ['/admin/sounds', 'Sounds', $isAdmin],
+    'logs' => ['/admin/logs', 'Chat logs', $isAdmin],
+    'webhooks' => ['/admin/webhooks', 'Webhooks', $isAdmin],
+    'invites' => ['/admin/invites', 'Invites', $isAdmin],
+    'legal' => ['/admin/legal', 'Terms & Privacy', $isAdmin],
+    'settings' => ['/admin/settings', 'Settings', $isAdmin],
   ];
   echo '<div class="flex flex-wrap gap-1 mb-6 bg-discord-850 border border-discord-700 rounded-lg p-1">';
-  foreach ($items as $k => [$href, $label]) {
+  foreach ($items as $k => [$href, $label, $visible]) {
+    if (!$visible) {
+      continue;
+    }
     $on = $active === $k ? 'bg-discord-700 text-white' : 'text-discord-300 hover:bg-discord-750';
     echo '<a href="' . h($href) . '" class="px-3 py-1.5 rounded-md text-sm font-medium ' . $on . '">' . h($label) . '</a>';
   }

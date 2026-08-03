@@ -179,7 +179,7 @@
     const nameColor = isAdmin ? 'text-red-400' : (COLORS[m.level || 'normal'] || COLORS.normal);
     const contentColor = isAdmin ? 'text-red-400' : 'text-discord-200';
     if (m.kind === 'action') {
-      return `<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="${m.id}" data-kind="action" data-author="${esc(m.username)}">
+      return `<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="${m.id}" data-kind="action" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}">
         <div class="w-10 shrink-0"></div>
         <div class="text-sm ${contentColor}"${roleStyle}><span class="italic">* <span class="font-medium ${nameColor}"${roleStyle}>${esc(m.username)}</span>${guestTag} ${linkify(m.content)}</span></div>
       </div>`;
@@ -189,7 +189,7 @@
       ? `<a class="reply-line block text-xs text-discord-400 italic hover:text-discord-300 mt-0.5 break-all" href="#msg-${parseInt(m.reply_to_id, 10)}" data-reply-scroll="${parseInt(m.reply_to_id, 10)}">↪ <span class="font-semibold">${esc(m.reply_to_username || '')}</span>: ${esc(m.reply_to_excerpt || '')}</a>`
       : '';
     if (grouped) {
-      return `<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-author="${esc(m.username)}">
+      return `<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}">
         <div class="w-10 shrink-0"></div>
         <div class="min-w-0 flex-1">
           ${replyLine}
@@ -204,7 +204,7 @@
       actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
         + '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
-    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-author="${esc(m.username)}">
+    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}">
       <div class="w-10 h-10 shrink-0">${avatarHtml(m, 'w-10 h-10 rounded-full')}</div>
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 h-[22px]">
@@ -377,6 +377,89 @@
       });
   }
 
+  // ── Sound alerts (channel messages + DMs) ────────────────────────────────
+  // Data comes from data-sounds / data-sound-prefs / data-sound-overrides:
+  //   sounds[id]    {name, url}
+  //   dm/channel    sound id for that context (null = muted)
+  //   overrides[uid] sound id for that sender (null = muted, absent = default)
+  const SOUND_DATA = { sounds: {}, dm: null, channel: null, overrides: {} };
+  try {
+    SOUND_DATA.sounds = JSON.parse(body.dataset.sounds || '{}');
+    const sp = JSON.parse(body.dataset.soundPrefs || '{}');
+    SOUND_DATA.dm = sp.dm_sound_id || null;
+    SOUND_DATA.channel = sp.channel_sound_id || null;
+    SOUND_DATA.overrides = JSON.parse(body.dataset.soundOverrides || '{}');
+  } catch (e) {}
+
+  const audioCache = {};
+  function playSound(id) {
+    const s = SOUND_DATA.sounds[id];
+    if (!s) return;
+    let a = audioCache[id];
+    if (!a) {
+      a = audioCache[id] = new Audio(s.url);
+      a.preload = 'auto';
+    }
+    a.currentTime = 0;
+    const p = a.play();
+    if (p) p.catch(() => {});
+  }
+  // A sender's override wins; otherwise use the context default (null = off).
+  function resolveSound(senderUserId, contextDefault) {
+    if (senderUserId && Object.prototype.hasOwnProperty.call(SOUND_DATA.overrides, senderUserId)) {
+      return SOUND_DATA.overrides[senderUserId];
+    }
+    return contextDefault;
+  }
+  // Browsers only allow audio after a user gesture; prime the pipeline once so
+  // poll-driven plays work the moment the user clicks/types anywhere.
+  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
+    document.addEventListener(ev, () => {
+      try { const a = new Audio(); a.volume = 0; a.play().catch(() => {}); } catch (e) {}
+    }, { once: true, passive: true });
+  });
+
+  // Background-channel messages: the server returns new real messages in every
+  // member channel except the one being viewed, using our global watermark.
+  // The first payload seeds the watermark silently (no sounds for pre-existing
+  // unread mail); `bgSeen` dedupes against SSE, whose query string is fixed.
+  let bgLast = parseInt(body.dataset.bgLast || '0', 10) || 0;
+  let bgSeeded = false;
+  const bgSeen = new Set();
+  function handleBgMessages(list) {
+    if (!Array.isArray(list)) return;
+    let maxId = bgLast;
+    list.forEach((m) => {
+      const id = parseInt(m.id, 10);
+      if (!id || bgSeen.has(id)) return;
+      bgSeen.add(id);
+      if (id > maxId) maxId = id;
+      if (!bgSeeded) return;
+      if (parseInt(m.sender_id, 10) === MY_ID) return;
+      if (m.username && m.username.toLowerCase() === MY_NICK) return;
+      const sid = resolveSound(parseInt(m.sender_id, 10) || null, SOUND_DATA.channel);
+      if (sid) playSound(sid);
+    });
+    if (maxId > bgLast) bgLast = maxId;
+    bgSeeded = true;
+  }
+
+  // @mention pings in the currently-open channel (same dedupe/seed pattern).
+  let mentionSeeded = false;
+  const mentionSeen = new Set();
+  function handleMentions(list) {
+    if (!Array.isArray(list)) return;
+    list.forEach((n) => {
+      const id = parseInt(n.message_id, 10);
+      if (!id || mentionSeen.has(id)) return;
+      mentionSeen.add(id);
+      if (!mentionSeeded || n.kind !== 'mention') return;
+      const sid = resolveSound(parseInt(n.sender_id, 10) || null, SOUND_DATA.channel);
+      if (sid) playSound(sid);
+    });
+    mentionSeeded = true;
+  }
+
   // ── Polling ────────────────────────────────────────────────────────────────
   let pollFails = 0;
   // Shared handler for a realtime payload (poll response or SSE message).
@@ -387,6 +470,8 @@
     if (j.messages && j.messages.length) {
       j.messages.forEach(appendMsg);
     }
+    if (j.bg_messages) handleBgMessages(j.bg_messages);
+    if (j.mentions) handleMentions(j.mentions);
     if (j.presence && CHANNEL) applyPresence(j.presence);
     if (typeof j.notify_count === 'number') setBell(j.notify_count);
     if (j.dm_list) handleDmList(j.dm_list);
@@ -396,6 +481,7 @@
     const q = new URLSearchParams({ since: lastId });
     if (CHANNEL) q.set('channel', CHANNEL);
     if (DM) q.set('dm', DM);
+    q.set('bg_since', bgLast);
     fetch('/api/poll?' + q.toString())
       .then((r) => r.json())
       .then((j) => {
@@ -455,6 +541,8 @@
         const prev = dmSeen[d.user_id] || 0;
         if (d.last_id > prev && d.unread > 0 && DM !== d.username) {
           showDmToast(d);
+          const sid = resolveSound(parseInt(d.user_id, 10) || null, SOUND_DATA.dm);
+          if (sid) playSound(sid);
         }
         dmSeen[d.user_id] = d.last_id;
       });
@@ -1064,6 +1152,10 @@
       items.push({ label: 'Reply', onClick: () => { setPendingReply(id, author, content.slice(0, 80)); if (!CHANNEL) { input.value = '@' + author + ' '; } } });
     }
     if (content) items.push({ label: 'Copy text', onClick: () => copyText(content) });
+    const kind = el.dataset.kind || '';
+    if (kind === 'message' || kind === 'image') {
+      items.push({ label: 'Report message', onClick: () => openReport(id, el.dataset.isPm === '1', content) });
+    }
     const mine = author && author.toLowerCase() === MY_NICK;
     if (CAN_ADMIN || mine) {
       items.push({ label: 'Edit', onClick: () => {
@@ -1093,6 +1185,52 @@
     if (u) { e.preventDefault(); userMenu(e.clientX, e.clientY, u); return; }
     const m = e.target.closest('.msg[data-id]');
     if (m) { e.preventDefault(); msgMenu(e.clientX, e.clientY, m); }
+  });
+
+  // ── Report message modal ───────────────────────────────────────────────────
+  const reportModal = document.getElementById('report-modal');
+  const reportQuote = document.getElementById('report-quote');
+  const reportOther = document.getElementById('report-other');
+  const reportError = document.getElementById('report-error');
+  const reportSubmit = document.getElementById('report-submit');
+  let reportTarget = null;
+
+  function openReport(id, isPm, excerpt) {
+    if (!reportModal) return;
+    reportTarget = { id: parseInt(id, 10) || 0, pm: !!isPm };
+    if (reportQuote) reportQuote.textContent = (excerpt || '(no text)').slice(0, 300);
+    if (reportOther) { reportOther.value = ''; reportOther.classList.add('hidden'); }
+    if (reportError) reportError.classList.add('hidden');
+    document.querySelectorAll('#report-reasons input[name="report_reason"]').forEach((r) => {
+      r.checked = r.value === 'Harassment / Bullying';
+    });
+    reportModal.classList.remove('hidden');
+  }
+  function closeReport() { if (reportModal) reportModal.classList.add('hidden'); }
+
+  document.querySelectorAll('#report-reasons input[name="report_reason"]').forEach((r) => {
+    r.addEventListener('change', () => {
+      if (reportOther) reportOther.classList.toggle('hidden', r.value !== 'Other');
+      if (reportError) reportError.classList.add('hidden');
+    });
+  });
+  if (reportModal) {
+    reportModal.querySelectorAll('[data-report-close]').forEach((el) => el.addEventListener('click', closeReport));
+    reportModal.addEventListener('click', (e) => { if (e.target === reportModal) closeReport(); });
+  }
+  if (reportSubmit) reportSubmit.addEventListener('click', () => {
+    if (!reportTarget || !reportTarget.id) return;
+    const checked = document.querySelector('#report-reasons input[name="report_reason"]:checked');
+    const reason = checked ? checked.value : '';
+    const other = reportOther ? reportOther.value.trim() : '';
+    if (reason === 'Other' && !other) {
+      if (reportError) { reportError.textContent = 'Please describe the issue.'; reportError.classList.remove('hidden'); }
+      return;
+    }
+    post('/api/report', { id: reportTarget.id, pm: reportTarget.pm ? '1' : '0', reason, other }, () => {
+      closeReport();
+      showReply('Report submitted. Thanks — staff will review it.');
+    });
   });
 
   // ── Theme toggle (light/dark, sticky per browser + per account) ────────────
@@ -1314,6 +1452,7 @@
       const q = new URLSearchParams({ since: lastId });
       if (CHANNEL) q.set('channel', CHANNEL);
       if (DM) q.set('dm', DM);
+      q.set('bg_since', bgLast);
       es = new EventSource('/api/stream?' + q.toString());
       es.onmessage = (e) => {
         if (e.data === ': keepalive') return;

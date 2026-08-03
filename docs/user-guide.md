@@ -264,11 +264,32 @@ edit).
   rejoin with `/back`. While away, you appear offline to "online" lists and get the
   💤 symbol in member lists and profile.
 
-### 6.1 Hide your online status
+### 6.1 Notification sounds
+
+Audio alerts play in your browser when a message lands while you're looking
+elsewhere. Open your **Profile & settings** page (from the `⚙` menu) and scroll
+to **Notification sounds**:
+
+- **Direct messages** — sound that plays when a new DM arrives while you're not
+  viewing that conversation.
+- **Channel messages** — sound that plays when a new message arrives in a channel
+  you're a member of but **aren't currently viewing**. You're never pinged for the
+  channel you're actively reading; @mentioning you in the open channel does ping.
+- Each dropdown offers **Off (muted)** or any sound the admin uploaded; the
+  **Play** button previews your current pick. Changes save instantly.
+- **Per-user overrides** — pick a specific sound for a particular person (or
+  **mute** them entirely) with **Add override**. An override applies to that
+  person's DMs *and* their channel messages everywhere. Use **Remove** to let
+  them fall back to your default choices again.
+
+Guests get the default sounds automatically but can't change them. Any sound the
+admin uploads is available to everyone — you can't upload your own.
+
+### 6.2 Hide your online status
 
 `/set hide on` hides you from the online list; `/set hide off` unhides.
 
-### 6.2 Your public profile
+### 6.3 Your public profile
 
 Every user has a profile at `/u/<username>` (click any nick, or right-click →
 **View profile**). It shows your avatar initial, status (Guest / IRC Operator /

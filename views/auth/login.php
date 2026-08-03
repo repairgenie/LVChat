@@ -1,7 +1,9 @@
 <div class="max-w-md mx-auto">
   <div class="card p-8">
+    <?php if (site_logo()): ?>
+    <img src="<?= h(site_logo()) ?>" alt="" class="w-full h-auto object-contain mb-8">
+    <?php endif; ?>
     <div class="flex items-center gap-3 mb-8">
-      <?= logo_mark() ?>
       <div>
         <h1 class="text-xl font-bold text-white">Welcome back</h1>
         <p class="text-sm text-discord-400"><?= h(config_get('site_name', 'LVChat')) ?></p>
@@ -38,12 +40,22 @@
     <div class="mt-8 pt-6 border-t border-discord-700">
       <h2 class="text-sm font-semibold text-white">Prefer to stay anonymous?</h2>
       <p class="text-xs text-discord-400 mt-1 mb-3">Join instantly with a nickname — no email, no password, no account. You can chat in existing channels right away.</p>
-      <form method="post" action="/guest" class="flex gap-2">
+      <form method="post" action="/guest" class="space-y-3">
         <?= Csrf::field() ?>
         <input type="hidden" name="next" value="<?= h($next) ?>">
-        <input class="input flex-1" name="nick" placeholder="Your nickname" maxlength="32" required autocomplete="off">
-        <button class="btn-ghost">Join as guest</button>
+        <div class="flex gap-2">
+          <input class="input flex-1" name="nick" placeholder="Your nickname" maxlength="32" required autocomplete="off">
+          <button class="btn-ghost">Join as guest</button>
+        </div>
+        <label class="flex items-start gap-2 text-xs text-discord-400 cursor-pointer">
+          <input type="checkbox" name="age18" value="1" required class="w-4 h-4 mt-0.5 accent-blurple">
+          <span>I certify that I am at least 18 years of age and agree to the <a class="text-blurple hover:underline" href="/terms" target="_blank">Terms of Service</a> and <a class="text-blurple hover:underline" href="/privacy" target="_blank">Privacy Policy</a>.</span>
+        </label>
       </form>
+    </div>
+
+    <div class="mt-6 pt-4 border-t border-discord-700 text-xs text-discord-500 text-center">
+      <a class="hover:underline" href="/terms">Terms of Service</a> · <a class="hover:underline" href="/privacy">Privacy Policy</a>
     </div>
   </div>
 </div>

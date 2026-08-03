@@ -57,6 +57,93 @@ final class AdminController
         render_view('admin/users', ['admin' => $admin, 'users' => $users, 'term' => $term, 'roles' => $roles]);
     }
 
+    /** GET /admin/users/{id} — staff-only moderation history + notes for an account. */
+    public static function userShow(array $params): void
+    {
+        $staff = ModerationService::requireStaff();
+        $u = Database::row('SELECT * FROM users WHERE id = ?', [(int) $params['id']]);
+        if (!$u) {
+            render_view('errors/notfound', [], null);
+        }
+        render_view('admin/users_show', [
+            'admin' => $staff,
+            'user' => $u,
+            'history' => ModerationService::history((int) $u['id']),
+            'events' => ModerationService::eventsForUser((int) $u['id']),
+        ]);
+    }
+
+    /** GET /admin/moderation — the moderation queue (staff+admin). */
+    public static function moderation(): void
+    {
+        $staff = ModerationService::requireStaff();
+        $summary = Database::all(
+            "SELECT COALESCE(u.username, g.nick) AS username, COALESCE(me.user_id, 0) AS user_id,
+                    COALESCE(me.guest_id, 0) AS guest_id, COUNT(*) AS hits,
+                    SUM(CASE WHEN me.kind = 'badword' THEN 1 ELSE 0 END) AS badwords,
+                    SUM(CASE WHEN me.kind = 'spamfilter' THEN 1 ELSE 0 END) AS spamfilters,
+                    SUM(CASE WHEN me.kind NOT IN ('badword','spamfilter') THEN 1 ELSE 0 END) AS actions,
+                    MAX(me.created_at) AS last_hit
+             FROM moderation_events me
+             LEFT JOIN users u ON u.id = me.user_id
+             LEFT JOIN guests g ON g.id = me.guest_id
+             GROUP BY me.user_id, me.guest_id
+             ORDER BY hits DESC LIMIT 200"
+        );
+        $events = Database::all(
+            'SELECT me.*, u.username, g.nick AS guest_name FROM moderation_events me
+             LEFT JOIN users u ON u.id = me.user_id
+             LEFT JOIN guests g ON g.id = me.guest_id
+             ORDER BY me.id DESC LIMIT 300'
+        );
+        render_view('admin/moderation', ['admin' => $staff, 'summary' => $summary, 'events' => $events]);
+    }
+
+    /** GET /admin/reports — message reports queue (staff+admin). */
+    public static function reports(): void
+    {
+        $staff = ModerationService::requireStaff();
+        $status = trim((string) ($_GET['status'] ?? 'open'));
+        $where = '';
+        $params = [];
+        if (in_array($status, ['open', 'investigated', 'resolved', 'dismissed'], true)) {
+            $where = 'WHERE r.status = ?';
+            $params[] = $status;
+        }
+        $rows = Database::all(
+            "SELECT r.*, ru.username AS reporter_name, rg.nick AS reporter_guest_name,
+                    sh.username AS handled_name
+             FROM reports r
+             LEFT JOIN users ru ON ru.id = r.reporter_user_id
+             LEFT JOIN guests rg ON rg.id = r.reporter_guest_id
+             LEFT JOIN users sh ON sh.id = r.handled_by
+             $where
+             ORDER BY r.id DESC LIMIT 200",
+            $params
+        );
+        render_view('admin/reports', ['admin' => $staff, 'reports' => $rows, 'status' => $status]);
+    }
+
+    /** GET /admin/support — all support tickets (staff+admin). */
+    public static function support(): void
+    {
+        $staff = ModerationService::requireStaff();
+        $status = trim((string) ($_GET['status'] ?? ''));
+        $tickets = SupportService::all($status);
+        render_view('admin/support', ['admin' => $staff, 'tickets' => $tickets, 'status' => $status]);
+    }
+
+    /** GET /admin/legal — tiptap editors for the ToS and Privacy Policy (admin only). */
+    public static function legal(): void
+    {
+        $admin = Auth::requireAdmin();
+        render_view('admin/legal', [
+            'admin' => $admin,
+            'terms' => LegalService::get('terms'),
+            'privacy' => LegalService::get('privacy'),
+        ]);
+    }
+
     public static function channels(): void
     {
         $admin = self::require();
@@ -130,6 +217,13 @@ final class AdminController
     {
         $admin = self::require();
         render_view('admin/motd', ['admin' => $admin, 'motd' => (string) config_get('motd', '')]);
+    }
+
+    /** Sound alerts uploaded by admins and offered to every user. */
+    public static function sounds(): void
+    {
+        $admin = self::require();
+        render_view('admin/sounds', ['admin' => $admin, 'sounds' => SoundService::listAll()]);
     }
 
     public static function logs(): void
@@ -250,7 +344,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'logo_url', 'registration_enabled', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'webhooks_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name'];
+        $keys = ['site_name', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'webhooks_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -287,36 +381,42 @@ final class AdminController
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET banned = 1, ban_reason = ? WHERE id = ?', [mb_substr((string) ($_POST['reason'] ?? ''), 0, 300), $id]);
                 Database::query('DELETE FROM sessions WHERE user_id = ?', [$id]);
+                ModerationService::note($id, $admin, 'ban', (string) ($_POST['reason'] ?? ''));
                 log_audit('user_ban', 'user#' . $id);
                 $message = 'User banned.';
                 break;
             case 'user_unban':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET banned = 0, ban_reason = NULL WHERE id = ?', [$id]);
+                ModerationService::note($id, $admin, 'unban', '');
                 log_audit('user_unban', 'user#' . $id);
                 $message = 'User unbanned.';
                 break;
             case 'user_admin':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET role = "admin" WHERE id = ?', [$id]);
+                ModerationService::note($id, $admin, 'role', 'Promoted to admin');
                 log_audit('user_admin', 'user#' . $id);
                 $message = 'User promoted to admin.';
                 break;
             case 'user_deadmin':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET role = "user" WHERE id = ? AND id != ?', [$id, $admin['id']]);
+                ModerationService::note($id, $admin, 'role', 'Admin rights removed');
                 log_audit('user_deadmin', 'user#' . $id);
                 $message = 'Admin rights removed.';
                 break;
             case 'user_staff':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET role = "staff" WHERE id = ?', [$id]);
+                ModerationService::note($id, $admin, 'role', 'Promoted to staff');
                 log_audit('user_staff', 'user#' . $id);
                 $message = 'User promoted to staff.';
                 break;
             case 'user_destaff':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET role = "user" WHERE id = ?', [$id]);
+                ModerationService::note($id, $admin, 'role', 'Staff role removed');
                 log_audit('user_destaff', 'user#' . $id);
                 $message = 'Staff role removed.';
                 break;
@@ -325,6 +425,7 @@ final class AdminController
                 $pw = bin2hex(random_bytes(6));
                 Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($pw, PASSWORD_ARGON2ID), $id]);
                 Database::query('DELETE FROM sessions WHERE user_id = ?', [$id]);
+                ModerationService::note($id, $admin, 'reset_password', 'Password reset by an administrator');
                 log_audit('user_reset', 'user#' . $id);
                 $message = "Password reset to: $pw (user must use it to log in)";
                 break;
@@ -452,7 +553,9 @@ final class AdminController
                 $id = (int) ($_POST['id'] ?? 0);
                 $u = Database::row('SELECT * FROM users WHERE id = ?', [$id]);
                 if ($u && !empty($u['last_ip'])) {
-                    BanService::addBan('zline', null, (string) $u['last_ip'], trim((string) ($_POST['reason'] ?? 'Banned by admin (IP)')), null, (int) $admin['id']);
+                    $reason = trim((string) ($_POST['reason'] ?? 'Banned by admin (IP)'));
+                    BanService::addBan('zline', null, (string) $u['last_ip'], $reason, null, (int) $admin['id']);
+                    ModerationService::note($id, $admin, 'zline_ip', "IP {$u['last_ip']}" . ($reason !== '' ? ' — ' . $reason : ''));
                     log_audit('zline_ip', $u['username'], $u['last_ip']);
                     $message = "IP {$u['last_ip']} banned (zline).";
                 } else {
@@ -480,6 +583,25 @@ final class AdminController
             case 'badword_toggle':
                 Database::query('UPDATE badwords SET enabled = 1 - enabled WHERE id = ?', [(int) ($_POST['id'] ?? 0)]);
                 $message = 'Bad word toggled.';
+                break;
+            case 'sound_add':
+                $r = SoundService::add($_FILES['file'] ?? [], (string) ($_POST['name'] ?? ''));
+                if (!$r['ok']) {
+                    $ok = false;
+                    $message = $r['error'];
+                } else {
+                    log_audit('sound_add', 'sound#' . $r['id']);
+                    $message = 'Sound added.';
+                }
+                break;
+            case 'sound_toggle':
+                SoundService::toggle((int) ($_POST['id'] ?? 0));
+                $message = 'Sound toggled.';
+                break;
+            case 'sound_del':
+                SoundService::remove((int) ($_POST['id'] ?? 0));
+                log_audit('sound_del', 'sound#' . (int) ($_POST['id'] ?? 0));
+                $message = 'Sound deleted.';
                 break;
             case 'role_save':
                 $id = (int) ($_POST['id'] ?? 0);
@@ -512,6 +634,7 @@ final class AdminController
                 $id = (int) ($_POST['id'] ?? 0);
                 $roleId = (int) ($_POST['role_id'] ?? 0);
                 Database::query('UPDATE users SET role_id = ? WHERE id = ?', [$roleId > 0 ? $roleId : null, $id]);
+                ModerationService::note($id, $admin, 'role', 'Custom role set to ' . ($roleId > 0 ? (Database::scalar('SELECT name FROM roles WHERE id = ?', [$roleId]) ?: "role #$roleId") : 'none'));
                 log_audit('user_set_role', 'user#' . $id, 'role#' . $roleId);
                 $message = 'Role assigned.';
                 break;
@@ -590,7 +713,7 @@ final class AdminController
                     $role = 'user';
                 }
                 $pw = bin2hex(random_bytes(8)); // 16 hex chars, shown once
-                $result = Auth::register($username, $email, $pw);
+                $result = Auth::register($username, $email, $pw, true, true);
                 if (!$result['ok']) {
                     $ok = false;
                     $message = implode(' ', $result['errors']);
@@ -675,6 +798,7 @@ final class AdminController
                 config_set('site_name', trim((string) ($_POST['site_name'] ?? 'LVChat')));
                 config_set('logo_url', trim((string) ($_POST['logo_url'] ?? '')));
                 config_set('registration_enabled', ($_POST['registration_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('registration_requires_approval', ($_POST['registration_requires_approval'] ?? '0') === '1' ? '1' : '0');
                 config_set('spamfilter_enabled', ($_POST['spamfilter_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('uploads_enabled', ($_POST['uploads_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('reactions_enabled', ($_POST['reactions_enabled'] ?? '0') === '1' ? '1' : '0');
@@ -696,6 +820,79 @@ final class AdminController
                 config_set('smtp_from_name', trim((string) ($_POST['smtp_from_name'] ?? '')));
                 log_audit('settings_save');
                 $message = 'Settings saved.';
+                break;
+            case 'user_approve':
+                $id = (int) ($_POST['id'] ?? 0);
+                ModerationService::setStatus($id, 'active', null, $admin, true, 'approve');
+                $message = 'Account approved.';
+                break;
+            case 'user_activate':
+                $id = (int) ($_POST['id'] ?? 0);
+                ModerationService::setStatus($id, 'active', trim((string) ($_POST['reason'] ?? '')) ?: null, $admin);
+                $message = 'Account activated.';
+                break;
+            case 'user_pending':
+                $id = (int) ($_POST['id'] ?? 0);
+                ModerationService::setStatus($id, 'pending', trim((string) ($_POST['reason'] ?? '')) ?: null, $admin);
+                $message = 'Account set to pending approval.';
+                break;
+            case 'user_suspend':
+                $id = (int) ($_POST['id'] ?? 0);
+                $reason = trim((string) ($_POST['reason'] ?? ''));
+                if ($reason === '') {
+                    $ok = false;
+                    $message = 'A reason is required when suspending an account.';
+                } else {
+                    ModerationService::setStatus($id, 'suspended', $reason, $admin);
+                    $message = 'Account suspended.';
+                }
+                break;
+            case 'user_note':
+                $id = (int) ($_POST['id'] ?? 0);
+                $reason = trim((string) ($_POST['reason'] ?? ''));
+                if ($reason === '') {
+                    $ok = false;
+                    $message = 'A note is required.';
+                } else {
+                    ModerationService::note($id, $admin, 'note', $reason);
+                    log_audit('user_note', 'user#' . $id);
+                    $message = 'Note added.';
+                }
+                break;
+            case 'report_status':
+                $id = (int) ($_POST['id'] ?? 0);
+                $status = (string) ($_POST['status'] ?? '');
+                $resolution = trim((string) ($_POST['resolution'] ?? ''));
+                $report = Database::row('SELECT * FROM reports WHERE id = ?', [$id]);
+                if (!$report) {
+                    $ok = false;
+                    $message = 'Report not found.';
+                } elseif (!in_array($status, ['investigated', 'resolved', 'dismissed'], true)) {
+                    $ok = false;
+                    $message = 'Invalid report status.';
+                } else {
+                    Database::query(
+                        'UPDATE reports SET status = ?, handled_by = ?, handled_at = datetime("now"), resolution = ? WHERE id = ?',
+                        [$status, (int) $admin['id'], $resolution, $id]
+                    );
+                    if ((int) $report['sender_user_id'] > 0) {
+                        ModerationService::note((int) $report['sender_user_id'], $admin, 'report', 'Report #' . $id . ' (' . $report['reason'] . ') — ' . $status . ($resolution !== '' ? ': ' . $resolution : ''));
+                    }
+                    log_audit('report_status', 'report#' . $id, "$status / $resolution");
+                    $message = 'Report updated.';
+                }
+                break;
+            case 'legal_save':
+                LegalService::save('terms', (string) ($_POST['terms'] ?? ''));
+                LegalService::save('privacy', (string) ($_POST['privacy'] ?? ''));
+                log_audit('legal_save');
+                $message = 'Legal pages saved.';
+                break;
+            case 'legal_reset':
+                $which = ($_POST['which'] ?? '') === 'privacy' ? 'privacy' : 'terms';
+                LegalService::save($which, LegalService::boilerplate($which));
+                log_audit('legal_reset', $which);
+                $message = ucfirst($which) . ' reset to the US/Nevada boilerplate.';
                 break;
             default:
                 $ok = false;

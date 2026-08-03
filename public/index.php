@@ -40,6 +40,7 @@ $router->post('/api/channel/delete', [ChannelController::class, 'deleteChannel']
 $router->post('/api/message/delete', [ChatController::class, 'deleteMessage']);
 $router->post('/api/message/edit', [ChatController::class, 'editMessage']);
 $router->post('/api/message/reaction', [ChatController::class, 'reaction']);
+$router->post('/api/report', [ChatController::class, 'report']);
 $router->get('/api/history', [ChatController::class, 'historyApi']);
 $router->get('/api/search', [ChatController::class, 'search']);
 
@@ -51,9 +52,32 @@ $router->post('/api/profile', [UserController::class, 'updateProfile']);
 $router->post('/api/avatar', [UserController::class, 'uploadAvatar']);
 $router->post('/api/avatar/remove', [UserController::class, 'removeAvatar']);
 
+// Sound alerts (user settings)
+$router->post('/api/sound/prefs', [SoundController::class, 'prefs']);
+$router->post('/api/sound/override', [SoundController::class, 'setOverride']);
+$router->post('/api/sound/override/remove', [SoundController::class, 'removeOverride']);
+
+// Legal pages (public)
+$router->get('/terms', [LegalController::class, 'terms']);
+$router->get('/privacy', [LegalController::class, 'privacy']);
+
+// Support tickets (registered users + staff)
+$router->get('/support', [SupportController::class, 'index']);
+$router->post('/support', [SupportController::class, 'create']);
+$router->get('/support/{id}', [SupportController::class, 'show']);
+$router->post('/support/{id}/reply', [SupportController::class, 'reply']);
+$router->post('/support/{id}/close', [SupportController::class, 'close']);
+$router->post('/support/{id}/reopen', [SupportController::class, 'reopen']);
+
 // Admin dashboard
 $router->get('/admin', [AdminController::class, 'overview']);
 $router->get('/admin/users', [AdminController::class, 'users']);
+$router->get('/admin/users/{id}', [AdminController::class, 'userShow']);
+$router->get('/admin/moderation', [AdminController::class, 'moderation']);
+$router->get('/admin/reports', [AdminController::class, 'reports']);
+$router->get('/admin/support', [AdminController::class, 'support']);
+$router->get('/admin/support/{id}', [SupportController::class, 'show']);
+$router->get('/admin/legal', [AdminController::class, 'legal']);
 $router->get('/admin/channels', [AdminController::class, 'channels']);
 $router->get('/admin/bans', [AdminController::class, 'bans']);
 $router->get('/admin/spamfilters', [AdminController::class, 'spamfilters']);
@@ -62,6 +86,7 @@ $router->get('/admin/roles', [AdminController::class, 'roles']);
 $router->get('/admin/opers', [AdminController::class, 'opers']);
 $router->get('/admin/operclasses', [AdminController::class, 'operclasses']);
 $router->get('/admin/motd', [AdminController::class, 'motd']);
+$router->get('/admin/sounds', [AdminController::class, 'sounds']);
 $router->get('/admin/logs', [AdminController::class, 'logs']);
 $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
 $router->get('/admin/logs/export', [AdminController::class, 'logDayExport']);

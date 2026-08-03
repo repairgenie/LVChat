@@ -48,6 +48,19 @@
         <input class="input" id="password" type="password" name="password" required minlength="8">
         <p class="text-xs text-discord-400 mt-1">At least 8 characters</p>
       </div>
+      <label class="flex items-start gap-2 text-sm text-discord-300 cursor-pointer">
+        <input type="checkbox" name="age18" value="1" required class="w-4 h-4 mt-0.5 accent-blurple">
+        <span>I certify that I am at least 18 years of age. This service is not intended for minors.</span>
+      </label>
+      <label class="flex items-start gap-2 text-sm text-discord-300 cursor-pointer">
+        <input type="checkbox" required class="w-4 h-4 mt-0.5 accent-blurple">
+        <span>I have read and agree to the <a class="text-blurple hover:underline" href="/terms" target="_blank">Terms of Service</a> and <a class="text-blurple hover:underline" href="/privacy" target="_blank">Privacy Policy</a>.</span>
+      </label>
+      <?php if ($requires_approval): ?>
+      <div class="rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 px-3 py-2 text-xs">
+        New registrations require admin approval before you can chat. You can still log in and browse channels.
+      </div>
+      <?php endif; ?>
       <button class="btn-primary w-full justify-center py-2.5">Create account</button>
     </form>
 
@@ -55,5 +68,8 @@
       Already registered?
       <a class="text-blurple hover:underline" href="/login?next=<?= h(rawurlencode($next)) ?>">Log in</a>
     </p>
+    <div class="mt-4 pt-4 border-t border-discord-700 text-xs text-discord-500 text-center">
+      <a class="hover:underline" href="/terms">Terms of Service</a> · <a class="hover:underline" href="/privacy">Privacy Policy</a>
+    </div>
   </div>
 </div>

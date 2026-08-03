@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '11';
+    private const SCHEMA_VERSION = '13';
 
     public static function init(): void
     {
@@ -64,6 +64,19 @@ final class Database
         if (!in_array('avatar', $userCols, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN avatar TEXT');
         }
+        if (!in_array('status', $userCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+        }
+        if (!in_array('status_reason', $userCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN status_reason TEXT');
+        }
+        if (!in_array('age_verified_at', $userCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN age_verified_at TEXT');
+        }
+        $guestCols = array_column($pdo->query('PRAGMA table_info(guests)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+        if (!in_array('age_verified_at', $guestCols, true)) {
+            $pdo->exec('ALTER TABLE guests ADD COLUMN age_verified_at TEXT');
+        }
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('censor', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN censor INTEGER NOT NULL DEFAULT 0');
@@ -80,6 +93,17 @@ final class Database
         if (!in_array('channel_notify', $tables, true)) {
             $pdo->exec('CREATE TABLE channel_notify (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL DEFAULT "all", UNIQUE (channel_id, user_id))');
             $pdo->exec('CREATE INDEX idx_channel_notify_user ON channel_notify(user_id)');
+        }
+        // Sound alerts + per-user sound preferences/overrides (schema v13).
+        if (!in_array('sound_alerts', $tables, true)) {
+            $pdo->exec('CREATE TABLE sound_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, file TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+        }
+        if (!in_array('user_sound_prefs', $tables, true)) {
+            $pdo->exec('CREATE TABLE user_sound_prefs (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, dm_sound_id INTEGER REFERENCES sound_alerts(id) ON DELETE SET NULL, channel_sound_id INTEGER REFERENCES sound_alerts(id) ON DELETE SET NULL)');
+        }
+        if (!in_array('user_sound_overrides', $tables, true)) {
+            $pdo->exec('CREATE TABLE user_sound_overrides (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, sound_id INTEGER REFERENCES sound_alerts(id) ON DELETE CASCADE, created_at TEXT NOT NULL DEFAULT (datetime("now")), UNIQUE (user_id, target_user_id))');
+            $pdo->exec('CREATE INDEX idx_sound_overrides_user ON user_sound_overrides(user_id)');
         }
         if (!in_array('webhooks', $tables, true)) {
             $pdo->exec('CREATE TABLE webhooks (id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, name TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used TEXT)');
@@ -115,6 +139,29 @@ final class Database
             $pdo->exec('CREATE INDEX idx_registration_invites_email ON registration_invites(email)');
         }
 
+        // Moderation / reporting / support (added in schema v13).
+        if (!in_array('moderation_events', $tables, true)) {
+            $pdo->exec('CREATE TABLE moderation_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, kind TEXT NOT NULL, action TEXT NOT NULL DEFAULT "applied", match TEXT NOT NULL DEFAULT "", content TEXT NOT NULL DEFAULT "", target TEXT NOT NULL DEFAULT "", channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+            $pdo->exec('CREATE INDEX idx_moderation_events_user ON moderation_events(user_id, id)');
+            $pdo->exec('CREATE INDEX idx_moderation_events_guest ON moderation_events(guest_id, id)');
+        }
+        if (!in_array('reports', $tables, true)) {
+            $pdo->exec('CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL, pm INTEGER NOT NULL DEFAULT 0, channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, reporter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, reporter_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, sender_guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, sender_name TEXT NOT NULL DEFAULT "", content TEXT NOT NULL DEFAULT "", reason TEXT NOT NULL DEFAULT "", reason_other TEXT NOT NULL DEFAULT "", status TEXT NOT NULL DEFAULT "open", handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL, handled_at TEXT, resolution TEXT, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+            $pdo->exec('CREATE INDEX idx_reports_status ON reports(status, id)');
+        }
+        if (!in_array('user_notes', $tables, true)) {
+            $pdo->exec('CREATE TABLE user_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL, action TEXT NOT NULL DEFAULT "note", reason TEXT NOT NULL DEFAULT "", created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+            $pdo->exec('CREATE INDEX idx_user_notes_user ON user_notes(user_id, id)');
+        }
+        if (!in_array('support_tickets', $tables, true)) {
+            $pdo->exec('CREATE TABLE support_tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT "open", assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")), updated_at TEXT NOT NULL DEFAULT (datetime("now")), closed_at TEXT)');
+            $pdo->exec('CREATE INDEX idx_support_tickets_status ON support_tickets(status, id)');
+        }
+        if (!in_array('support_ticket_replies', $tables, true)) {
+            $pdo->exec('CREATE TABLE support_ticket_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, author_id INTEGER REFERENCES users(id) ON DELETE SET NULL, is_staff INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+            $pdo->exec('CREATE INDEX idx_support_replies_ticket ON support_ticket_replies(ticket_id, id)');
+        }
+
         // Backfill the FTS index from any pre-existing messages (new rows are
         // indexed by the triggers created above). Only rebuild when it lags.
         if (self::fts5($pdo)) {
@@ -129,6 +176,7 @@ final class Database
         $pdo->exec("UPDATE server_config SET value = 'LVChat' WHERE key = 'site_name' AND value = 'Chat Relay'");
 
         self::seedOperclasses($pdo);
+        self::seedSoundAlerts($pdo);
 
         $pdo->exec("INSERT OR REPLACE INTO server_config (key, value) VALUES ('schema_version', '" . self::SCHEMA_VERSION . "')");
 
@@ -311,6 +359,7 @@ final class Database
         $config = [
             'site_name' => 'LVChat',
             'registration_enabled' => '1',
+            'registration_requires_approval' => '0',
             'motd' => "Welcome to LVChat!\n\nType /help for a list of slash commands.",
             'spamfilter_enabled' => '1',
             'uploads_enabled' => '1',
@@ -348,6 +397,41 @@ final class Database
         $ins = $pdo->prepare('INSERT OR IGNORE INTO operclasses (name, perms, is_default) VALUES (?, ?, 1)');
         foreach ($defaults as $name => $perms) {
             $ins->execute([$name, json_encode($perms)]);
+        }
+    }
+
+    /**
+     * Ensure at least three built-in sound alerts exist. On a fresh install (or
+     * any DB with no sounds yet) the default WAVs are generated on disk with a
+     * dependency-free pure-PHP writer, so the server never needs ffmpeg.
+     */
+    private static function seedSoundAlerts(PDO $pdo): void
+    {
+        $count = (int) $pdo->query('SELECT COUNT(*) FROM sound_alerts')->fetchColumn();
+        if ($count > 0) {
+            return;
+        }
+        $defaults = [
+            ['Ding', 880.0, 0.40],
+            ['Pop', 440.0, 0.18],
+            ['Chime', 1046.5, 0.60],
+        ];
+        $dir = ROOT . '/public/assets/sounds';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        $ins = $pdo->prepare('INSERT INTO sound_alerts (name, file) VALUES (?, ?)');
+        foreach ($defaults as [$name, $freq, $dur]) {
+            $slug = strtolower(str_replace(' ', '-', $name));
+            $file = $dir . '/' . $slug . '.wav';
+            if (!file_exists($file)) {
+                SoundService::writeDefaultWav($file, $name, $freq, $dur);
+            }
+            // Only register a default whose file is actually on disk (a
+            // read-only web root that lost the committed files just skips it).
+            if (file_exists($file)) {
+                $ins->execute([$name, '/assets/sounds/' . $slug . '.wav']);
+            }
         }
     }
 }

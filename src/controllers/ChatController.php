@@ -80,6 +80,14 @@ final class ChatController
             $messages = MessageService::forDm($user, $dm);
             MessageService::markDmRead($user, $dm);
         }
+        // Background-audio watermark: highest channel message id rendered on this
+        // page, so the client only plays sounds for messages newer than it.
+        $bgLast = 0;
+        foreach ($messages as $m) {
+            if ((int) ($m['channel_id'] ?? 0) > 0 && (int) $m['id'] > $bgLast) {
+                $bgLast = (int) $m['id'];
+            }
+        }
 
         render_view('chat/app', [
             'user' => $user,
@@ -98,6 +106,8 @@ final class ChatController
             'commands' => CommandRegistry::names(),
             'joinModal' => $joinModal,
             'notifyMode' => $notifyMode,
+            'sounds' => SoundService::soundsForClient($user),
+            'bgLast' => $bgLast,
         ], null);
     }
 
@@ -152,6 +162,10 @@ final class ChatController
     {
         $user = self::requireUser();
         self::requireCsrf();
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            self::finish(['error' => $restriction], '/app', 403);
+        }
         $content = trim((string) ($_POST['content'] ?? ''));
         if ($content === '') {
             self::finish(['error' => 'Message is empty.'], '/app', 400);
@@ -190,6 +204,7 @@ final class ChatController
             // Global word filter applies to PMs (no channel mode exists for them).
             $censor = CensorService::check($content, true);
             if ($censor) {
+                ModerationService::record($user, 'badword', $censor['action'], $censor['word'], $content, 'p');
                 if ($censor['action'] === 'censor') {
                     $content = $censor['censored'];
                 } else {
@@ -247,6 +262,7 @@ final class ChatController
         // Global word filter applies only when the channel has +C set.
         $censor = CensorService::check($content, CensorService::isChannelFiltered($channel));
         if ($censor) {
+            ModerationService::record($user, 'badword', $censor['action'], $censor['word'], $content, 'c', (int) $channel['id']);
             if ($censor['action'] === 'censor') {
                 $content = $censor['censored'];
             } else {
@@ -269,6 +285,10 @@ final class ChatController
     {
         $user = self::requireUser();
         self::requireCsrf();
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            json_out(['error' => $restriction], 403);
+        }
         if (config_get('uploads_enabled', '1') !== '1') {
             json_out(['error' => 'Image uploads are disabled on this server.'], 403);
         }
@@ -304,6 +324,7 @@ final class ChatController
             }
             $censor = CensorService::check($content, true);
             if ($censor) {
+                ModerationService::record($user, 'badword', $censor['action'], $censor['word'], $content, 'p');
                 if ($censor['action'] === 'censor') {
                     $content = $censor['censored'];
                 } else {
@@ -340,6 +361,21 @@ final class ChatController
         if ($blocked) {
             json_out(['error' => $blocked], 403);
         }
+        // Image uploads run the same spamfilter + word filter as text messages
+        // (the caption is visible text), recording any hit on the queue.
+        $blocked = BanService::sendBlocked($user, $content, 'c');
+        if ($blocked) {
+            json_out(['error' => $blocked], 403);
+        }
+        $censor = CensorService::check($content, CensorService::isChannelFiltered($channel));
+        if ($censor) {
+            ModerationService::record($user, 'badword', $censor['action'], $censor['word'], $content, 'c', (int) $channel['id']);
+            if ($censor['action'] === 'censor') {
+                $content = $censor['censored'];
+            } else {
+                json_out(['error' => 'Message blocked by the word filter.'], 403);
+            }
+        }
         $msg = MessageService::send((int) $channel['id'], $user, $content, 'image');
         $msg['channel'] = $channel['slug'];
         json_out(['ok' => true, 'message' => $msg]);
@@ -349,6 +385,10 @@ final class ChatController
     {
         $user = self::requireUser();
         self::requireCsrf();
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            json_out(['error' => $restriction], 403);
+        }
         $text = trim((string) ($_POST['text'] ?? ''));
         if ($text === '' || $text[0] !== '/') {
             json_out(['error' => 'Not a command.'], 400);
@@ -368,7 +408,7 @@ final class ChatController
     /** Build the JSON payload the poll endpoint returns (shared with SSE). */
     private static function pollPayload(array $user, int $since, bool $markRead = true): array
     {
-        $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => []];
+        $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => [], 'bg_messages' => []];
 
         $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? OR guest_user_id = ?', [$user['id'], $user['id']]);
         $out['notify_count'] = $notifyCount;
@@ -381,6 +421,17 @@ final class ChatController
             fn ($c) => ['slug' => $c['slug'], 'unread' => (int) $c['unread']],
             ChannelService::joinedChannelNames($user)
         );
+        // Background channel messages since the client's global watermark — the
+        // fuel for channel audio alerts. Excludes the channel being viewed.
+        $bgSince = max(0, (int) ($_GET['bg_since'] ?? 0));
+        $bgExclude = 0;
+        if (isset($_GET['channel']) && $_GET['channel'] !== '') {
+            $bgChannel = ChannelService::findBySlug((string) $_GET['channel']);
+            if ($bgChannel) {
+                $bgExclude = (int) $bgChannel['id'];
+            }
+        }
+        $out['bg_messages'] = MessageService::backgroundSince($user, $bgSince, $bgExclude);
 
         if (isset($_GET['dm'])) {
             $t = Auth::findActor((string) $_GET['dm']);
@@ -429,7 +480,7 @@ final class ChatController
             }
             // Recent notifications for this channel to surface mentions/invites in a toast.
             $out['mentions'] = Database::all(
-                'SELECT n.kind, COALESCE(s.username, gs.nick) AS sender, n.message_id FROM notifications n
+                'SELECT n.kind, COALESCE(s.username, gs.nick) AS sender, n.sender_id, n.message_id FROM notifications n
                  LEFT JOIN users s ON s.id = n.sender_id
                  LEFT JOIN guests gs ON gs.id = n.sender_guest_id
                  WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.channel_id = ? AND n.read = 0',
@@ -614,5 +665,99 @@ final class ChatController
         }
         log_audit('message_edit', 'msg#' . $id, $user['username']);
         json_out(['ok' => true, 'content' => $content]);
+    }
+
+    /**
+     * POST /api/report — right-click -> report a channel or DM message to staff.
+     * Snapshots the sender and content (inline image URLs included) so the report
+     * survives edits and deletions. Guests may report too.
+     */
+    public static function report(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        $id = (int) ($_POST['id'] ?? 0);
+        $pm = ($_POST['pm'] ?? '0') === '1';
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+        $other = trim((string) ($_POST['other'] ?? ''));
+        if ($id < 1) {
+            json_out(['error' => 'Missing message.'], 400);
+        }
+        $isGuest = MessageService::isGuest($user);
+        // One report per message per reporter (checked before reason validation so
+        // a repeat submission is reported as a duplicate, not a bad request).
+        $dup = Database::row(
+            'SELECT 1 FROM reports WHERE pm = ? AND message_id = ?
+             AND COALESCE(reporter_user_id, 0) = CAST(? AS INTEGER)
+             AND COALESCE(reporter_guest_id, 0) = CAST(? AS INTEGER) LIMIT 1',
+            [$pm ? 1 : 0, $id, $isGuest ? 0 : (int) $user['id'], $isGuest ? (int) $user['id'] : 0]
+        );
+        if ($dup) {
+            json_out(['error' => 'You have already reported this message.'], 409);
+        }
+        if ($reason === '') {
+            json_out(['error' => 'Please choose a reason.'], 400);
+        }
+        if ($reason === 'Other' && $other === '') {
+            json_out(['error' => 'Please describe the issue.'], 400);
+        }
+        $other = mb_substr($other, 0, 500);
+        if ($pm) {
+            $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$id]);
+            if (!$row) {
+                json_out(['error' => 'Message not found.'], 404);
+            }
+            // Reporter must be one of the two participants.
+            $meU = $isGuest ? 0 : (int) $user['id'];
+            $meG = $isGuest ? (int) $user['id'] : 0;
+            $involved = ($row['sender_id'] === null ? 0 : (int) $row['sender_id']) === $meU
+                || ($row['recipient_id'] === null ? 0 : (int) $row['recipient_id']) === $meU
+                || ($row['sender_guest_id'] === null ? 0 : (int) $row['sender_guest_id']) === $meG
+                || ($row['recipient_guest_id'] === null ? 0 : (int) $row['recipient_guest_id']) === $meG;
+            if (!$involved) {
+                json_out(['error' => 'You cannot report this message.'], 403);
+            }
+            $senderId = $row['sender_id'] === null ? null : (int) $row['sender_id'];
+            $senderGuestId = $row['sender_guest_id'] === null ? null : (int) $row['sender_guest_id'];
+            $senderName = (string) ($row['sender_id']
+                ? (Database::scalar('SELECT username FROM users WHERE id = ?', [(int) $row['sender_id']]) ?: '')
+                : ($row['sender_guest_id']
+                    ? (Database::scalar('SELECT nick FROM guests WHERE id = ?', [(int) $row['sender_guest_id']]) ?: '')
+                    : ''));
+            $content = (string) $row['content'];
+            $channelId = null;
+        } else {
+            $row = Database::row('SELECT * FROM messages WHERE id = ?', [$id]);
+            if (!$row) {
+                json_out(['error' => 'Message not found.'], 404);
+            }
+            if ((int) $row['deleted'] === 1) {
+                json_out(['error' => 'This message has been removed.'], 410);
+            }
+            // Reporter must be a member of the channel.
+            if (!AccessService::member((int) $row['channel_id'], $user)) {
+                json_out(['error' => 'You are not a member of this channel.'], 403);
+            }
+            $senderId = $row['sender_id'] === null ? null : (int) $row['sender_id'];
+            $senderGuestId = $row['sender_guest_id'] === null ? null : (int) $row['sender_guest_id'];
+            $senderName = (string) ($row['sender_id']
+                ? (Database::scalar('SELECT username FROM users WHERE id = ?', [(int) $row['sender_id']]) ?: '')
+                : ($row['sender_guest_id']
+                    ? (Database::scalar('SELECT nick FROM guests WHERE id = ?', [(int) $row['sender_guest_id']]) ?: '')
+                    : ''));
+            $content = (string) $row['content'];
+            $channelId = (int) $row['channel_id'];
+        }
+
+        Database::query(
+            'INSERT INTO reports (message_id, pm, channel_id, reporter_user_id, reporter_guest_id,
+                                  sender_user_id, sender_guest_id, sender_name, content, reason, reason_other)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$id, $pm ? 1 : 0, $channelId,
+             $isGuest ? null : (int) $user['id'], $isGuest ? (int) $user['id'] : null,
+             $senderId, $senderGuestId, mb_substr($senderName, 0, 64), mb_substr($content, 0, 4000), $reason, $other]
+        );
+        log_audit('report_add', 'msg#' . $id, $reason . ($other !== '' ? ' / ' . $other : ''));
+        json_out(['ok' => true, 'message' => 'Report submitted. Thanks — staff will review it.']);
     }
 }

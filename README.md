@@ -17,8 +17,29 @@ services from Anope.
 - **Private messages** — `/msg`, notices, ignore list, unread badges, read receipts,
   and messaging yourself (an IRC hallmark)
 - **Context menus** — right-click any message, user, or channel for actions (copy, edit,
-  delete, message, profile, whois, ignore, kick, ban, share link, leave, channel info)
+  delete, report, message, profile, whois, ignore, kick, ban, share link, leave, channel info)
+- **Message reports** — right-click → **Report message** on any channel or DM message with
+  preset reasons plus a free-text "Other"; reports snapshot the sender and content (inline
+  images included) and land in **Admin → Reports** (staff+admin) with a review/resolve/dismiss flow
+- **Moderation queue** — every time a user trips a bad-word/spam filter, or is kicked, banned,
+  muted, or hit with a kline/gline/zline/shun, it's recorded in **Admin → Moderation** with the
+  actor, match, and channel
+- **Staff account timeline** — **Admin → Users → moderation history** keeps a staff-only record
+  of every action taken against an account plus free-form staff notes; visible only to admins/staff
+- **Support tickets** — registered users open tickets from the account menu (**Support**);
+  staff reply from **Admin → Support**, and the user is emailed via the system SMTP settings
+- **Age gate** — registering (or joining as a guest) requires certifying you are 18+, recorded
+  on the account; registrations can be set to require **admin approval** (pending users can
+  browse but not chat), and any account can be set **pending** or **suspended** with a reason
+- **Legal pages** — **Terms of Service** and **Privacy Policy** (US + Nevada boilerplate) are
+  editable in **Admin → Terms & Privacy** with a tiptap rich-text editor and linked from the
+  account menu in the chat sidebar and the login/register pages
 - **Realtime** — 2s AJAX polling with presence + mention/direct-message notification bell
+- **Sound alerts** — audio pings for DMs and for messages in channels you're not
+  viewing, with per-context sounds, @mention pings, and per-user overrides
+  (custom sound or mute) all configurable from your profile. Admins upload the
+  alert sounds (**Admin → Sounds**); three defaults ship built-in and every
+  sound is available to all users
 - **Resilient sending** — the composer posts via AJAX, with a native no-JS fallback that
   still delivers the message and returns you to the channel
 - **Slash commands** — full parser + Discord-style autocomplete for the entire IRC/Anope command set (see `/help`)
@@ -162,17 +183,20 @@ client automatically falls back to polling if the stream drops.
 bash bin/test.sh
 ```
 
-Runs **446 automated assertions** in two layers:
+Runs **558 automated assertions** in two layers:
 
-- **`tests/smoke.php`** (319) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (379) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
-  share links, guests, webhooks, account invites + SMTP, and the admin dashboard data.
-- **`tests/http_test.php`** (122) — full HTTP end-to-end: spins up the built-in server
+  share links, guests, webhooks, account invites + SMTP, age verification, the
+  moderation queue (filter hits, kicks, *lines), pending/suspended account status,
+  staff notes, support tickets, and legal-page sanitisation.
+- **`tests/http_test.php`** (179) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
-  share-link redirects, webhooks, and logout.
+  message reports, moderation/reports/support/legal admin pages, pending-approval and
+  suspended login flows, share-link redirects, webhooks, and logout.
 
 A headless-browser check (Chrome DevTools Protocol) is also used during development to
 confirm the chat page loads without JS errors, fills the viewport, polls for messages,
@@ -181,7 +205,7 @@ and sends messages from the UI.
 ## Layout
 
 ```
-public/          front controller + .htaccess + JS
+public/          front controller + .htaccess + JS + sounds
 src/             bootstrap, router, DB, auth, services (commands), controllers
 views/           layout, auth, chat app, browse, admin pages
 bin/deploy.sh    post-upload restore + sanity check

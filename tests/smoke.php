@@ -29,15 +29,15 @@ function check(string $label, bool $cond, string $detail = ''): void {
 
 // --- Registration ---
 echo "== registration ==\n";
-$r = Auth::register('alice', 'alice@example.com', 'password123');
+$r = Auth::register('alice', 'alice@example.com', 'password123', true);
 check('register alice', $r['ok'] === true, json_encode($r));
 $aliceRow = Auth::attempt('alice', 'password123');
 check('first registered user becomes admin', ($aliceRow['role'] ?? '') === 'admin', json_encode($aliceRow));
-$r = Auth::register('bob', 'bob@example.com', 'password123');
+$r = Auth::register('bob', 'bob@example.com', 'password123', true);
 check('register bob', $r['ok'] === true, json_encode($r));
 $bobRow = Auth::attempt('bob', 'password123');
 check('second user stays a regular user', ($bobRow['role'] ?? '') === 'user', json_encode($bobRow));
-$r = Auth::register('alice', 'alice2@example.com', 'password123');
+$r = Auth::register('alice', 'alice2@example.com', 'password123', true);
 check('duplicate username rejected', $r['ok'] === false, json_encode($r));
 
 // --- Login ---
@@ -98,7 +98,7 @@ check('historyBefore returns ascending order', $asc);
 check('admin can edit a message', MessageService::edit((int) $msg['id'], 'hello edited', $alice) === true);
 $msg2 = MessageService::send((int) $ch['id'], $bob, 'bob message');
 check('owner can edit own message', MessageService::edit((int) $msg2['id'], 'bob edited', $bob) === true);
-Auth::register('mallory', 'mallory@example.com', 'password123');
+Auth::register('mallory', 'mallory@example.com', 'password123', true);
 $mallory = Auth::attempt('mallory', 'password123');
 check('non-owner cannot edit a message', is_string(MessageService::edit((int) $msg2['id'], 'hacked', $mallory)));
 $edited = Database::row('SELECT edited_at FROM messages WHERE id = ?', [(int) $msg2['id']]);
@@ -245,7 +245,7 @@ check('correct key joins', ChannelService::joinStatus($priv, $alice, 'hunter2')[
 echo "== oper ==\n";
 $res = CommandParser::run('/kline bob 1h spam', $bob, $ch);
 check('non-admin cannot /kline', str_contains($res['replies'][0] ?? '', 'restricted'));
-Auth::register('charlie', 'charlie@example.com', 'password123');
+Auth::register('charlie', 'charlie@example.com', 'password123', true);
 $res = CommandParser::run('/kline charlie 1h spam', $alice, $ch);
 check('/kline as admin', str_contains($res['replies'][0] ?? '', 'KLINE'));
 check('kline blocks charlie', Auth::globalBanFor(Auth::attempt('charlie', 'password123')) !== null);
@@ -276,7 +276,7 @@ check('#staff seeded staff-only', $staff !== null && $staff['visibility'] === 's
 check('regular user denied #staff', ChannelService::joinStatus($staff, $bob)['ok'] === false);
 check('admin can join #staff', ChannelService::joinStatus($staff, $alice)['ok'] === true);
 check('#staff hidden from public list', !in_array($staff['id'], array_column(ChannelService::publicChannels(), 'id'), true));
-Auth::register('dave', 'dave@example.com', 'password123');
+Auth::register('dave', 'dave@example.com', 'password123', true);
 Database::query('UPDATE users SET role = "staff" WHERE username = "dave"');
 $dave = Auth::attempt('dave', 'password123');
 check('staff member can join #staff', ChannelService::joinStatus($staff, $dave)['ok'] === true);
@@ -285,7 +285,7 @@ check('#staff denied via share link to non-staff', ChannelService::joinStatus($s
 // ── Comprehensive command coverage ──────────────────────────────────────────
 $alice = Auth::attempt('alice', 'password123');
 $bob2 = Auth::attempt('bob_the_second', 'password123');
-Auth::register('erin', 'erin@example.com', 'password123');
+Auth::register('erin', 'erin@example.com', 'password123', true);
 $erin = Auth::attempt('erin', 'password123');
 $dave = Auth::attempt('dave', 'password123');
 $ch = ChannelService::find('#test');
@@ -535,7 +535,7 @@ check('mention creates notification', $after === $before + 1);
 
 // ── Channel lifecycle: temp channels vanish, register/deregister ────────────
 echo "== channel lifecycle ==\n";
-Auth::register('frank', 'frank@example.com', 'password123');
+Auth::register('frank', 'frank@example.com', 'password123', true);
 $frank = Auth::attempt('frank', 'password123');
 $tmp = ChannelService::create($frank, '#temp2');
 check('temp channel starts unregistered', ChannelService::isRegistered($tmp) === false);
@@ -661,7 +661,7 @@ ChannelService::join($ch, $erin);
 ChannelService::join($ch, $bob2);
 $res = CommandParser::run('/op erin #test', $alice, $ch);
 check('founder promotes to op', str_contains($res['replies'][0] ?? '', 'now has level: op'), $res['replies'][0] ?? '');
-Auth::register('gloria', 'gloria@example.com', 'password123');
+Auth::register('gloria', 'gloria@example.com', 'password123', true);
 $gloria = Auth::attempt('gloria', 'password123');
 ChannelService::join($ch, $gloria);
 $res = CommandParser::run('/op gloria #test', $erin, $ch);
@@ -677,26 +677,26 @@ check('half-op can set -i', $res['replies'][0] === 'Modes updated.', $res['repli
 
 // ── Anonymous guests ─────────────────────────────────────────────────────────
 echo "== guests ==\n";
-$guest = Auth::loginGuest('anoncat');
+$guest = Auth::loginGuest('anoncat', true);
 check('guest login creates guest row', $guest !== null && (int) $guest['guest'] === 1, json_encode($guest));
-check('guest nick is unique (duplicate rejected)', Auth::loginGuest('anoncat') === null);
-check('guest cannot take a registered nick', Auth::loginGuest('alice') === null);
+check('guest nick is unique (duplicate rejected)', Auth::loginGuest('anoncat', true) === null);
+check('guest cannot take a registered nick', Auth::loginGuest('alice', true) === null);
 
 // ── Guest nick release (guests are never permanently "registered") ──────────
-$g1 = Auth::loginGuest('guestnick');
+$g1 = Auth::loginGuest('guestnick', true);
 check('guest login creates a guest row', $g1 !== null && (int) $g1['guest'] === 1, json_encode($g1));
 check('guests never live in the users table', Database::scalar('SELECT COUNT(*) FROM users WHERE username = "guestnick"') === 0);
 Auth::logout(); // guest logout stamps last_seen = NULL -> nick frees instantly
-$g2 = Auth::loginGuest('guestnick');
+$g2 = Auth::loginGuest('guestnick', true);
 check('guest logout frees nick (re-login reuses same row)', $g2 !== null && (int) $g2['id'] === (int) $g1['id'], json_encode($g2));
-check('active guest still blocks a duplicate nick', Auth::loginGuest('guestnick') === null);
+check('active guest still blocks a duplicate nick', Auth::loginGuest('guestnick', true) === null);
 Database::query('UPDATE guests SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g2['id']]);
-$g3 = Auth::loginGuest('guestnick');
+$g3 = Auth::loginGuest('guestnick', true);
 check('stale guest row reclaimed (same id keeps DM history)', $g3 !== null && (int) $g3['id'] === (int) $g1['id'], json_encode($g3));
 Auth::logout();
-$g4 = Auth::loginGuest('claimme');
+$g4 = Auth::loginGuest('claimme', true);
 Database::query('UPDATE guests SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g4['id']]);
-$rc = Auth::register('claimme', 'claimme@example.com', 'password123');
+$rc = Auth::register('claimme', 'claimme@example.com', 'password123', true);
 check('register converts a stale guest row into a real account', $rc['ok'] === true, json_encode($rc));
 $claimed = Auth::attempt('claimme', 'password123');
 check('converted guest is a real (non-guest) account', $claimed !== null && (int) $claimed['guest'] === 0, json_encode($claimed));
@@ -830,7 +830,7 @@ check('invite list returns rows', count(InviteService::all()) >= 2);
 
 // Admin-style manual creation with an auto-generated password.
 $manualPw = bin2hex(random_bytes(8));
-$rManual = Auth::register('manualuser', 'manual@example.com', $manualPw);
+$rManual = Auth::register('manualuser', 'manual@example.com', $manualPw, true);
 check('admin-style manual creation works', $rManual['ok'] === true && Auth::attempt('manualuser', $manualPw) !== null, json_encode($rManual));
 
 // Mailer: graceful errors, never an uncaught exception.
@@ -847,6 +847,151 @@ check('Mailer unreachable host returns graceful error', $conn['ok'] === false &&
 config_set('smtp_from_email', '');
 check('Mailer refuses to send without a from address', Mailer::send('x@example.com', 't', 'b')['ok'] === false);
 config_set('smtp_enabled', '0');
+
+// ── Sound alerts (channel + DM audio) ────────────────────────────────────────
+echo "== sound alerts ==\n";
+$snds = SoundService::listAll();
+check('default sounds seeded (>= 3)', count($snds) >= 3, json_encode($snds));
+foreach ($snds as $s) {
+    $abs = ROOT . '/public' . $s['file'];
+    check('default sound file on disk: ' . $s['name'], file_exists($abs) && filesize($abs) > 1000, $abs);
+}
+$d1 = (int) $snds[0]['id'];
+$d2 = (int) $snds[1]['id'];
+$prefs0 = SoundService::prefsFor($alice);
+check('default prefs are on (first sound)', $prefs0['dm_sound_id'] === $d1 && $prefs0['channel_sound_id'] === $d1, json_encode($prefs0));
+check('guests inherit default prefs', SoundService::prefsFor(['id' => 999999, 'guest' => 1])['dm_sound_id'] === $d1);
+
+SoundService::savePrefs($alice, null, $d2);
+$prefs = SoundService::prefsFor($alice);
+check('prefs saved (dm off, channel=sound 2)', $prefs['dm_sound_id'] === null && $prefs['channel_sound_id'] === $d2, json_encode($prefs));
+SoundService::savePrefs($alice, $d1, null);
+$prefs = SoundService::prefsFor($alice);
+check('prefs update (dm back on)', $prefs['dm_sound_id'] === $d1 && $prefs['channel_sound_id'] === null, json_encode($prefs));
+
+// Per-user overrides: mute bob, then a specific sound for mallory.
+check('override set (mute bob)', SoundService::setOverride($alice, (int) $bob['id'], null) === true);
+$o = SoundService::overrideFor($alice, (int) $bob['id']);
+check('override mutes bob', $o['override'] === true && $o['sound_id'] === null, json_encode($o));
+check('override set (specific sound for mallory)', SoundService::setOverride($alice, (int) $mallory['id'], $d1) === true);
+$o = SoundService::overrideFor($alice, (int) $mallory['id']);
+check('override uses specific sound', $o['override'] === true && $o['sound_id'] === $d1, json_encode($o));
+$o = SoundService::overrideFor($alice, 999999);
+check('no override falls back to default', $o['override'] === false, json_encode($o));
+check('override for unknown user rejected', is_string(SoundService::setOverride($alice, 999999, $d1)));
+check('override for self rejected', is_string(SoundService::setOverride($alice, (int) $alice['id'], $d1)));
+SoundService::removeOverride($alice, (int) $bob['id']);
+check('override removed reverts to default', SoundService::overrideFor($alice, (int) $bob['id'])['override'] === false);
+check('override list contains mallory', isset(SoundService::overrides($alice)[(int) $mallory['id']]));
+
+$client = SoundService::soundsForClient($alice);
+check('client payload bundles sounds + prefs + overrides',
+    isset($client['sounds'][$d1]) && $client['dm_sound_id'] === $d1 && $client['channel_sound_id'] === null
+    && isset($client['overrides'][(int) $mallory['id']]) && $client['overrides'][(int) $mallory['id']] === $d1,
+    json_encode($client));
+
+// Toggle hides a sound from user pickers; the file stays until deletion.
+$enabledBefore = count(SoundService::listEnabled());
+check('sound toggle disables', SoundService::toggle($d1) === true);
+check('disabled sound leaves user pickers', count(SoundService::listEnabled()) === $enabledBefore - 1);
+SoundService::toggle($d1);
+check('sound re-enabled', count(SoundService::listEnabled()) === $enabledBefore);
+check('admin add rejects a missing file', SoundService::add(['name' => 'x.wav', 'tmp_name' => '/dev/null', 'error' => UPLOAD_ERR_NO_FILE], 'Test')['ok'] === false);
+
+// backgroundSince drives background-channel audio: other channels surface, the
+// channel being viewed is excluded, and system kinds never ping.
+$ch2 = ChannelService::create($alice, '#bgtest');
+ChannelService::join($ch2, $bob);
+MessageService::send((int) $ch2['id'], $bob, 'bg hello');
+$bg = MessageService::backgroundSince($alice, 0, (int) $ch['id']);
+check('backgroundSince surfaces other-channel messages', in_array('bg hello', array_column($bg, 'content'), true), json_encode($bg));
+$bgEx = MessageService::backgroundSince($alice, 0, (int) $ch2['id']);
+check('backgroundSince excludes the open channel', !in_array('bg hello', array_column($bgEx, 'content'), true));
+$bgKinds = MessageService::backgroundSince($alice, 0, 0);
+check('backgroundSince filters system kinds', !array_intersect(array_column($bgKinds, 'kind'), MessageService::SYSTEM_KINDS));
+ChannelService::drop((string) $ch2['id']);
+
+// ── Age verification ─────────────────────────────────────────────────────────
+echo "== age verification ==\n";
+$under = Auth::register('minor', 'minor@example.com', 'password123', false);
+check('registration without age certification rejected', $under['ok'] === false && str_contains(implode(' ', $under['errors']), '18'), json_encode($under));
+check('guests cannot join without age', Auth::loginGuest('minorguest', false) === null);
+check('guests can join with age', Auth::loginGuest('ageguest', true) !== null);
+
+// ── Moderation queue (filter hits + account actions) ─────────────────────────
+echo "== moderation queue ==\n";
+$modCh = ChannelService::find('#test') ?: ChannelService::create($alice, '#test');
+Database::query('DELETE FROM moderation_events');
+Database::query('INSERT INTO spamfilters (match_type, targets, action, match) VALUES ("simple", "c", "block", "zzfilterword")');
+$blocked = BanService::sendBlocked($bob, 'zzfilterword', 'c');
+check('spamfilter block returns error', $blocked !== null && str_contains($blocked, 'spam filter'), (string) $blocked);
+check('spamfilter hit recorded', (int) Database::scalar('SELECT COUNT(*) FROM moderation_events WHERE kind = "spamfilter" AND user_id = ?', [$bob['id']]) === 1);
+Database::query('DELETE FROM spamfilters WHERE match = "zzfilterword"');
+
+Database::query('INSERT INTO badwords (word, action) VALUES ("zzquux", "censor")');
+$censor = CensorService::check('say zzquux', true);
+check('badword censor detected', $censor !== null && $censor['action'] === 'censor');
+ModerationService::record($bob, 'badword', $censor['action'], $censor['word'], 'say zzquux', 'c', (int) $modCh['id']);
+check('badword event recorded', (int) Database::scalar('SELECT COUNT(*) FROM moderation_events WHERE kind = "badword" AND user_id = ?', [$bob['id']]) === 1);
+Database::query('DELETE FROM badwords WHERE word = "zzquux"');
+
+if (!AccessService::member($modCh['id'], (int) $bob['id'])) {
+    ChannelService::join($modCh, $bob);
+}
+CommandParser::run('/kick bob_the_second test kick reason', $alice, $modCh);
+check('/kick records moderation event', (int) Database::scalar('SELECT COUNT(*) FROM moderation_events WHERE kind = "kick" AND user_id = ?', [$bob['id']]) >= 1);
+check('/kick records staff note', (int) Database::scalar('SELECT COUNT(*) FROM user_notes WHERE user_id = ? AND action = "kick"', [$bob['id']]) >= 1);
+ChannelService::join($modCh, $bob);
+CommandParser::run('/ban bob_the_second 1h test ban', $alice, $modCh);
+check('/ban records staff note', (int) Database::scalar('SELECT COUNT(*) FROM user_notes WHERE user_id = ? AND action = "ban"', [$bob['id']]) >= 1);
+CommandParser::run('/unban bob_the_second', $alice, $modCh);
+
+// ── Pending / Suspended status ───────────────────────────────────────────────
+echo "== account status ==\n";
+ModerationService::setStatus((int) $mallory['id'], 'suspended', 'test suspension', $alice);
+$mRow = Database::row('SELECT * FROM users WHERE id = ?', [$mallory['id']]);
+check('suspend sets status + reason', ($mRow['status'] ?? '') === 'suspended' && $mRow['status_reason'] === 'test suspension');
+check('suspend writes note', (int) Database::scalar('SELECT COUNT(*) FROM user_notes WHERE user_id = ? AND action = "suspend"', [$mallory['id']]) === 1);
+$restr = ModerationService::restriction($mRow);
+check('suspended restriction message', $restr !== null && str_contains($restr, 'suspended'), (string) $restr);
+check('history lists timeline entries', count(ModerationService::history((int) $mallory['id'])) >= 1);
+ModerationService::setStatus((int) $mallory['id'], 'active', null, $alice);
+check('activate clears status', (Database::row('SELECT * FROM users WHERE id = ?', [$mallory['id']])['status'] ?? '') === 'active');
+
+config_set('registration_requires_approval', '1');
+$penny = Auth::register('penny', 'penny@example.com', 'password123', true);
+$pennyRow = Database::row('SELECT * FROM users WHERE id = ?', [$penny['id']]);
+check('approval toggle makes new accounts pending', ($pennyRow['status'] ?? '') === 'pending');
+$restr = ModerationService::restriction($pennyRow);
+check('pending restriction blocks chat', $restr !== null && str_contains($restr, 'pending'), (string) $restr);
+check('guests are never restricted', ModerationService::restriction($guest) === null);
+ModerationService::setStatus((int) $penny['id'], 'active', null, $alice);
+check('approve enables chat', ModerationService::restriction(Database::row('SELECT * FROM users WHERE id = ?', [$penny['id']])) === null);
+config_set('registration_requires_approval', '0');
+
+// ── Support tickets ──────────────────────────────────────────────────────────
+echo "== support tickets ==\n";
+$t = SupportService::create($bob, 'Need help with channels', 'I cannot create a channel.');
+check('support ticket created', $t['ok'] === true && $t['id'] > 0, json_encode($t));
+$tk = SupportService::get($t['id']);
+check('ticket open for owner', (string) $tk['status'] === 'open' && (int) $tk['user_id'] === (int) $bob['id']);
+$rep = SupportService::reply((int) $t['id'], $alice, 'Thanks for letting us know.');
+check('staff reply succeeds', $rep['ok'] === true, json_encode($rep));
+$tk = SupportService::get($t['id']);
+check('staff reply marks answered', (string) $tk['status'] === 'answered');
+check('replies stored', count(SupportService::replies((int) $t['id'])) === 2);
+check('owner cannot view someone else', SupportService::canView(SupportService::get($t['id']), $mallory) === false);
+check('close ticket', SupportService::setStatus((int) $t['id'], 'closed', $alice)['ok'] === true);
+check('ticket closed', (SupportService::get((int) $t['id'])['status'] ?? '') === 'closed');
+
+// ── Legal pages (ToS / Privacy) ──────────────────────────────────────────────
+echo "== legal pages ==\n";
+$terms = LegalService::get('terms');
+check('legal boilerplate generated', str_contains($terms, 'Terms of Service') && str_contains($terms, 'Nevada'));
+$clean = LegalService::sanitize('<p>Hello <script>alert(1)</script></p><p onclick="x()">ok</p><a href="javascript:evil()">x</a>');
+check('legal sanitizer strips script/events/js', !str_contains($clean, 'script') && !str_contains($clean, 'onclick') && !str_contains($clean, 'javascript:'), $clean);
+LegalService::save('terms', '<h1>Custom terms</h1><p>Body</p>');
+check('legal save/get round-trip', str_contains(LegalService::get('terms'), 'Custom terms'));
 
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

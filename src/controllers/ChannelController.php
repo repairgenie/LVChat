@@ -19,6 +19,14 @@ final class ChannelController
         if ($member) {
             redirect('/app?channel=' . rawurlencode($channel['slug']));
         }
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            render_view('chat/denied', [
+                'channel' => $channel,
+                'reason' => $restriction,
+                'user' => $user,
+            ]);
+        }
         $status = ChannelService::joinStatus($channel, $user, $_POST['key'] ?? null);
         if ($status['reason'] === 'need_key') {
             redirect('/app?join=' . rawurlencode($channel['slug']));
@@ -79,6 +87,11 @@ final class ChannelController
         if (!$channel) {
             render_view('errors/notfound', [], null);
         }
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            flash($restriction);
+            redirect('/app');
+        }
         $status = ChannelService::joinStatus($channel, $user, (string) ($_POST['key'] ?? ''));
         if (!$status['ok']) {
             flash($status['reason']);
@@ -92,6 +105,10 @@ final class ChannelController
     {
         $user = Auth::require();
         Csrf::verify();
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            json_out(['error' => $restriction], 403);
+        }
         $name = trim((string) ($_POST['name'] ?? ''));
         $result = ChannelService::create($user, $name);
         if (is_string($result)) {
@@ -104,6 +121,10 @@ final class ChannelController
     {
         $user = Auth::require();
         Csrf::verify();
+        $restriction = ModerationService::restriction($user);
+        if ($restriction) {
+            json_out(['error' => $restriction], 403);
+        }
         $name = trim((string) ($_POST['name'] ?? ''));
         $key = $_POST['key'] ?? null;
         $channel = ChannelService::find($name);

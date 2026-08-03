@@ -14,12 +14,22 @@ final class UserController
         $isSelf = (int) $viewer['id'] === (int) $user['id'];
         $channels = ChannelService::joinedChannelNames($user);
         $isOnline = Auth::isOnline($user);
+        $sounds = SoundService::listEnabled();
+        $soundPrefs = SoundService::prefsFor($user);
+        $soundOverrides = SoundService::overrides($user);
+        $allUsers = $isSelf && !(int) ($user['guest'] ?? 0)
+            ? Database::all('SELECT id, username FROM users WHERE id != ? ORDER BY username COLLATE NOCASE LIMIT 1000', [$user['id']])
+            : [];
         render_view('user/profile', [
             'viewer' => $viewer,
             'user' => $user,
             'isSelf' => $isSelf,
             'channels' => $channels,
             'isOnline' => $isOnline,
+            'sounds' => $sounds,
+            'soundPrefs' => $soundPrefs,
+            'soundOverrides' => $soundOverrides,
+            'allUsers' => $allUsers,
         ]);
     }
 

@@ -163,6 +163,37 @@ final class MessageService
         return array_map([self::class, 'present'], $rows);
     }
 
+    /**
+     * New real (non-system) messages in every channel the actor is a member of
+     * except the one they're currently viewing. This is what drives background
+     * channel audio alerts: the client polls with a global messages.id
+     * watermark (`bg_since`) and plays a sound for each returned row.
+     */
+    public static function backgroundSince(array $actor, int $since, int $excludeChannelId = 0, int $limit = 50): array
+    {
+        $memberJoin = self::isGuest($actor)
+            ? 'JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.guest_id = ?'
+            : 'JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = ?';
+        $kinds = implode('","', self::SYSTEM_KINDS);
+        $params = [$actor['id'], $since];
+        $exclude = '';
+        if ($excludeChannelId > 0) {
+            $exclude = ' AND m.channel_id != ?';
+            $params[] = $excludeChannelId;
+        }
+        $params[] = $limit;
+        $rows = Database::all(
+            self::msgSelect() . "
+             $memberJoin
+             WHERE m.id > ? AND m.deleted = 0
+               AND m.kind NOT IN (\"$kinds\")$exclude
+             ORDER BY m.id ASC
+             LIMIT ?",
+            $params
+        );
+        return array_map([self::class, 'present'], $rows);
+    }
+
     public static function history(int $channelId, int $limit = 60): array
     {
         $rows = Database::all(

@@ -96,6 +96,8 @@ final class OpCommands
         }
         MessageService::system($channel['id'], 'kick', $msg);
         log_audit('kick', $channel['name'], $nick . ($reason ? " / $reason" : ''));
+        ModerationService::record($target, 'kick', 'applied', $channel['name'], $reason, 'c', (int) $channel['id']);
+        ModerationService::note((int) $target['id'], $user, 'kick', $channel['name'] . ($reason ? ' — ' . $reason : ''));
         return ['replies' => ["Kicked $nick."]];
     }
 
@@ -109,6 +111,8 @@ final class OpCommands
         }
         $mask = strtolower($target['username']) . '!*@*';
         BanService::addBan('channel_ban', $channel['id'], $mask, $reason ?: null, null, (int) $user['id'], (int) $target['id']);
+        ModerationService::record($target, 'ban', 'applied', $mask, $reason, 'c', (int) $channel['id']);
+        ModerationService::note((int) $target['id'], $user, 'ban', $channel['name'] . ($reason ? ' — ' . $reason : ''));
         $r = self::kick([$nick, $reason], $user, $channel);
         MessageService::system($channel['id'], 'ban', $nick . ' has been banned from ' . $channel['name']);
         return $r;
@@ -144,6 +148,13 @@ final class OpCommands
         $display = $duration !== null ? self::fmtDuration($duration) : 'permanent';
         MessageService::system($channel['id'], 'ban', $user['username'] . ' banned ' . $target . ' (' . $display . ')');
         log_audit('ban', $channel['name'], "$target / $display" . ($reason ? " / $reason" : ''));
+        if ($userId) {
+            $tu = Database::row('SELECT * FROM users WHERE id = ?', [$userId]);
+            if ($tu) {
+                ModerationService::record($tu, 'ban', 'applied', $target, $reason, 'c', (int) $channel['id']);
+                ModerationService::note($userId, $user, 'ban', $channel['name'] . ' (' . $display . ')' . ($reason ? ' — ' . $reason : ''));
+            }
+        }
         if ($userId) {
             self::kick([$args[0], 'Banned (' . ($reason ?: 'no reason') . ')'], $user, $channel);
         }
@@ -193,6 +204,8 @@ final class OpCommands
         $dur = parse_duration($duration);
         $mask = strtolower($u['username']) . '!*@*';
         BanService::addBan('quiet', $channel['id'], $mask, null, $dur, (int) $user['id'], (int) $u['id']);
+        ModerationService::record($u, 'quiet', 'applied', $mask, '', 'c', (int) $channel['id']);
+        ModerationService::note((int) $u['id'], $user, 'warn', 'Muted in ' . $channel['name'] . ' (+q)' . ($dur ? ' for ' . self::fmtDuration($dur) : ''));
         MessageService::system($channel['id'], 'mode', $user['username'] . ' muted ' . $nick . ' (+q)');
         return ['replies' => ["$nick is now muted in " . $channel['name'] . '.']];
     }

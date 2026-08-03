@@ -63,6 +63,10 @@
         <td class="px-4 py-2">
           <a href="/u/<?= h(rawurlencode($u['username'])) ?>" class="font-medium text-white hover:underline"><?= h($u['username']) ?></a>
           <?php if ($u['banned']): ?><span class="ml-1 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">BANNED</span><?php endif; ?>
+          <?php if (($u['status'] ?? 'active') === 'suspended'): ?><span class="ml-1 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">SUSPENDED</span><?php endif; ?>
+          <?php if (($u['status'] ?? 'active') === 'pending'): ?><span class="ml-1 text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">PENDING</span><?php endif; ?>
+          <?php if (!empty($u['status_reason'])): ?><span class="ml-1 text-[10px] text-discord-500" title="<?= h($u['status_reason']) ?>">⚠</span><?php endif; ?>
+          <div class="mt-0.5"><a href="/admin/users/<?= (int) $u['id'] ?>" class="text-[11px] text-blurple hover:underline">moderation history</a></div>
         </td>
         <td class="px-4 py-2 text-discord-300"><?= h($u['email']) ?></td>
         <td class="px-4 py-2"><?= $u['role'] === 'admin' ? '<span class="text-amber-400">admin</span>' : ($u['role'] === 'staff' ? '<span class="text-blurple">staff</span>' : 'user') ?></td>
@@ -90,6 +94,15 @@
             <input type="hidden" name="back" value="/admin/users">
             <input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
             <?php if ((int) $u['id'] !== (int) $admin['id']): ?>
+              <?php if (($u['status'] ?? 'active') === 'pending'): ?>
+              <button name="action" value="user_approve" class="btn-ghost text-xs !py-1 text-green-400">Approve</button>
+              <?php elseif (($u['status'] ?? 'active') === 'suspended'): ?>
+              <button name="action" value="user_activate" class="btn-ghost text-xs !py-1 text-green-400">Activate</button>
+              <button name="action" value="user_pending" class="btn-ghost text-xs !py-1 text-amber-400" onclick="return promptReason(event, 'Reason for pending:')">Set pending</button>
+              <?php else: ?>
+              <button name="action" value="user_pending" class="btn-ghost text-xs !py-1 text-amber-400" onclick="return promptReason(event, 'Reason for pending:')">Set pending</button>
+              <button name="action" value="user_suspend" class="btn-ghost text-xs !py-1 text-red-400" onclick="return promptReason(event, 'Reason for suspension (required):')">Suspend</button>
+              <?php endif; ?>
               <?php if ($u['banned']): ?>
               <button name="action" value="user_unban" class="btn-ghost text-xs !py-1">Unban</button>
               <?php else: ?>
@@ -117,3 +130,19 @@
     </tbody>
   </table>
 </div>
+<script>
+function promptReason(event, msg) {
+  var reason = prompt(msg, '');
+  if (reason === null) return false;
+  var form = event.currentTarget.closest('form');
+  var inp = form.querySelector('input[name="reason"]');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'hidden';
+    inp.name = 'reason';
+    form.appendChild(inp);
+  }
+  inp.value = reason;
+  return true;
+}
+</script>

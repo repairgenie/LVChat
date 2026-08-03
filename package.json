@@ -4,10 +4,18 @@
   "description": "LVChat — Discord-style IRC web chat (PHP + SQLite)",
   "private": true,
   "scripts": {
-    "build": "tailwindcss -i ./src/assets/input.css -o ./public/assets/css/app.css --minify",
+    "build": "tailwindcss -i ./src/assets/input.css -o ./public/assets/css/app.css --minify && npm run build:editor",
+    "build:editor": "esbuild src/assets/tiptap-entry.js --bundle --minify --format=iife --outfile=public/assets/vendor/tiptap/tiptap-bundle.js",
     "watch": "tailwindcss -i ./src/assets/input.css -o ./public/assets/css/app.css --watch"
   },
   "devDependencies": {
+    "@tiptap/core": "^2.11.5",
+    "@tiptap/extension-link": "^2.11.5",
+    "@tiptap/extension-placeholder": "^2.11.5",
+    "@tiptap/extension-underline": "^2.11.5",
+    "@tiptap/pm": "^2.11.5",
+    "@tiptap/starter-kit": "^2.11.5",
+    "esbuild": "^0.24.0",
     "tailwindcss": "^3.4.0"
   }
 }

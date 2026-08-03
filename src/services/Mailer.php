@@ -193,6 +193,25 @@ final class Mailer
         return self::send($to, $subject, $text, self::htmlWrap($subject, $body));
     }
 
+    /** Send the ticket owner an email when a staff member replies to their support ticket. */
+    public static function sendSupportReply(string $to, string $subject, string $reply, string $staffName, int $ticketId): array
+    {
+        $site = (string) (config_get('site_name', 'LVChat') ?: 'LVChat');
+        $ticketSubject = trim($subject) !== '' ? $subject : 'your support ticket';
+        $mailSubject = "Re: $ticketSubject";
+        $link = base_url() . '/support/' . $ticketId;
+        $text = "Hi,\n\n$staffName has replied to your support ticket on $site.\n\n"
+            . "Reply:\n$reply\n\n"
+            . "View the ticket: $link\n";
+
+        $body = '<p>Hi,</p>'
+            . '<p><strong>' . h($staffName) . '</strong> has replied to your support ticket on <strong>' . h($site) . '</strong>.</p>'
+            . '<div style="border-left:3px solid #5865f2;background:#232428;padding:10px 14px;border-radius:6px;white-space:pre-wrap">' . h($reply) . '</div>'
+            . '<p><a href="' . h($link) . '" style="display:inline-block;background:#5865f2;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600">View the ticket</a></p>';
+
+        return self::send($to, $mailSubject, $text, self::htmlWrap($mailSubject, $body));
+    }
+
     /** Whether SMTP is enabled and pointed at a host (used to hide/emphasise UI). */
     public static function configured(): bool
     {

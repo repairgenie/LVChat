@@ -138,6 +138,7 @@ final class BanService
                     ? @preg_match($f['match'], $content) === 1
                     : Auth::maskMatch(str_replace('_', ' ', $f['match']), $content);
                 if ($hit) {
+                    ModerationService::record($user, 'spamfilter', 'block', (string) $f['match'], $content, $target);
                     return 'Your message was blocked by a spam filter' . ($f['reason'] ? ': ' . $f['reason'] : '.');
                 }
             }

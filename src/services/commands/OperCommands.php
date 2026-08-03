@@ -83,17 +83,24 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
                 return ['replies' => [$err]];
             }
             $dur = $duration !== null ? ($duration >= 3600 ? floor($duration / 3600) . 'h' : floor($duration / 60) . 'm') : 'permanent';
+            if ($userId) {
+                $tu = Database::row('SELECT * FROM users WHERE id = ?', [$userId]);
+                if ($tu) {
+                    ModerationService::record($tu, $kind, 'applied', $target, $reason, '', null);
+                    ModerationService::note($userId, $user, $kind, $reason !== '' ? $reason : 'no reason');
+                }
+            }
             if ($kind === 'shun' && $userId) {
                 // shun blocks messaging, so don't kick
             } elseif ($isIp || ($kind === 'zline' && !$userId)) {
                 // Kick any online users whose recorded IP matches the ban.
                 foreach (Database::all('SELECT * FROM users WHERE last_ip IS NOT NULL') as $u) {
                     if (Auth::ipMatch($target, (string) $u['last_ip'])) {
-                        op_force_kick((int) $u['id'], "Banned (" . ($reason ?: $kind) . ')');
+                        op_force_kick((int) $u['id'], "Banned (" . ($reason ?: $kind) . ')', $user);
                     }
                 }
             } elseif ($userId) {
-                op_force_kick((int) $userId, "Banned (" . ($reason ?: $kind) . ')');
+                op_force_kick((int) $userId, "Banned (" . ($reason ?: $kind) . ')', $user);
             }
             log_audit($kind . '_add', $target, "$dur / " . ($reason ?: 'no reason'));
             return ['replies' => ["$target has been " . strtoupper($kind) . "d for $dur" . ($reason ? ": $reason" : '') . '.']];
@@ -142,7 +149,8 @@ CommandRegistry::register('kill', [
         if ((int) $t['id'] === (int) $user['id']) {
             return ['replies' => ['You cannot kill yourself.']];
         }
-        op_force_kick((int) $t['id'], 'Killed: ' . $reason);
+        op_force_kick((int) $t['id'], 'Killed: ' . $reason, $user);
+        ModerationService::note((int) $t['id'], $user, 'kline', $reason);
         Database::query('DELETE FROM sessions WHERE user_id = ?', [$t['id']]);
         log_audit('kill', $nick, $reason);
         return ['replies' => ["$nick has been killed ($reason)."]];
@@ -425,12 +433,16 @@ CommandRegistry::register('badword', [
     },
 ]);
 
-// Shared helper for this file.
-function op_force_kick(int $userId, string $reason): void
+// Shared helper for this file. When $actor is given, the removal is recorded on
+// the target's staff-only moderation timeline.
+function op_force_kick(int $userId, string $reason, ?array $actor = null): void
 {
     foreach (Database::all('SELECT cm.channel_id, c.name FROM channel_members cm JOIN channels c ON c.id = cm.channel_id WHERE cm.user_id = ?', [$userId]) as $r) {
         MessageService::system($r['channel_id'], 'kick', 'user#' . $userId . ' was removed (' . $reason . ')');
         Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$r['channel_id'], $userId]);
         ChannelService::afterMemberRemoval($r['channel_id']);
+    }
+    if ($actor) {
+        ModerationService::note($userId, $actor, 'kick', $reason);
     }
 }

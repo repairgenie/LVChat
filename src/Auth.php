@@ -85,6 +85,9 @@ final class Auth
             'registered_at' => $g['created_at'] ?? null,
             'last_seen' => $g['last_seen'] ?? null,
             'last_ip' => $g['ip'] ?? null,
+            'status' => 'active',
+            'status_reason' => null,
+            'age_verified_at' => $g['age_verified_at'] ?? null,
         ];
     }
 
@@ -143,7 +146,13 @@ final class Auth
         return $stmt->rowCount();
     }
 
-    public static function register(string $username, string $email, string $password): array
+    /**
+     * Register a real account. When $ageVerified is true the user has certified
+     * they are at least 18; when registration_requires_approval is enabled new
+     * accounts are created as 'pending' (unless $autoApprove, used when an admin
+     * creates the account manually or the very first account becomes the admin).
+     */
+    public static function register(string $username, string $email, string $password, bool $ageVerified = false, bool $autoApprove = false): array
     {
         $username = trim($username);
         $email = trim($email);
@@ -157,6 +166,9 @@ final class Auth
         if (strlen($password) < 8) {
             $errors[] = 'Password must be at least 8 characters.';
         }
+        if (!$ageVerified) {
+            $errors[] = 'You must certify that you are at least 18 years old to register.';
+        }
         if ($errors) {
             return ['ok' => false, 'errors' => $errors];
         }
@@ -168,6 +180,13 @@ final class Auth
         if ($exists) {
             return ['ok' => false, 'errors' => ['That username is already registered.']];
         }
+        $hasAdmin = (int) Database::scalar('SELECT COUNT(*) FROM users WHERE role = "admin"') > 0;
+        if (!$hasAdmin || $autoApprove || config_get('registration_requires_approval', '0') !== '1') {
+            $status = 'active';
+        } else {
+            $status = 'pending';
+        }
+        $ageAt = $ageVerified ? now() : null;
         // A stale guest row may hold the nick — convert it into the real account,
         // transferring its DMs / memberships / notifications to the new user id.
         $guest = Database::row('SELECT * FROM guests WHERE nick = ? COLLATE NOCASE', [$username]);
@@ -176,8 +195,8 @@ final class Auth
                 return ['ok' => false, 'errors' => ['That username is already registered.']];
             }
             Database::query(
-                'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-                [$username, $email, password_hash($password, PASSWORD_ARGON2ID)]
+                'INSERT INTO users (username, email, password_hash, status, age_verified_at) VALUES (?, ?, ?, ?, ?)',
+                [$username, $email, password_hash($password, PASSWORD_ARGON2ID), $status, $ageAt]
             );
             $id = (int) Database::lastId();
             Database::query('UPDATE private_messages SET sender_id = ?, sender_guest_id = NULL WHERE sender_guest_id = ?', [$id, $guest['id']]);
@@ -190,14 +209,13 @@ final class Auth
             Database::query('DELETE FROM guests WHERE id = ?', [$guest['id']]);
         } else {
             Database::query(
-                'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-                [$username, $email, password_hash($password, PASSWORD_ARGON2ID)]
+                'INSERT INTO users (username, email, password_hash, status, age_verified_at) VALUES (?, ?, ?, ?, ?)',
+                [$username, $email, password_hash($password, PASSWORD_ARGON2ID), $status, $ageAt]
             );
             $id = (int) Database::lastId();
         }
-        $hasAdmin = (int) Database::scalar('SELECT COUNT(*) FROM users WHERE role = "admin"') > 0;
         if (!$hasAdmin) {
-            Database::query('UPDATE users SET role = "admin" WHERE id = ?', [$id]);
+            Database::query('UPDATE users SET role = "admin", status = "active", status_reason = NULL WHERE id = ?', [$id]);
         }
         return ['ok' => true, 'id' => $id];
     }
@@ -210,10 +228,13 @@ final class Auth
      * a short inactivity), so the nick frees quickly and its DM history survives.
      * Returns the guest actor array, or null if the nick is invalid/in use/banned.
      */
-    public static function loginGuest(string $nick): ?array
+    public static function loginGuest(string $nick, bool $ageVerified = false): ?array
     {
         $nick = trim($nick);
         if (!preg_match('/^[A-Za-z0-9_\-\[\]\\`^{}|]{2,32}$/', $nick)) {
+            return null;
+        }
+        if (!$ageVerified) {
             return null;
         }
         self::purgeGuests();
@@ -232,13 +253,13 @@ final class Auth
         if ($existing) {
             // Stale guest row: reclaim it, keeping the same guest id and DMs.
             Database::query('DELETE FROM guest_sessions WHERE guest_id = ?', [$existing['id']]);
-            Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $existing['id']]);
+            Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ?, age_verified_at = COALESCE(age_verified_at, datetime("now")) WHERE id = ?', [client_ip(), $existing['id']]);
             $g = Database::row('SELECT * FROM guests WHERE id = ?', [$existing['id']]);
             self::loginGuestSession($g);
             log_audit('guest_join', $nick);
             return self::guestActor($g);
         }
-        Database::query('INSERT INTO guests (nick, ip) VALUES (?, ?)', [$nick, client_ip()]);
+        Database::query('INSERT INTO guests (nick, ip, age_verified_at) VALUES (?, ?, datetime("now"))', [$nick, client_ip()]);
         $g = Database::row('SELECT * FROM guests WHERE id = ?', [(int) Database::lastId()]);
         self::loginGuestSession($g);
         log_audit('guest_join', $nick);

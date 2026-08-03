@@ -101,3 +101,34 @@ html.light .bg-red-500 .text-white { color: #fff; }
   box-shadow: inset 2px 0 0 0 rgb(88 101 242 / .6);
   transition: background .4s ease;
 }
+
+/* tiptap rich-text editor (Admin → Terms & Privacy). */
+.tiptap-shell {
+  border: 1px solid var(--c-d-600);
+  border-radius: 0.5rem;
+  background: var(--c-d-850);
+  padding: 0.75rem 1rem;
+  min-height: 260px;
+}
+.tiptap-shell:focus-within { outline: 2px solid rgb(var(--c-blurple) / .6); outline-offset: 1px; }
+.tiptap { min-height: 240px; font-size: 15px; line-height: 1.7; color: var(--c-d-200); outline: none; }
+.tiptap p { margin: 0.5rem 0; }
+.tiptap h1 { font-size: 1.5rem; font-weight: 700; color: var(--c-d-100); margin: 0.75rem 0 0.4rem; }
+.tiptap h2 { font-size: 1.15rem; font-weight: 600; color: var(--c-d-100); margin: 1.1rem 0 0.4rem; }
+.tiptap h3 { font-size: 1rem; font-weight: 600; color: var(--c-d-100); margin: 0.9rem 0 0.3rem; }
+.tiptap ul { list-style: disc; padding-left: 1.4rem; margin: 0.5rem 0; }
+.tiptap ol { list-style: decimal; padding-left: 1.4rem; margin: 0.5rem 0; }
+.tiptap li { margin: 0.2rem 0; }
+.tiptap a { color: rgb(var(--c-blurple)); text-decoration: underline; }
+.tiptap blockquote { border-left: 3px solid rgb(var(--c-blurple) / .5); padding-left: 0.75rem; color: var(--c-d-300); margin: 0.6rem 0; }
+.tiptap code { background: var(--c-d-750); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 13px; }
+.tiptap pre { background: var(--c-d-900); padding: 0.75rem; border-radius: 6px; overflow-x: auto; }
+.tiptap pre code { background: transparent; padding: 0; }
+.tiptap hr { border: none; border-top: 1px solid var(--c-d-600); margin: 0.75rem 0; }
+.tiptap .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--c-d-400);
+  pointer-events: none;
+  height: 0;
+}

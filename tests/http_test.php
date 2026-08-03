@@ -123,6 +123,20 @@ function jsonDecode(string $body): array
     return is_array($j) ? $j : ['_raw' => $body];
 }
 
+/** Direct read access to the scratch DB for id lookups + row assertions. */
+function dbq(string $sql, array $p = []): array
+{
+    global $DB;
+    static $pdo = null;
+    if (!$pdo) {
+        $pdo = new PDO('sqlite:' . $DB);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    }
+    $st = $pdo->prepare($sql);
+    $st->execute($p);
+    return $st->fetchAll();
+}
+
 // ── Auth & redirects ────────────────────────────────────────────────────────
 echo "== auth ==\n";
 [$s, $h, $b] = req('GET', '/');
@@ -135,7 +149,7 @@ check('GET /register 200', $s === 200);
 $cjA = '/tmp/opencode/httptest-a.txt';
 $page = req('GET', '/register', [], $cjA)[2];
 $t = csrf($page);
-[$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'password123', 'next' => '/'], $cjA);
+[$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjA);
 check('register alice 302', $s === 302, (string) $s);
 check('first user redirected to next', ($h['location'] ?? '') === '/');
 [$s] = req('GET', '/app', [], $cjA);
@@ -204,7 +218,7 @@ sleep(6); // let the 5s rate-limit window clear before the PM tests
 echo "== private messages ==\n";
 $cjB = '/tmp/opencode/httptest-b.txt';
 $t = csrf(req('GET', '/register', [], $cjB)[2]);
-[$s, , $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'bob', 'email' => 'bob@x.com', 'password' => 'password123', 'next' => '/'], $cjB);
+[$s, , $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'bob', 'email' => 'bob@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjB);
 check('register bob', $s === 302, (string) $s);
 
 $tA = csrf(req('GET', '/app', [], $cjA)[2]);
@@ -225,7 +239,7 @@ check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found
 
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
-foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/logs', '/admin/settings', '/admin/webhooks'] as $p) {
+foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks'] as $p) {
     [$s] = req('GET', $p, [], $cjA);
     check("GET $p 200", $s === 200, (string) $s);
 }
@@ -278,7 +292,7 @@ $cjE = '/tmp/opencode/httptest-e.txt';
 [$s, , $b] = req('GET', '/register?invite=' . $invToken, [], $cjE);
 check('invite link opens locked register form', $s === 200 && strpos($b, 'invited@x.com') !== false && strpos($b, 'name="invite"') !== false, $b);
 $t = csrf($b);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken, 'username' => 'erin', 'email' => 'invited@x.com', 'password' => 'password123', 'next' => '/'], $cjE);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken, 'username' => 'erin', 'email' => 'invited@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjE);
 check('register via invite 302', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
 $pdo = new PDO('sqlite:' . $DB);
 $used = (int) $pdo->query('SELECT COUNT(*) FROM registration_invites WHERE token = ' . $pdo->quote($invToken) . ' AND used_at IS NOT NULL')->fetchColumn();
@@ -297,11 +311,11 @@ $invToken2 = $m[1] ?? '';
 check('second invite link available', $invToken2 !== '', $invPage);
 $cjF = '/tmp/opencode/httptest-f.txt';
 $t = csrf(req('GET', '/register', [], $cjF)[2]);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'frank2', 'email' => 'frank2@x.com', 'password' => 'password123', 'next' => '/'], $cjF);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'frank2', 'email' => 'frank2@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjF);
 check('plain register blocked when registration closed', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
 [$s, , $b] = req('GET', '/register?invite=' . $invToken2, [], $cjF);
 $t = csrf($b);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken2, 'username' => 'frank', 'email' => 'invited2@x.com', 'password' => 'password123', 'next' => '/'], $cjF);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken2, 'username' => 'frank', 'email' => 'invited2@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjF);
 check('invite bypasses closed registration', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
 // Restore open registration for the rest of the suite.
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
@@ -430,7 +444,7 @@ check('bob can join private #secret via link', $s === 302 && str_contains($h['lo
 req('POST', '/api/command', ['csrf' => $tA, 'channel' => 'secret', 'text' => '/mode #secret +k hunter2'], $cjA);
 $cjD = '/tmp/opencode/httptest-d.txt';
 $t = csrf(req('GET', '/register', [], $cjD)[2]);
-req('POST', '/register', ['csrf' => $t, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'password123', 'next' => '/'], $cjD);
+req('POST', '/register', ['csrf' => $t, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjD);
 [$s, $h] = req('GET', '/c/secret', [], $cjD);
 check('keyed channel opens the join modal', $s === 302 && str_contains($h['location'] ?? '', '/app?join=secret'), "$s " . ($h['location'] ?? ''));
 [$s, , $b] = req('GET', '/app?join=secret', [], $cjD);
@@ -452,7 +466,7 @@ check('promote bob to staff', $s === 302, (string) $s);
 check('staff can join #staff', $s === 302 && str_contains($h['location'] ?? '', 'channel=staff'), "$s " . ($h['location'] ?? ''));
 $cjC = '/tmp/opencode/httptest-c.txt';
 $t = csrf(req('GET', '/register', [], $cjC)[2]);
-req('POST', '/register', ['csrf' => $t, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'password123', 'next' => '/'], $cjC);
+req('POST', '/register', ['csrf' => $t, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjC);
 [$s] = req('GET', '/c/staff', [], $cjC);
 check('regular user denied #staff', $s === 200, (string) $s); // access-denied page (not redirect to chat)
 
@@ -488,6 +502,80 @@ check('delete non-existent message rejected', $s === 403, (string) $s);
 [$s, , $b] = req('GET', '/u/alice', [], $cjA);
 check('profile page', $s === 200, (string) $s);
 
+// ── Sound alerts (admin upload + user settings + background channel pings) ───
+echo "== sound alerts ==\n";
+$pdo = new PDO('sqlite:' . $DB);
+check('default sounds seeded over HTTP', (int) $pdo->query('SELECT COUNT(*) FROM sound_alerts')->fetchColumn() >= 3);
+// Build a tiny valid WAV and upload it as an admin.
+$wavPath = '/tmp/opencode/soundtest.wav';
+$rate = 22050;
+$n = (int) ($rate * 0.2);
+$samples = '';
+for ($i = 0; $i < $n; $i++) {
+    $t = $i / $rate;
+    $samples .= pack('v', ((int) round(sin(2 * M_PI * 500 * $t) * 0.4 * 32767)) & 0xFFFF);
+}
+file_put_contents($wavPath, 'RIFF' . pack('V', 36 + strlen($samples)) . 'WAVE'
+    . 'fmt ' . pack('V', 16) . pack('v', 1) . pack('v', 1) . pack('V', $rate) . pack('V', $rate * 2) . pack('v', 2) . pack('v', 16)
+    . 'data' . pack('V', strlen($samples)) . $samples);
+$tA = csrf(req('GET', '/admin/sounds', [], $cjA)[2]);
+[$s, $b] = uploadReq('/admin/action', $cjA, ['csrf' => $tA, 'action' => 'sound_add', 'name' => 'Test Blip', 'back' => '/admin/sounds'], ['tmp' => $wavPath, 'type' => 'audio/wav', 'name' => 'blip.wav']);
+check('admin uploads a sound', $s === 302, "$s $b");
+[$s, , $b] = req('GET', '/admin/sounds', [], $cjA);
+check('admin sounds page lists upload', $s === 200 && strpos($b, 'Test Blip') !== false, (string) $s);
+$soundId = (int) $pdo->query("SELECT id FROM sound_alerts WHERE name = 'Test Blip' ORDER BY id DESC LIMIT 1")->fetchColumn();
+$soundFile = (string) $pdo->query("SELECT file FROM sound_alerts WHERE id = $soundId")->fetchColumn();
+check('upload stored in sound_alerts', $soundId > 0 && str_contains($soundFile, '/assets/sounds/'), "id=$soundId file=$soundFile");
+
+// User prefs API.
+$tA = csrf(req('GET', '/u/alice', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/sound/prefs', ['csrf' => $tA, 'channel_sound' => (string) $soundId, 'dm_sound' => '0'], $cjA);
+check('save sound prefs', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+$prefRow = $pdo->query('SELECT dm_sound_id, channel_sound_id FROM user_sound_prefs WHERE user_id = 1')->fetch(PDO::FETCH_ASSOC);
+check('prefs persisted (dm off, channel=upload)', (int) $prefRow['channel_sound_id'] === $soundId && $prefRow['dm_sound_id'] === null, json_encode($prefRow));
+[$s, , $b] = req('GET', '/u/alice', [], $cjA);
+check('profile page renders the sounds settings', $s === 200 && strpos($b, 'Notification sounds') !== false, (string) $s);
+
+// Per-user override API: set a specific sound, then mute, then remove.
+[$s, , $b] = req('POST', '/api/sound/override', ['csrf' => $tA, 'target_user_id' => '2', 'sound' => (string) $soundId], $cjA);
+check('set per-user override sound', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+$ov = $pdo->query('SELECT sound_id FROM user_sound_overrides WHERE user_id = 1 AND target_user_id = 2')->fetch(PDO::FETCH_ASSOC);
+check('override persisted', $ov !== false && (int) $ov['sound_id'] === $soundId, json_encode($ov));
+[$s] = req('POST', '/api/sound/override', ['csrf' => $tA, 'target_user_id' => '2', 'sound' => '0'], $cjA);
+check('override to mute saved', $s === 200, (string) $s);
+$ov = $pdo->query('SELECT sound_id FROM user_sound_overrides WHERE user_id = 1 AND target_user_id = 2')->fetch(PDO::FETCH_ASSOC);
+check('override mute persisted (NULL sound)', $ov !== false && $ov['sound_id'] === null, json_encode($ov));
+[$s] = req('POST', '/api/sound/override/remove', ['csrf' => $tA, 'target_user_id' => '2'], $cjA);
+check('override removed', $s === 200, (string) $s);
+check('override row gone', (int) $pdo->query('SELECT COUNT(*) FROM user_sound_overrides WHERE user_id = 1 AND target_user_id = 2')->fetchColumn() === 0);
+
+// Background channel pings: bob posts in #general while alice is in #gaming.
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+req('POST', '/api/join', ['csrf' => $tB, 'name' => '#general'], $cjB);
+$tB = csrf(req('GET', '/app?channel=general', [], $cjB)[2]);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => $tB, 'channel' => 'general', 'content' => 'bg alert message'], $cjB);
+check('bob posts in #general', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+[$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0&bg_since=0', [], $cjA);
+$j = jsonDecode($b);
+$found = false;
+foreach (($j['bg_messages'] ?? []) as $m) {
+    if (($m['channel_slug'] ?? '') === 'general' && str_contains($m['content'] ?? '', 'bg alert')) $found = true;
+}
+check('poll bg_messages surfaces other-channel messages', $s === 200 && $found, $b);
+[$s, , $b] = req('GET', '/api/poll?channel=general&since=0&bg_since=0', [], $cjA);
+$j = jsonDecode($b);
+$found = false;
+foreach (($j['bg_messages'] ?? []) as $m) {
+    if (($m['channel_slug'] ?? '') === 'general' && str_contains($m['content'] ?? '', 'bg alert')) $found = true;
+}
+check('open channel excluded from bg_messages', $s === 200 && !$found, $b);
+
+// Clean up the uploaded test sound (removes row + file).
+$tA = csrf(req('GET', '/admin/sounds', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'sound_del', 'id' => (string) $soundId, 'back' => '/admin/sounds'], $cjA);
+check('admin deletes the uploaded sound', $s === 302 && (int) $pdo->query("SELECT COUNT(*) FROM sound_alerts WHERE id = $soundId")->fetchColumn() === 0, (string) $s);
+check('deleted sound file removed from disk', !file_exists(dirname(__DIR__) . '/public' . $soundFile), $soundFile);
+
 // ── Native (no-JS) form fallback ─────────────────────────────────────────────
 echo "== native form fallback ==\n";
 $tA = csrf(req('GET', '/app?channel=gaming', [], $cjA)[2]);
@@ -504,11 +592,126 @@ preg_match("/define\('LVC_VERSION', '([^']+)'\)/", $src, $m);
 $expectedVersion = $m[1] ?? '';
 check('/api/version matches source LVC_VERSION', $s === 200 && ($j['version'] ?? '') === $expectedVersion, $b);
 
+// ── Moderation / reports / support / legal ───────────────────────────────────
+echo "== moderation & reports ==\n";
+[$s] = req('GET', '/terms');
+check('/terms page 200', $s === 200, (string) $s);
+[$s] = req('GET', '/privacy');
+check('/privacy page 200', $s === 200, (string) $s);
+
+// Staff guard: a regular user (carol) gets 403 from the moderation pages.
+[$s] = req('GET', '/admin/moderation', [], $cjC);
+check('regular user denied from moderation page', $s === 403, (string) $s);
+[$s] = req('GET', '/admin/moderation', [], $cjA);
+check('admin opens moderation page', $s === 200, (string) $s);
+[$s] = req('GET', '/admin/reports', [], $cjA);
+check('admin opens reports page', $s === 200, (string) $s);
+[$s] = req('GET', '/admin/support', [], $cjA);
+check('admin opens support page', $s === 200, (string) $s);
+[$s] = req('GET', '/admin/legal', [], $cjA);
+check('admin opens legal page (tiptap)', $s === 200, (string) $s);
+$tA = csrf(req('GET', '/admin/legal', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'legal_save', 'terms' => '<h2>Custom terms</h2><script>alert(1)</script>', 'privacy' => '<p>Custom privacy</p>', 'back' => '/admin/legal'], $cjA);
+check('legal save accepted', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/terms');
+check('legal save sanitizes + renders on public page', $s === 200 && strpos($b, 'Custom terms') !== false && strpos($b, 'alert(1)') === false, (string) $s);
+
+// Bob joins #gaming so he can report a fresh message alice posts there.
+$t = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $b] = req('POST', '/api/join', ['csrf' => $t, 'name' => '#gaming'], $cjB);
+check('bob joins #gaming', $s === 200, "$s $b");
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2]), 'channel' => 'gaming', 'content' => 'report me please'], $cjA);
+$reportMsgId = jsonDecode($b)['message']['id'] ?? 0;
+check('alice posts reportable message', $s === 200 && $reportMsgId > 0, "$s $b");
+[$s, , $b] = req('POST', '/api/report', ['csrf' => $t, 'id' => (string) $reportMsgId, 'pm' => '0', 'reason' => 'Harassment / Bullying', 'other' => ''], $cjB);
+check('report channel message', $s === 200 && str_contains(jsonDecode($b)['message'] ?? '', 'submitted'), "$s $b");
+[$s, , $b] = req('POST', '/api/report', ['csrf' => $t, 'id' => (string) $reportMsgId, 'pm' => '0', 'reason' => 'Other', 'other' => ''], $cjB);
+check('duplicate report rejected', $s === 409, "$s $b");
+// A second user (carol) reports the same message with the custom "Other" reason.
+$tC = csrf(req('GET', '/app', [], $cjC)[2]);
+[$s] = req('POST', '/api/join', ['csrf' => $tC, 'name' => '#gaming'], $cjC);
+check('carol joins #gaming to report', $s === 200, (string) $s);
+[$s, , $b] = req('POST', '/api/report', ['csrf' => $tC, 'id' => (string) $reportMsgId, 'pm' => '0', 'reason' => 'Other', 'other' => 'custom detail'], $cjC);
+check('report with custom reason accepted', $s === 200, "$s $b");
+[$s, , $b] = req('POST', '/api/report', ['csrf' => $t, 'id' => '999999', 'pm' => '0', 'reason' => 'Spam or advertising', 'other' => ''], $cjB);
+check('report of a missing message rejected', $s === 404, "$s $b");
+$reports = dbq('SELECT * FROM reports ORDER BY id');
+check('reports snapshotted into DB', count($reports) === 2 && ($reports[0]['content'] ?? '') === 'report me please' && ($reports[1]['reason_other'] ?? '') === 'custom detail', json_encode($reports));
+
+$tA = csrf(req('GET', '/admin/reports', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'report_status', 'id' => '1', 'status' => 'resolved', 'resolution' => 'Warned the user', 'back' => '/admin/reports'], $cjA);
+check('admin resolves report', $s === 302, (string) $s);
+check('report status updated + note written', (dbq('SELECT status FROM reports WHERE id = 1')[0]['status'] ?? '') === 'resolved'
+    && count(dbq('SELECT 1 FROM user_notes WHERE action = "report"')) === 1);
+
+// Age gate: guest join without the 18+ certification is rejected.
+$cjMin = '/tmp/opencode/httptest-min.txt';
+$t = csrf(req('GET', '/login', [], $cjMin)[2]);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'minorguest', 'next' => '/app'], $cjMin);
+check('guest without age certification rejected', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
+
+// ── Support tickets (HTTP) ───────────────────────────────────────────────────
+echo "== support tickets ==\n";
+$t = csrf(req('GET', '/support', [], $cjB)[2]);
+[$s, $h] = req('POST', '/support', ['csrf' => $t, 'subject' => 'Help with reporting', 'content' => 'I found a problem.'], $cjB);
+check('support ticket created', $s === 302 && str_contains($h['location'] ?? '', '/support/'), "$s " . ($h['location'] ?? ''));
+$ticketId = (int) basename($h['location'] ?? '0');
+$t = csrf(req('GET', '/support/' . $ticketId, [], $cjA)[2]);
+[$s, $h] = req('POST', '/support/' . $ticketId . '/reply', ['csrf' => $t, 'content' => 'We are on it.'], $cjA);
+check('staff replies to ticket', $s === 302 && str_contains($h['location'] ?? '', '/support/' . $ticketId), "$s " . ($h['location'] ?? ''));
+check('ticket marked answered', (dbq('SELECT status FROM support_tickets WHERE id = ?', [$ticketId])[0]['status'] ?? '') === 'answered');
+[$s, , $b] = req('GET', '/admin/support', [], $cjA);
+check('admin support list renders', $s === 200 && strpos($b, 'Help with reporting') !== false, (string) $s);
+
+// ── Pending approval + suspension (HTTP) ─────────────────────────────────────
+echo "== pending & suspended ==\n";
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'registration_requires_approval' => '1', 'back' => '/admin/settings'], $cjA);
+check('approval toggle saved', $s === 302, (string) $s);
+$cjP = '/tmp/opencode/httptest-p.txt';
+$t = csrf(req('GET', '/register', [], $cjP)[2]);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'penny', 'email' => 'penny@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjP);
+check('pending registration logs in (redirect /app)', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
+[$s, , $b] = req('GET', '/app', [], $cjP);
+check('pending banner shown in chat', $s === 200 && strpos($b, 'pending admin approval') !== false, (string) $s);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf($b), 'channel' => 'gaming', 'content' => 'hi'], $cjP);
+check('pending user cannot chat (403)', $s === 403 && strpos($b, 'pending') !== false, "$s $b");
+$penny = dbq('SELECT * FROM users WHERE username = "penny"')[0] ?? null;
+check('penny is pending in DB', ($penny['status'] ?? '') === 'pending');
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_approve', 'id' => (string) $penny['id'], 'back' => '/admin/users'], $cjA);
+check('admin approves penny', $s === 302, (string) $s);
+check('approval clears status + writes note', (dbq('SELECT status FROM users WHERE id = ?', [$penny['id']])[0]['status'] ?? '') === 'active'
+    && count(dbq('SELECT 1 FROM user_notes WHERE user_id = ? AND action = "approve"', [$penny['id']])) === 1);
+$t = csrf(req('GET', '/app', [], $cjP)[2]);
+[$s] = req('POST', '/api/join', ['csrf' => $t, 'name' => '#gaming'], $cjP);
+check('approved penny can join channels', $s === 200, (string) $s);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjP)[2]), 'channel' => 'gaming', 'content' => 'now i can chat'], $cjP);
+check('approved penny can chat', $s === 200, "$s $b");
+
+// Suspend penny: her session is killed and login is blocked.
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_suspend', 'id' => (string) $penny['id'], 'reason' => 'age verification', 'back' => '/admin/users'], $cjA);
+check('admin suspends penny', $s === 302, (string) $s);
+[$s, $h] = req('GET', '/app', [], $cjP);
+check('suspended session is dead (redirect to login)', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
+$cjP2 = '/tmp/opencode/httptest-p2.txt';
+$t = csrf(req('GET', '/login', [], $cjP2)[2]);
+[$s, $h] = req('POST', '/login', ['csrf' => $t, 'username' => 'penny', 'password' => 'password123', 'next' => '/'], $cjP2);
+check('suspended login blocked', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
+check('suspended status has reason', (dbq('SELECT status, status_reason FROM users WHERE id = ?', [$penny['id']])[0]['status_reason'] ?? '') === 'age verification');
+$tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_activate', 'id' => (string) $penny['id'], 'back' => '/admin/users'], $cjA);
+check('admin activates penny', $s === 302, (string) $s);
+// Reset the approval toggle so the rest of the suite behaves as before.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'registration_requires_approval' => '0', 'back' => '/admin/settings'], $cjA);
+
 // ── Anonymous guests ─────────────────────────────────────────────────────────
 echo "== guests ==\n";
 $cjG = '/tmp/opencode/httptest-g.txt';
 $t = csrf(req('GET', '/login', [], $cjG)[2]);
-[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app'], $cjG);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app', 'age18' => '1'], $cjG);
 check('guest login redirects', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
 [$s] = req('GET', '/app', [], $cjG);
 check('guest can open /app', $s === 200, (string) $s);
@@ -518,19 +721,19 @@ check('guest cannot create a channel', $s === 400 && strpos($b, 'existing channe
 check('guest cannot join-and-create via /api/join', $s === 400 && strpos($b, 'existing channels') !== false, "$s $b");
 $cjG2 = '/tmp/opencode/httptest-g2.txt';
 $t = csrf(req('GET', '/login', [], $cjG2)[2]);
-[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app'], $cjG2);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'stranger', 'next' => '/app', 'age18' => '1'], $cjG2);
 check('duplicate guest nick rejected (back to login)', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
 
 // A guest who logs out frees the nick immediately; re-login reuses the row.
 $cjG3 = '/tmp/opencode/httptest-g3.txt';
 $t = csrf(req('GET', '/login', [], $cjG3)[2]);
-[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app'], $cjG3);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app', 'age18' => '1'], $cjG3);
 check('guest wanderer logs in', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
 [$s] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjG3)[2])], $cjG3);
 check('guest wanderer logs out', $s === 302, (string) $s);
 $cjG4 = '/tmp/opencode/httptest-g4.txt';
 $t = csrf(req('GET', '/login', [], $cjG4)[2]);
-[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app'], $cjG4);
+[$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app', 'age18' => '1'], $cjG4);
 check('guest nick free after logout (re-login ok)', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
 
 // logout

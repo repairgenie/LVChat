@@ -17,6 +17,10 @@
       <?= Csrf::field() ?>
       <input type="hidden" name="next" value="<?= h($next) ?>">
       <input class="input text-center" name="nick" placeholder="Guest nickname" maxlength="32" required autocomplete="off" autofocus>
+      <label class="flex items-start gap-2 text-left text-xs text-discord-400 cursor-pointer">
+        <input type="checkbox" name="age18" value="1" required class="w-4 h-4 mt-0.5 accent-blurple">
+        <span>I certify that I am at least 18 years of age and agree to the <a class="text-blurple hover:underline" href="/terms" target="_blank">Terms of Service</a> and <a class="text-blurple hover:underline" href="/privacy" target="_blank">Privacy Policy</a>.</span>
+      </label>
       <button class="btn-primary w-full justify-center py-2.5">Chat as guest</button>
     </form>
 
