@@ -19,13 +19,13 @@ final class MessageService
     }
 
     /** Insert a private message between two actors (users and/or guests). Returns the new id. */
-    public static function insertPm(array $sender, array $recipient, string $content): int
+    public static function insertPm(array $sender, array $recipient, string $content, string $kind = 'message'): int
     {
         $sc = self::isGuest($sender) ? 'sender_guest_id' : 'sender_id';
         $rc = self::isGuest($recipient) ? 'recipient_guest_id' : 'recipient_id';
         Database::query(
-            "INSERT INTO private_messages ($sc, $rc, content) VALUES (?, ?, ?)",
-            [$sender['id'], $recipient['id'], $content]
+            "INSERT INTO private_messages ($sc, $rc, content, kind) VALUES (?, ?, ?, ?)",
+            [$sender['id'], $recipient['id'], $content, $kind]
         );
         return (int) Database::lastId();
     }
@@ -215,7 +215,7 @@ final class MessageService
         foreach ($rows as $r) {
             $out[] = [
                 'id' => (int) $r['id'],
-                'kind' => 'message',
+                'kind' => $r['kind'] ?? 'message',
                 'content' => $r['content'],
                 'created_at' => $r['created_at'],
                 'username' => $r['username'],
@@ -261,7 +261,7 @@ final class MessageService
         foreach ($rows as $r) {
             $out[] = [
                 'id' => (int) $r['id'],
-                'kind' => 'message',
+                'kind' => $r['kind'] ?? 'message',
                 'content' => $r['content'],
                 'created_at' => $r['created_at'],
                 'username' => $r['username'],

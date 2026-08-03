@@ -162,17 +162,17 @@ client automatically falls back to polling if the stream drops.
 bash bin/test.sh
 ```
 
-Runs **437 automated assertions** in two layers:
+Runs **446 automated assertions** in two layers:
 
 - **`tests/smoke.php`** (319) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
   share links, guests, webhooks, account invites + SMTP, and the admin dashboard data.
-- **`tests/http_test.php`** (118) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (122) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
-  private messages, admin pages & actions (including invites, manual user creation,
-  user deletion and SMTP settings), private/keyed/staff channel flows, share-link redirects,
-  webhooks, and logout.
+  private messages (including image attachments), admin pages & actions (including invites,
+  manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
+  share-link redirects, webhooks, and logout.
 
 A headless-browser check (Chrome DevTools Protocol) is also used during development to
 confirm the chat page loads without JS errors, fills the viewport, polls for messages,
@@ -187,7 +187,7 @@ views/           layout, auth, chat app, browse, admin pages
 bin/deploy.sh    post-upload restore + sanity check
 bin/test.sh      run the full automated test suite
 tests/smoke.php  319 command/service assertions
-tests/http_test.php  118 HTTP assertions
+tests/http_test.php  122 HTTP assertions
 schema.sql       SQLite schema (applied on boot)
 data/            SQLite database (beside public/, never web-served)
 ```

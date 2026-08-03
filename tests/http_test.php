@@ -93,6 +93,30 @@ function csrf(string $html): string
     return '';
 }
 
+/** Multipart POST for /api/upload (a real image file). @return array{0:int,1:string} */
+function uploadReq(string $path, string $jar, array $fields, array $file): array
+{
+    global $BASE;
+    $ch = curl_init($BASE . $path);
+    $post = $fields;
+    $post['file'] = new CURLFile($file['tmp'], $file['type'], $file['name']);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT => 8,
+        CURLOPT_COOKIEJAR => $jar,
+        CURLOPT_COOKIEFILE => $jar,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $post,
+    ]);
+    $raw = (string) curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $body = substr($raw, strpos($raw, "\r\n\r\n") !== false ? strpos($raw, "\r\n\r\n") + 4 : 0);
+    return [$status, $body];
+}
+
 function jsonDecode(string $body): array
 {
     $j = json_decode($body, true);
@@ -336,6 +360,28 @@ check('user_delete is audited', (int) $pdo->query("SELECT COUNT(*) FROM audit_lo
 $tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_delete', 'id' => '1', 'back' => '/admin/users'], $cjA);
 check('self-delete blocked (admin still exists)', $s === 302 && (int) $pdo->query("SELECT COUNT(*) FROM users WHERE id = 1")->fetchColumn() === 1, (string) $s);
+
+// ── DM image attachments ─────────────────────────────────────────────────────
+echo "== dm upload ==\n";
+// Earlier settings_save runs reset the uploads toggle; make sure it's on.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'uploads_enabled' => '1', 'back' => '/admin/settings'], $cjA);
+check('uploads enabled for test', $s === 302, (string) $s);
+file_put_contents('/tmp/opencode/dmtest.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='));
+$t = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, $b] = uploadReq('/api/upload', $cjA, ['csrf' => $t, 'ajax' => '1', 'dm' => 'bob'], ['tmp' => '/tmp/opencode/dmtest.png', 'type' => 'image/png', 'name' => 'dmtest.png']);
+$j = jsonDecode($b);
+check('DM image upload ok (kind image)', $s === 200 && ($j['ok'] ?? false) === true && ($j['message']['kind'] ?? '') === 'image' && ($j['message']['is_pm'] ?? false) === true, "$s $b");
+check('DM image content is an upload url', str_starts_with((string) ($j['message']['content'] ?? ''), '/uploads/'), $b);
+$imgUrl = $j['message']['content'] ?? '';
+// The recipient sees the image PM in their DM poll, with kind image preserved.
+[$s, , $b] = req('GET', '/api/poll?dm=alice&since=0', [], $cjB);
+$j = jsonDecode($b);
+$found = false;
+foreach (($j['messages'] ?? []) as $m) {
+    if (($m['kind'] ?? '') === 'image' && ($m['content'] ?? '') === $imgUrl && ($m['is_pm'] ?? false) === true) $found = true;
+}
+check('recipient DM poll surfaces the image PM', $s === 200 && $found, "$s $b");
 
 // SMTP settings save + graceful test failure (no SMTP server running).
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);

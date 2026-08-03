@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS private_messages (
   sender_guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
   recipient_guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
   content TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'message',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   read_at TEXT
 );

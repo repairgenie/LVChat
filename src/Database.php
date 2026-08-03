@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '10';
+    private const SCHEMA_VERSION = '11';
 
     public static function init(): void
     {
@@ -67,6 +67,10 @@ final class Database
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('censor', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN censor INTEGER NOT NULL DEFAULT 0');
+        }
+        $pmCols = array_column($pdo->query('PRAGMA table_info(private_messages)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+        if (!in_array('kind', $pmCols, true)) {
+            $pdo->exec("ALTER TABLE private_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'message'");
         }
         $tables = array_column($pdo->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('reactions', $tables, true)) {

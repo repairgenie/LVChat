@@ -210,9 +210,11 @@ Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
 - **Actions:** `/me does something` renders as an italic *action* line.
 - **Reactions:** hover a message and use the **+** under it (or click an emoji
   chip to toggle it). Every message shows its reaction chips live.
-- **Images:** use the **📎** button (or drag & drop an image) in a channel to
-  post an image; it renders as a thumbnail and opens in a lightbox when clicked.
-  If an administrator has disabled uploads you'll be told so.
+- **Images:** use the **📎** button (or drag & drop an image) in a channel **or
+  a private message** to post an image; it renders as a thumbnail and opens in a
+  lightbox when clicked. The view pins to the bottom while an image loads so a
+  just-posted picture is fully visible without scrolling. If an administrator
+  has disabled uploads you'll be told so.
 - **Reply (quote):** right-click somebody's message → **Reply** sets a "Replying to @nick — excerpt" chip above the composer; your message then carries the quoted context, and the quoted line is shown under the author's name in the timeline. Click the `↪` line to jump to (and briefly highlight) the original message.
 - **Mentions:** mention a member of the current channel with `@nick`; they get a
   notification bell. Mute a channel from its 🔔 header button to stop its

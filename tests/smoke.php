@@ -213,6 +213,21 @@ check('/ignore alice', $res['replies'][0] === 'You are now ignoring alice.');
 $pm = CommandParser::run('/msg bob hi', $alice, $ch);
 check('PM blocked when target ignores sender', $pm['replies'][0] === 'bob is not accepting private messages from you.', $pm['replies'][0] ?? '');
 
+// DM image attachments: private messages carry a kind, so image uploads render.
+$imgDm = MessageService::insertPm($alice, $bob, "/uploads/dm-image.jpg\nDM caption", 'image');
+check('DM image message inserted', $imgDm > 0);
+check('DM image stored with kind image', (Database::row('SELECT kind FROM private_messages WHERE id = ?', [$imgDm])['kind'] ?? '') === 'image');
+$dmRows = MessageService::forDm($alice, $bob);
+$kindFound = false;
+foreach ($dmRows as $r) { if (($r['kind'] ?? '') === 'image' && ($r['is_pm'] ?? false) === true && str_contains((string) $r['content'], '/uploads/dm-image.jpg')) $kindFound = true; }
+check('forDm returns DM image kind', $kindFound, json_encode($dmRows));
+$histRows = MessageService::dmHistoryBefore($alice, $bob, $imgDm + 1);
+$histKind = false;
+foreach ($histRows as $r) { if (($r['kind'] ?? '') === 'image' && str_contains((string) $r['content'], '/uploads/dm-image.jpg')) $histKind = true; }
+check('dmHistoryBefore returns DM image kind', $histKind, json_encode($histRows));
+$plain = MessageService::insertPm($bob, $alice, 'plain dm');
+check('plain DM defaults to kind message', (Database::row('SELECT kind FROM private_messages WHERE id = ?', [$plain])['kind'] ?? '') === 'message');
+
 // --- Keyed / private channel + share link flow ---
 echo "== private channel / share link ==\n";
 $priv = ChannelService::create($bob, '#secret');

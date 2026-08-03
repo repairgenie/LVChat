@@ -425,7 +425,7 @@ function member_html(array $m, bool $online): string {
                class="input pr-28 py-2.5 resize-none bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow align-middle max-h-40 overflow-y-auto"
                placeholder="<?= h($channel ? "Message #" . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
                <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
-        <button type="button" id="upload-btn" class="absolute right-24 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
+        <button type="button" id="upload-btn" class="absolute right-24 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
         <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
         <button type="button" id="emoji-btn" class="absolute right-12 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji">😀</button>
         <button type="submit" class="absolute right-2 top-1/2 -translate-y-1/2 btn-primary !p-1.5 !rounded-md" title="Send">➤</button>

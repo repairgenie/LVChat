@@ -205,7 +205,7 @@ final class ChatController
                 'ok' => true,
                 'message' => [
                     'id' => (int) $row['id'],
-                    'kind' => 'message',
+                    'kind' => $row['kind'] ?? 'message',
                     'content' => $row['content'],
                     'created_at' => $row['created_at'],
                     'username' => $user['username'],
@@ -263,25 +263,14 @@ final class ChatController
         self::finish(['ok' => true, 'message' => $msg], $back);
     }
 
-    /** POST /api/upload — upload an image and post it as an image message. */
+    /** POST /api/upload — upload an image and post it as an image message
+     *  (channel, or DM when `dm` is given). */
     public static function upload(): void
     {
         $user = self::requireUser();
         self::requireCsrf();
         if (config_get('uploads_enabled', '1') !== '1') {
             json_out(['error' => 'Image uploads are disabled on this server.'], 403);
-        }
-        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
-        if (!$channel) {
-            json_out(['error' => 'Channel not found.'], 404);
-        }
-        $member = AccessService::member($channel['id'], $user);
-        if (!$member) {
-            json_out(['error' => 'You are not a member of this channel.'], 403);
-        }
-        $blocked = BanService::canPost($channel, $user, $member);
-        if ($blocked) {
-            json_out(['error' => $blocked], 403);
         }
         if (self::rateLimited($user)) {
             json_out(['error' => 'You are sending messages too quickly. Slow down.'], 429);
@@ -301,6 +290,56 @@ final class ChatController
             : str_replace('\\', '/', substr($scaled, strlen(ROOT . '/public')));
         $caption = mb_substr(trim((string) ($_POST['caption'] ?? '')), 0, 300);
         $content = $url . ($caption !== '' ? "\n" . $caption : '');
+
+        // Private-message upload: send an image PM, same rules as /msg.
+        $dm = trim((string) ($_POST['dm'] ?? ''));
+        if ($dm !== '') {
+            $t = Auth::findActor($dm);
+            if (!$t) {
+                json_out(['error' => 'No such user.'], 404);
+            }
+            $blocked = BanService::sendBlocked($user, $content, 'p');
+            if ($blocked) {
+                json_out(['error' => $blocked], 403);
+            }
+            $censor = CensorService::check($content, true);
+            if ($censor) {
+                if ($censor['action'] === 'censor') {
+                    $content = $censor['censored'];
+                } else {
+                    json_out(['error' => 'Message blocked by the word filter.'], 403);
+                }
+            }
+            $pmId = MessageService::insertPm($user, $t, $content, 'image');
+            MessageService::notifyDm($t, $user, $pmId);
+            MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
+            $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
+            json_out(['ok' => true, 'message' => [
+                'id' => (int) $row['id'],
+                'kind' => $row['kind'] ?? 'image',
+                'content' => $row['content'],
+                'created_at' => $row['created_at'],
+                'username' => $user['username'],
+                'sender_id' => (int) $user['id'],
+                'role' => $user['role'],
+                'guest' => MessageService::isGuest($user) ? 1 : 0,
+                'level' => 'normal',
+                'is_pm' => true,
+            ]]);
+        }
+
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        $member = AccessService::member($channel['id'], $user);
+        if (!$member) {
+            json_out(['error' => 'You are not a member of this channel.'], 403);
+        }
+        $blocked = BanService::canPost($channel, $user, $member);
+        if ($blocked) {
+            json_out(['error' => $blocked], 403);
+        }
         $msg = MessageService::send((int) $channel['id'], $user, $content, 'image');
         $msg['channel'] = $channel['slug'];
         json_out(['ok' => true, 'message' => $msg]);

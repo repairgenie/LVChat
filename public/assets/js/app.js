@@ -247,6 +247,7 @@
     lastMsg = m.kind === 'message' ? m : null;
     if (parseInt(m.id, 10) > lastId) lastId = parseInt(m.id, 10);
     maybeScroll();
+    scrollBottomWhenImagesLoad(msgsEl.lastElementChild);
     bindMessageActions();
   }
 
@@ -256,6 +257,21 @@
   }
 
   function scrollBottom() { msgsEl.scrollTop = msgsEl.scrollHeight; }
+
+  // Images (uploads) are lazy-loaded, so they expand after the initial scroll —
+  // pin the view to the bottom again as each one loads so a just-posted image is
+  // fully visible without the user having to scroll. Only re-scrolls while the
+  // reader is (still) near the bottom, so it never yanks someone scrolled up.
+  function scrollBottomWhenImagesLoad(el) {
+    if (!el || !el.querySelector('img')) return;
+    const imgs = el.querySelectorAll('img');
+    let pending = imgs.length;
+    const done = () => { if (--pending <= 0) maybeScroll(); };
+    imgs.forEach((img) => {
+      if (img.complete) done();
+      else { img.addEventListener('load', done); img.addEventListener('error', done); }
+    });
+  }
 
   function bindMessageActions() {
     msgsEl.querySelectorAll('.msg-del').forEach((btn) => {
@@ -767,7 +783,7 @@
   // ── Image upload (composer 📎) ─────────────────────────────────────────────
   const uploadBtn = document.getElementById('upload-btn');
   const uploadFile = document.getElementById('upload-file');
-  if (uploadBtn && uploadFile && CHANNEL) {
+  if (uploadBtn && uploadFile && (CHANNEL || DM)) {
     uploadBtn.addEventListener('click', () => uploadFile.click());
     uploadFile.addEventListener('change', () => {
       const file = uploadFile.files && uploadFile.files[0];
@@ -775,7 +791,7 @@
       const fd = new FormData();
       fd.append('csrf', CSRF);
       fd.append('ajax', '1');
-      fd.append('channel', CHANNEL);
+      if (DM) fd.append('dm', DM); else fd.append('channel', CHANNEL);
       fd.append('file', file);
       uploadBtn.textContent = '⏳';
       fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
