@@ -926,7 +926,7 @@
         const items = j.gifs || [];
         if (gifGrid) {
           const html = items.map((g) =>
-            `<button type="button" class="gif-item rounded-md overflow-hidden border border-discord-700 hover:border-blurple/60 transition-colors aspect-video bg-discord-850" data-url="${esc(g.url)}" data-title="${esc(g.title)}" title="${esc(g.title || 'GIF')}">
+            `<button type="button" class="gif-item w-full rounded-md overflow-hidden border border-discord-700 hover:border-blurple/60 transition-colors aspect-square bg-discord-850" data-url="${esc(g.url)}" data-title="${esc(g.title)}" title="${esc(g.title || 'GIF')}">
               <img src="${esc(g.preview)}" alt="${esc(g.title || 'GIF')}" loading="lazy" class="w-full h-full object-cover">
             </button>`).join('');
           if (reset) gifGrid.innerHTML = html;
