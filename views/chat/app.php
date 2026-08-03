@@ -114,6 +114,20 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     </div>';
 }
 
+function channel_link(array $c, string $channelSlug, array $user): string {
+    $owned = (int) ($c['owner_id'] ?? 0) === (int) $user['id'] ? '1' : '0';
+    $vis = $c['visibility'] !== 'public'
+        ? '<span class="text-[10px] text-discord-400 ml-auto">' . ($c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁')) . '</span>'
+        : '';
+    $cls = $channelSlug === $c['slug'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white';
+    return '<a href="/app?channel=' . h(rawurlencode($c['slug'])) . '"'
+        . ' data-ctx-channel="' . h($c['slug']) . '"'
+        . ' data-ctx-channel-name="' . h($c['name']) . '"'
+        . ' data-owned="' . $owned . '"'
+        . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
+        . '<span class="truncate">' . h($c['name']) . '</span>' . $vis . '</a>';
+}
+
 function member_html(array $m, bool $online): string {
     $badge = $m['role'] === 'admin' ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-400">admin</span>'
         : ($m['role'] === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '');
@@ -183,6 +197,15 @@ function member_html(array $m, bool $online): string {
       </nav>
       <?php endif; ?>
 
+      <?php if ($myChannels): ?>
+      <nav class="px-2 pt-2 pb-1">
+        <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400">My Channels</div>
+        <div class="mt-1 space-y-0.5">
+          <?php foreach ($myChannels as $c): ?><?= channel_link($c, $channelSlug, $user) ?><?php endforeach; ?>
+        </div>
+      </nav>
+      <?php endif; ?>
+
       <nav class="px-2 pt-2 pb-2">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400 flex items-center justify-between">
           <span>Text channels</span>
@@ -192,16 +215,7 @@ function member_html(array $m, bool $online): string {
           <a href="/browse" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm">
             <span class="text-discord-400">🌐</span> Browse channels
           </a>
-          <?php foreach ($channels as $c): ?>
-          <a href="/app?channel=<?= h(rawurlencode($c['slug'])) ?>"
-             data-ctx-channel="<?= h($c['slug']) ?>"
-             data-ctx-channel-name="<?= h($c['name']) ?>"
-             data-owned="<?= (int) ($c['owner_id'] ?? 0) === (int) $user['id'] ? '1' : '0' ?>"
-             class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $channelSlug === $c['slug'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?>">
-             <span class="truncate"><?= h($c['name']) ?></span>
-             <?php if ($c['visibility'] !== 'public'): ?><span class="text-[10px] text-discord-400 ml-auto"><?= $c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁') ?></span><?php endif; ?>
-          </a>
-          <?php endforeach; ?>
+          <?php foreach ($otherChannels as $c): ?><?= channel_link($c, $channelSlug, $user) ?><?php endforeach; ?>
         </div>
       </nav>
 

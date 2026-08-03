@@ -42,6 +42,9 @@ final class ChatController
         }
 
         $channels = ChannelService::joinedChannelNames($user);
+        $ownedIds = array_column(ChannelService::ownedChannels($user), 'id');
+        $myChannels = array_values(array_filter($channels, fn ($c) => in_array($c['id'], $ownedIds, true)));
+        $otherChannels = array_values(array_filter($channels, fn ($c) => !in_array($c['id'], $ownedIds, true)));
         $dmPartners = MessageService::recentDmPartners($user);
         $unreadDms = MessageService::unreadDmCounts($user);
         $notifications = Database::all(
@@ -79,6 +82,8 @@ final class ChatController
             'channel' => $channel,
             'dm' => $dm,
             'channels' => $channels,
+            'myChannels' => $myChannels,
+            'otherChannels' => $otherChannels,
             'dmPartners' => $dmPartners,
             'unreadDms' => $unreadDms,
             'notifications' => $notifications,
