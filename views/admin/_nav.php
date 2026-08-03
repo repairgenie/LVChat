@@ -4,9 +4,9 @@ $fullWidth = true;
 $title = 'Admin dashboard';
 $active = $active ?? '';
 $user = $admin ?? null;
-function admin_nav(string $active): void {
+function admin_nav(string $active, array $user): void {
   // Moderation-facing pages are available to staff too; the rest are admin-only.
-  $isStaff = ModerationService::isStaff($user ?? []);
+  $isStaff = ModerationService::isStaff($user);
   $isAdmin = ($user['role'] ?? '') === 'admin';
   $items = [
     'overview' => ['/admin', 'Overview', $isAdmin],
@@ -39,4 +39,4 @@ function admin_nav(string $active): void {
   }
   echo '</div>';
 }
-admin_nav($active);
+admin_nav($active, is_array($user) ? $user : []);
