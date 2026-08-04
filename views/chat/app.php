@@ -702,6 +702,19 @@ function member_html(array $m, bool $online): string {
     </div>
   </div>
 
+  <!-- Guest profile modal -->
+  <div id="guest-profile-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-guest-modal-close></div>
+    <div class="relative card p-6 w-[min(92vw,400px)] shadow-2xl text-center">
+      <button type="button" data-guest-modal-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
+      <div class="mx-auto w-16 h-16 rounded-full bg-discord-600 flex items-center justify-center text-2xl font-bold text-white mb-3" id="guest-profile-avatar"></div>
+      <h2 class="text-lg font-bold text-white" id="guest-profile-name"></h2>
+      <p class="text-sm text-discord-400 mt-2">Profile does not exist</p>
+      <p class="text-xs text-discord-500 mt-1">Guest users do not have profiles.</p>
+      <button data-guest-modal-close class="btn-ghost mt-4 justify-center w-full">Close</button>
+    </div>
+  </div>
+
   <!-- Image lightbox -->
   <div id="lightbox" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/85">
     <button data-lightbox-close class="absolute top-3 right-3 text-white text-2xl leading-none p-2">✕</button>

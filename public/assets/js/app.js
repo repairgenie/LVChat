@@ -328,7 +328,14 @@
     msgsEl.querySelectorAll('.username[data-nick]').forEach((el) => {
       if (el.dataset.bound) return;
       el.dataset.bound = '1';
-      el.addEventListener('click', () => { window.location = '/u/' + encodeURIComponent(el.dataset.nick); });
+      el.addEventListener('click', () => {
+        const msg = el.closest('.msg');
+        if (msg && msg.dataset.guest === '1') {
+          showGuestProfileModal(el.dataset.nick);
+        } else {
+          window.location = '/u/' + encodeURIComponent(el.dataset.nick);
+        }
+      });
     });
 
     // Reactions: click a chip to toggle, "+" to add from the quick picker.
@@ -1555,7 +1562,13 @@
     const level = el.dataset.level || '';
     const items = [
       { label: 'Message ' + nick, onClick: () => { window.location = '/app?dm=' + encodeURIComponent(nick); } },
-      { label: 'View profile', onClick: () => { window.location = '/u/' + encodeURIComponent(nick); } },
+      { label: 'View profile', onClick: () => {
+        if (isGuest) {
+          showGuestProfileModal(nick);
+        } else {
+          window.location = '/u/' + encodeURIComponent(nick);
+        }
+      } },
       { label: 'Whois', onClick: () => runCommand('/whois ' + nick) },
       { label: 'Copy username', onClick: () => copyText(nick) },
     ];
@@ -1641,6 +1654,23 @@
     const m = e.target.closest('.msg[data-id]');
     if (m) { e.preventDefault(); msgMenu(e.clientX, e.clientY, m); }
   });
+
+  // ── Guest profile modal ───────────────────────────────────────────────────
+  const guestModal = document.getElementById('guest-profile-modal');
+  const guestModalAvatar = document.getElementById('guest-profile-avatar');
+  const guestModalName = document.getElementById('guest-profile-name');
+  function showGuestProfileModal(nick) {
+    if (!guestModal) return;
+    const initial = (nick || '?').charAt(0).toUpperCase();
+    if (guestModalAvatar) guestModalAvatar.textContent = initial;
+    if (guestModalName) guestModalName.textContent = nick;
+    guestModal.classList.remove('hidden');
+  }
+  function closeGuestModal() { if (guestModal) guestModal.classList.add('hidden'); }
+  if (guestModal) {
+    guestModal.querySelectorAll('[data-guest-modal-close]').forEach((el) => el.addEventListener('click', closeGuestModal));
+    guestModal.addEventListener('click', (e) => { if (e.target === guestModal) closeGuestModal(); });
+  }
 
   // ── Report message modal ───────────────────────────────────────────────────
   const reportModal = document.getElementById('report-modal');
@@ -2013,6 +2043,8 @@
       if (rpb) rpb.classList.add('hidden');
     } else if (document.body.classList.contains('sidebar-open')) {
       closeSidebar();
+    } else if (guestModal && !guestModal.classList.contains('hidden')) {
+      closeGuestModal();
     } else if (ctxMenu && !ctxMenu.classList.contains('hidden')) {
       ctxHide();
     } else if (installModal && !installModal.classList.contains('hidden')) {
