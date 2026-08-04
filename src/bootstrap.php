@@ -8,9 +8,14 @@ define('LVC_VERSION', '1.6.0');
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
+// Sessions must survive cross-site iframe contexts (the public embed widget),
+// so use SameSite=None over HTTPS. Plain-HTTP/local installs fall back to Lax.
+$secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || ($_SERVER['SERVER_PORT'] ?? '') === '443';
 session_set_cookie_params([
     'httponly' => true,
-    'samesite' => 'Lax',
+    'secure' => $secure,
+    'samesite' => $secure ? 'None' : 'Lax',
 ]);
 session_start();
 

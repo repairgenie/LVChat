@@ -7,7 +7,11 @@ final class Auth
     public static function id(): ?int
     {
         $u = self::user();
-        return $u ? (int) $u['id'] : null;
+        // Guests live in `guests`, never in `users` — no user id exists for them.
+        if (!$u || (int) ($u['guest'] ?? 0) === 1) {
+            return null;
+        }
+        return (int) $u['id'];
     }
 
     public static function user(): ?array

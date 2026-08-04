@@ -35,10 +35,10 @@ final class CensorService
         }
         foreach (self::activeBadWords() as $bw) {
             $word = trim((string) $bw['word']);
-            if ($word === '') {
+            $pattern = self::wordPattern($word);
+            if ($pattern === null) {
                 continue;
             }
-            $pattern = '/(?<![a-z0-9_])' . preg_quote($word, '/') . '(?![a-z0-9_])/i';
             if (preg_match($pattern, $content)) {
                 if (($bw['action'] ?? 'censor') === 'block') {
                     return ['word' => $word, 'action' => 'block', 'censored' => $content];
@@ -51,5 +51,28 @@ final class CensorService
             }
         }
         return null;
+    }
+
+    /**
+     * Build the match pattern for a stored bad word.
+     *
+     * A leading '*' drops the left word boundary, a trailing '*' drops the right
+     * one, so e.g. "nigger*" matches "niggers" and "*nigger*" matches both
+     * "niggers" and "fatnigger". Plain words keep full word boundaries.
+     */
+    private static function wordPattern(string $word): ?string
+    {
+        if ($word === '') {
+            return null;
+        }
+        $leadingStar = str_starts_with($word, '*');
+        $trailingStar = str_ends_with($word, '*');
+        $core = trim($word, '*');
+        if ($core === '') {
+            return null;
+        }
+        $left = $leadingStar ? '' : '(?<![a-z0-9_])';
+        $right = $trailingStar ? '' : '(?![a-z0-9_])';
+        return '/' . $left . preg_quote($core, '/') . $right . '/i';
     }
 }

@@ -650,6 +650,18 @@ $bw = (int) Database::scalar('SELECT id FROM badwords WHERE word = "fleep"');
 $res = CommandParser::run("/badword del $bw", $alice, $ch);
 check('/badword del', $res['replies'][0] === 'Bad word removed.');
 
+// Wildcard bad words: trailing * = prefix match, leading * = in-word match.
+Database::query('INSERT INTO badwords (word, action) VALUES ("bloop*", "censor")');
+Database::query('INSERT INTO badwords (word, action) VALUES ("*splat*", "censor")');
+check('trailing * catches plurals', CensorService::check('bloops', true)['action'] === 'censor');
+check('trailing * censors prefix', CensorService::check('a bloopish joke', true)['censored'] === 'a ****ish joke');
+check('trailing * leaves longer prefix alone when bounded', CensorService::check('sabloop', true) === null);
+check('leading+trailing * catches in-word', CensorService::check('fat splatting', true)['censored'] === 'fat ****ting');
+check('leading+trailing * catches suffix', CensorService::check('splatted', true)['censored'] === '****ted');
+check('leading+trailing * catches leading in-word', CensorService::check('asplat', true)['censored'] === 'a****');
+check('literal * only is skipped', CensorService::check('*', true) === null);
+Database::query('DELETE FROM badwords WHERE word IN ("bloop*", "*splat*")');
+
 // ── Admin red text data (role present in message payloads) ──────────────────
 echo "== admin role payload ==\n";
 $m = MessageService::send((int) $ch['id'], $alice, 'admin message check');
