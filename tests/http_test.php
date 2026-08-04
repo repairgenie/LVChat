@@ -653,6 +653,8 @@ check('regular user denied from moderation page', $s === 403, (string) $s);
 check('regular user denied from analytics page', $s === 403, (string) $s);
 [$s] = req('GET', '/admin/analytics?range=90', [], $cjA);
 check('admin opens analytics page with range', $s === 200, (string) $s);
+[$s, , $b] = req('GET', '/admin/analytics', [], $cjA);
+check('analytics page renders fully (no fatal, has content)', $s === 200 && stripos($b, 'fatal error') === false && strpos($b, 'Least active accounts') !== false, $s . ' ' . mb_substr($b, 0, 120));
 [$s] = req('GET', '/admin/moderation', [], $cjA);
 check('admin opens moderation page', $s === 200, (string) $s);
 [$s] = req('GET', '/admin/reports', [], $cjA);

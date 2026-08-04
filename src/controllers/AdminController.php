@@ -46,13 +46,16 @@ final class AdminController
     public static function analytics(): void
     {
         $admin = self::require();
-        $range = in_array($_GET['range'] ?? '30', AnalyticsService::ranges(), true) ? (string) $_GET['range'] : '30';
+        $range = (string) ($_GET['range'] ?? '30');
+        if (!in_array($range, AnalyticsService::ranges(), true)) {
+            $range = '30';
+        }
         $since = AnalyticsService::rangeSince($range);
         render_view('admin/analytics', [
             'admin' => $admin,
             'range' => $range,
             'kpis' => AnalyticsService::kpis($since),
-            'active' => AnalyticsService::activeCounts(),
+            'activeCounts' => AnalyticsService::activeCounts(),
             'messagesDaily' => AnalyticsService::messagesDaily($since),
             'pmsDaily' => AnalyticsService::pmsDaily($since),
             'registrationsDaily' => AnalyticsService::registrationsDaily($since),

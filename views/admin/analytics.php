@@ -33,8 +33,8 @@
 </div>
 
 <div class="flex flex-wrap gap-3 mb-8 text-sm">
-  <span class="card px-3 py-1.5 text-discord-300">Active accounts — <b class="text-white"><?= (int) $active['users_24h'] ?></b> <span class="text-discord-500">today</span> · <b class="text-white"><?= (int) $active['users_7d'] ?></b> <span class="text-discord-500">7d</span> · <b class="text-white"><?= (int) $active['users_30d'] ?></b> <span class="text-discord-500">30d</span></span>
-  <span class="card px-3 py-1.5 text-discord-300">Guests active (30d) — <b class="text-white"><?= (int) $active['guests_30d'] ?></b></span>
+  <span class="card px-3 py-1.5 text-discord-300">Active accounts — <b class="text-white"><?= (int) $activeCounts['users_24h'] ?></b> <span class="text-discord-500">today</span> · <b class="text-white"><?= (int) $activeCounts['users_7d'] ?></b> <span class="text-discord-500">7d</span> · <b class="text-white"><?= (int) $activeCounts['users_30d'] ?></b> <span class="text-discord-500">30d</span></span>
+  <span class="card px-3 py-1.5 text-discord-300">Guests active (30d) — <b class="text-white"><?= (int) $activeCounts['guests_30d'] ?></b></span>
 </div>
 
 <?php
