@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '16';
+    private const SCHEMA_VERSION = '17';
 
     public static function init(): void
     {
@@ -184,6 +184,13 @@ final class Database
         if (!in_array('support_ticket_replies', $tables, true)) {
             $pdo->exec('CREATE TABLE support_ticket_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, author_id INTEGER REFERENCES users(id) ON DELETE SET NULL, is_staff INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
             $pdo->exec('CREATE INDEX idx_support_replies_ticket ON support_ticket_replies(ticket_id, id)');
+        }
+
+        // Friends system (schema v17).
+        if (!in_array('friendships', $tables, true)) {
+            $pdo->exec('CREATE TABLE friendships (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT \'pending\', created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')), UNIQUE (user_id, friend_id))');
+            $pdo->exec('CREATE INDEX idx_friendships_user ON friendships(user_id, status)');
+            $pdo->exec('CREATE INDEX idx_friendships_friend ON friendships(friend_id, status)');
         }
 
         // Analytics indexes (schema v16): keep range-aggregation charts off full scans.

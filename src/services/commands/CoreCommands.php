@@ -350,39 +350,42 @@ CommandRegistry::register('knock', [
 
 CommandRegistry::register('ignore', [
     'group' => 'Core',
-    'desc' => 'Ignore private messages from a user.',
+    'desc' => 'Block a user (prevents DMs and hides their messages).',
     'usage' => '/ignore <nick>',
     'run' => function (array $args, array $user, ?array $channel) {
         $nick = $args[0] ?? null;
         if (!$nick) {
             return ['replies' => ['Usage: /ignore <nick>']];
         }
+        if ((int) ($user['guest'] ?? 0) === 1) {
+            return ['replies' => ['Registered users only.']];
+        }
         $t = Database::row('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
         if (!$t || (int) $t['id'] === (int) $user['id']) {
             return ['replies' => ['Invalid user.']];
         }
-        Database::query(
-            'INSERT OR IGNORE INTO ignores (user_id, ignored_user_id) VALUES (?, ?)',
-            [$user['id'], $t['id']]
-        );
-        return ['replies' => ["You are now ignoring $nick."]];
+        FriendService::blockUser((int) $user['id'], (int) $t['id']);
+        return ['replies' => ["You have blocked $nick."]];
     },
 ]);
 
 CommandRegistry::register('unignore', [
     'group' => 'Core',
-    'desc' => 'Stop ignoring a user.',
+    'desc' => 'Unblock a user.',
     'usage' => '/unignore <nick>',
     'run' => function (array $args, array $user, ?array $channel) {
         $nick = $args[0] ?? null;
         if (!$nick) {
             return ['replies' => ['Usage: /unignore <nick>']];
         }
+        if ((int) ($user['guest'] ?? 0) === 1) {
+            return ['replies' => ['Registered users only.']];
+        }
         $t = Database::row('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
         if ($t) {
-            Database::query('DELETE FROM ignores WHERE user_id = ? AND ignored_user_id = ?', [$user['id'], $t['id']]);
+            FriendService::unblockUser((int) $user['id'], (int) $t['id']);
         }
-        return ['replies' => ["You are no longer ignoring $nick."]];
+        return ['replies' => ["You have unblocked $nick."]];
     },
 ]);
 
@@ -438,19 +441,8 @@ final class UserCommands
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
-        $ignoring = Database::row(
-            'SELECT 1 FROM ignores WHERE user_id = ? AND ignored_user_id = ?',
-            [$user['id'], $target['id']]
-        );
-        if ($ignoring) {
-            return ['replies' => ['You are ignoring that user.']];
-        }
-        $blockedByTarget = Database::row(
-            'SELECT 1 FROM ignores WHERE user_id = ? AND ignored_user_id = ?',
-            [$target['id'], $user['id']]
-        );
-        if ($blockedByTarget) {
-            return ['replies' => ["$nick is not accepting private messages from you."]];
+        if ((int) ($user['guest'] ?? 0) !== 1 && (int) ($target['guest'] ?? 0) !== 1 && FriendService::isBlockedEither((int) $user['id'], (int) $target['id'])) {
+            return ['replies' => ['A block prevents messaging between you.']];
         }
         $blocked = BanService::sendBlocked($user, $text, 'p');
         if ($blocked) {

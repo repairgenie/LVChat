@@ -108,6 +108,8 @@ final class ChatController
             'notifyMode' => $notifyMode,
             'sounds' => SoundService::soundsForClient($user),
             'bgLast' => $bgLast,
+            'friends' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getFriendsWithStatus((int) $user['id']) : [],
+            'friendRequests' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getPendingIncoming((int) $user['id']) : [],
         ], null);
     }
 
@@ -205,9 +207,8 @@ final class ChatController
             if (!$t) {
                 self::finish(['error' => 'No such user.'], '/app', 404);
             }
-            $ignoring = Database::row('SELECT 1 FROM ignores WHERE user_id = ? AND ignored_user_id = ?', [$user['id'], $t['id']]);
-            if ($ignoring) {
-                self::finish(['error' => 'You are ignoring that user.'], '/app?dm=' . rawurlencode($t['username']), 400);
+            if ((int) ($user['guest'] ?? 0) !== 1 && (int) ($t['guest'] ?? 0) !== 1 && FriendService::isBlockedEither((int) $user['id'], (int) $t['id'])) {
+                self::finish(['error' => 'You cannot message this user.'], '/app?dm=' . rawurlencode($t['username']), 400);
             }
             $blocked = BanService::sendBlocked($user, $content, 'p');
             if ($blocked) {
@@ -477,6 +478,10 @@ final class ChatController
             fn ($c) => ['slug' => $c['slug'], 'online' => (int) $c['online']],
             $joined
         );
+        if ((int) ($user['guest'] ?? 0) !== 1) {
+            $out['friends'] = FriendService::getFriendsWithStatus((int) $user['id']);
+            $out['friend_requests'] = FriendService::getPendingIncoming((int) $user['id']);
+        }
         // Background channel messages since the client's global watermark — the
         // fuel for channel audio alerts. Excludes the channel being viewed.
         $bgSince = max(0, (int) ($_GET['bg_since'] ?? 0));

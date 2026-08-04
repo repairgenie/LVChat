@@ -76,6 +76,26 @@
     <label class="label">Max channels per user</label>
     <input class="input" type="number" min="1" name="max_channels_per_user" value="<?= (int) $settings['max_channels_per_user'] ?>">
   </div>
+  <div>
+    <label class="label">Server timezone</label>
+    <?php $tz = (string) ($settings['timezone'] ?? 'UTC'); ?>
+    <select name="timezone" class="input !py-1.5">
+      <?php
+      $regions = [];
+      foreach (DateTimeZone::listIdentifiers() as $id) {
+          $parts = explode('/', $id, 2);
+          $regions[$parts[0]][$id] = isset($parts[1]) ? str_replace(['_', '/'], [' ', ' / '], $parts[1]) : $parts[0];
+      }
+      foreach ($regions as $region => $zones): ?>
+        <optgroup label="<?= h($region) ?>">
+          <?php foreach ($zones as $id => $label): ?>
+            <option value="<?= h($id) ?>" <?= $tz === $id ? 'selected' : '' ?>><?= h($label) ?></option>
+          <?php endforeach; ?>
+        </optgroup>
+      <?php endforeach; ?>
+    </select>
+    <p class="text-xs text-discord-400 mt-1">Used for timestamps shown to users in chat, logs and the admin dashboard. Server storage remains UTC.</p>
+  </div>
   <div class="grid grid-cols-2 gap-4">
     <div>
       <label class="label">Poll interval (seconds)</label>

@@ -53,6 +53,17 @@ $router->post('/api/profile', [UserController::class, 'updateProfile']);
 $router->post('/api/avatar', [UserController::class, 'uploadAvatar']);
 $router->post('/api/avatar/remove', [UserController::class, 'removeAvatar']);
 
+// Friends
+$router->get('/api/friends', [FriendController::class, 'list']);
+$router->get('/api/friend/status', [FriendController::class, 'status']);
+$router->post('/api/friend/request', [FriendController::class, 'send']);
+$router->post('/api/friend/accept', [FriendController::class, 'accept']);
+$router->post('/api/friend/decline', [FriendController::class, 'decline']);
+$router->post('/api/friend/remove', [FriendController::class, 'remove']);
+$router->post('/api/friend/cancel', [FriendController::class, 'cancel']);
+$router->post('/api/friend/block', [FriendController::class, 'block']);
+$router->post('/api/friend/unblock', [FriendController::class, 'unblock']);
+
 // Sound alerts (user settings)
 $router->post('/api/sound/prefs', [SoundController::class, 'prefs']);
 $router->post('/api/sound/override', [SoundController::class, 'setOverride']);

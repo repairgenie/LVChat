@@ -860,6 +860,11 @@ final class AdminController
                 config_set('presence_throttle', (string) max(5, (int) ($_POST['presence_throttle'] ?? 30)));
                 config_set('poll_interval', (string) max(1, (int) ($_POST['poll_interval'] ?? 2)));
                 config_set('realtime', ($_POST['realtime'] ?? 'poll') === 'sse' ? 'sse' : 'poll');
+                $tz = trim((string) ($_POST['timezone'] ?? 'UTC'));
+                if (!in_array($tz, DateTimeZone::listIdentifiers(), true)) {
+                    $tz = 'UTC';
+                }
+                config_set('timezone', $tz);
                 config_set('smtp_enabled', ($_POST['smtp_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('smtp_host', trim((string) ($_POST['smtp_host'] ?? '')));
                 config_set('smtp_port', (string) max(1, (int) ($_POST['smtp_port'] ?? 587)));

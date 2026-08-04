@@ -38,6 +38,7 @@ require ROOT . '/src/services/InviteService.php';
 require ROOT . '/src/services/ModerationService.php';
 require ROOT . '/src/services/SupportService.php';
 require ROOT . '/src/services/LegalService.php';
+require ROOT . '/src/services/FriendService.php';
 require ROOT . '/src/services/AnalyticsService.php';
 require ROOT . '/src/services/CommandParser.php';
 require ROOT . '/src/services/CommandRegistry.php';
@@ -59,5 +60,13 @@ require ROOT . '/src/controllers/WebhookController.php';
 require ROOT . '/src/controllers/SupportController.php';
 require ROOT . '/src/controllers/LegalController.php';
 require ROOT . '/src/controllers/PwaController.php';
+require ROOT . '/src/controllers/FriendController.php';
 
 Database::init();
+
+// Apply the configured server timezone for display formatting.
+// Storage remains UTC; this only affects date()/strtotime() output.
+$tz = Database::scalar("SELECT value FROM server_config WHERE key = 'timezone'");
+if ($tz && in_array($tz, DateTimeZone::listIdentifiers(), true)) {
+    date_default_timezone_set($tz);
+}

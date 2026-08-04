@@ -242,9 +242,9 @@ check('/msg returns null (silent)', $pm['replies'] === []);
 $dms = MessageService::forDm($alice, $bob);
 check('alice sees bob PM', count($dms) === 1 && $dms[0]['content'] === 'hey bob here');
 $res = CommandParser::run('/ignore alice', $bob, $ch);
-check('/ignore alice', $res['replies'][0] === 'You are now ignoring alice.');
+check('/ignore alice', $res['replies'][0] === 'You have blocked alice.', $res['replies'][0] ?? '');
 $pm = CommandParser::run('/msg bob hi', $alice, $ch);
-check('PM blocked when target ignores sender', $pm['replies'][0] === 'bob is not accepting private messages from you.', $pm['replies'][0] ?? '');
+check('PM blocked when target blocks sender', $pm['replies'][0] === 'A block prevents messaging between you.', $pm['replies'][0] ?? '');
 
 // DM image attachments: private messages carry a kind, so image uploads render.
 $imgDm = MessageService::insertPm($alice, $bob, "/uploads/dm-image.jpg\nDM caption", 'image');
@@ -342,9 +342,9 @@ check('/info', count($res['replies']) >= 3);
 $res = CommandParser::run('/whois bob_the_second', $alice, $ch);
 check('/whois', count($res['replies']) >= 1);
 $res = CommandParser::run('/ignore bob_the_second', $alice, $ch);
-check('/ignore', $res['replies'][0] === 'You are now ignoring bob_the_second.', $res['replies'][0] ?? '');
+check('/ignore', $res['replies'][0] === 'You have blocked bob_the_second.', $res['replies'][0] ?? '');
 $res = CommandParser::run('/unignore bob_the_second', $alice, $ch);
-check('/unignore', $res['replies'][0] === 'You are no longer ignoring bob_the_second.', $res['replies'][0] ?? '');
+check('/unignore', $res['replies'][0] === 'You have unblocked bob_the_second.', $res['replies'][0] ?? '');
 $pm = CommandParser::run('/msg alice note to self', $alice, $ch);
 check('message yourself is allowed (IRC hallmark)', $pm['replies'] === [] && count(MessageService::forDm($alice, $alice)) === 1);
 $res = CommandParser::run('/invite bob_the_second #test', $alice, $ch);

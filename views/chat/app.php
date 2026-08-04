@@ -301,7 +301,7 @@ function member_html(array $m, bool $online): string {
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400">Online</div>
         <div class="mt-1 space-y-0.5">
           <?php foreach ($onlineUsers as $ou): ?>
-          <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
+          <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" data-guest="<?= !empty($ou['guest']) ? '1' : '0' ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
             <span class="w-2 h-2 rounded-full bg-green-500"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
           </a>
           <?php endforeach; ?>
@@ -488,6 +488,63 @@ function member_html(array $m, bool $online): string {
 
   <!-- ── Right: member list ── -->
   <aside class="hidden md:flex w-60 bg-discord-800 flex-col shrink-0 min-h-0">
+    <?php if ((int) ($user['guest'] ?? 0) !== 1): ?>
+    <?php
+    $onlineFriends = array_values(array_filter($friends, fn($f) => !empty($f['is_online'])));
+    $offlineFriends = array_values(array_filter($friends, fn($f) => empty($f['is_online'])));
+    ?>
+    <div class="h-12 px-4 border-b border-discord-700 flex items-center justify-between text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">
+      <span>Friends — <span id="friend-count"><?= (int) count($friends) ?></span></span>
+      <?php if (!empty($friendRequests)): ?>
+      <span id="friend-badge" class="min-w-5 h-5 px-1 rounded-full bg-blurple text-white text-[10px] flex items-center justify-center"><?= count($friendRequests) ?></span>
+      <?php endif; ?>
+    </div>
+    <div id="friends-section" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+      <?php if (!empty($friendRequests)): ?>
+      <div class="px-2 pt-2 pb-1">
+        <div class="px-2 text-xs font-semibold text-blurple uppercase tracking-wide mb-1">Requests — <?= count($friendRequests) ?></div>
+        <?php foreach ($friendRequests as $fr): ?>
+        <div class="friend-request flex items-center gap-2 px-2 py-1.5 rounded hover:bg-discord-600/40 text-sm" data-username="<?= h($fr['username']) ?>">
+          <?= avatar_img(['username' => $fr['username'], 'avatar' => $fr['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
+          <span class="truncate text-discord-200"><?= h($fr['username']) ?></span>
+          <div class="ml-auto flex gap-1">
+            <button type="button" class="friend-accept text-[10px] px-1.5 py-0.5 rounded bg-green-600 hover:bg-green-500 text-white">Accept</button>
+            <button type="button" class="friend-decline text-[10px] px-1.5 py-0.5 rounded bg-discord-700 hover:bg-discord-600 text-discord-300">Decline</button>
+          </div>
+        </div>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+      <?php if (!empty($onlineFriends)): ?>
+      <div class="px-2 pt-2 pb-1">
+        <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — <?= count($onlineFriends) ?></div>
+        <?php foreach ($onlineFriends as $f): ?>
+        <a href="/app?dm=<?= h(rawurlencode($f['username'])) ?>" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="<?= h($f['username']) ?>">
+          <span class="w-2 h-2 rounded-full <?= $f['away'] ? 'bg-amber-400' : 'bg-green-500' ?>"></span>
+          <?= avatar_img(['username' => $f['username'], 'avatar' => $f['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
+          <span class="truncate"><?= h($f['username']) ?></span>
+        </a>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+      <?php if (!empty($offlineFriends)): ?>
+      <div class="px-2 pt-2 pb-1">
+        <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — <?= count($offlineFriends) ?></div>
+        <?php foreach ($offlineFriends as $f): ?>
+        <a href="/app?dm=<?= h(rawurlencode($f['username'])) ?>" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="<?= h($f['username']) ?>">
+          <span class="w-2 h-2 rounded-full bg-discord-500"></span>
+          <?= avatar_img(['username' => $f['username'], 'avatar' => $f['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
+          <span class="truncate"><?= h($f['username']) ?></span>
+        </a>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+      <?php if (!$friends && !$friendRequests): ?>
+      <div class="p-4 text-xs text-discord-500">No friends yet.</div>
+      <?php endif; ?>
+    </div>
+    <div class="border-t border-discord-700 shrink-0"></div>
+    <?php endif; ?>
     <?php if ($channel): ?>
     <?php
     // Group by user type. Offline guests are skipped entirely (anonymous).
@@ -584,6 +641,10 @@ function member_html(array $m, bool $online): string {
       <div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
         <?php if ($n['kind'] === 'dm' && !empty($n['sender'])): ?>
         <span class="text-discord-400">dm</span> from <a class="text-blurple hover:underline" href="/app?dm=<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a>
+        <?php elseif ($n['kind'] === 'friend_request' && !empty($n['sender'])): ?>
+        <span class="text-green-400">friend request</span> from <a class="text-blurple hover:underline" href="/u/<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a>
+        <?php elseif ($n['kind'] === 'friend_accepted' && !empty($n['sender'])): ?>
+        <span class="text-green-400">friend accepted</span> — <a class="text-blurple hover:underline" href="/u/<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a> is now your friend
         <?php else: ?>
         <span class="text-discord-400"><?= h($n['kind']) ?></span>
         <?php if ($n['channel_name']): ?>→ <a class="text-blurple hover:underline" href="/app?channel=<?= h(rawurlencode(ChannelService::nameToSlug($n['channel_name']))) ?>"><?= h($n['channel_name']) ?></a><?php endif; ?>

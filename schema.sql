@@ -441,6 +441,18 @@ CREATE INDEX IF NOT EXISTS idx_bans_active ON bans(active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read);
 CREATE INDEX IF NOT EXISTS idx_notif_guest_user ON notifications(guest_user_id, read);
 
+CREATE TABLE IF NOT EXISTS friendships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, friend_id)
+);
+CREATE INDEX IF NOT EXISTS idx_friendships_user ON friendships(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id, status);
+
 -- Full-text search index over channel messages (external-content FTS5). The
 -- triggers keep it in sync with INSERT/UPDATE/DELETE on `messages`. The
 -- service-layer search falls back to LIKE when the PHP sqlite build lacks FTS5.
@@ -459,3 +471,15 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages
   INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
   INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
+
+CREATE TABLE IF NOT EXISTS friendships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, friend_id)
+);
+CREATE INDEX IF NOT EXISTS idx_friendships_user ON friendships(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id, status);

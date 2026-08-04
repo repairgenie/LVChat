@@ -20,6 +20,9 @@ final class UserController
         $allUsers = $isSelf && !(int) ($user['guest'] ?? 0)
             ? Database::all('SELECT id, username FROM users WHERE id != ? ORDER BY username COLLATE NOCASE LIMIT 1000', [$user['id']])
             : [];
+        $friendStatus = (!$isSelf && !(int) ($viewer['guest'] ?? 0) && !(int) ($user['guest'] ?? 0))
+            ? FriendService::status((int) $viewer['id'], (int) $user['id'])
+            : 'none';
         render_view('user/profile', [
             'viewer' => $viewer,
             'user' => $user,
@@ -30,6 +33,7 @@ final class UserController
             'soundPrefs' => $soundPrefs,
             'soundOverrides' => $soundOverrides,
             'allUsers' => $allUsers,
+            'friendStatus' => $friendStatus,
         ]);
     }
 

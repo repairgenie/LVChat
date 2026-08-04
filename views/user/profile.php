@@ -35,6 +35,31 @@
 
     <?php if (!$isSelf): ?>
     <a href="/app?dm=<?= h(rawurlencode($user['username'])) ?>" class="btn-primary w-full justify-center mt-5">Send message</a>
+    <?php if (!(int) ($viewer['guest'] ?? 0) && !(int) ($user['guest'] ?? 0)): ?>
+    <?php
+    $fs = $friendStatus ?? 'none';
+    ?>
+    <div class="mt-2 space-y-2" id="friend-actions" data-friend-status="<?= h($fs) ?>" data-friend-username="<?= h($user['username']) ?>">
+      <?php if ($fs === 'none'): ?>
+      <button type="button" id="friend-add" class="btn-primary w-full justify-center !bg-green-600 hover:!bg-green-500">Add Friend</button>
+      <?php elseif ($fs === 'outgoing'): ?>
+      <button type="button" id="friend-cancel" class="btn-ghost w-full justify-center">Cancel Request</button>
+      <?php elseif ($fs === 'incoming'): ?>
+      <div class="flex gap-2">
+        <button type="button" id="friend-accept" class="btn-primary flex-1 justify-center !bg-green-600 hover:!bg-green-500">Accept</button>
+        <button type="button" id="friend-decline" class="btn-ghost flex-1">Decline</button>
+      </div>
+      <?php elseif ($fs === 'friend'): ?>
+      <button type="button" id="friend-remove" class="btn-ghost w-full justify-center text-red-400">Remove Friend</button>
+      <?php endif; ?>
+      <?php if ($fs !== 'blocked_by_me'): ?>
+      <button type="button" id="friend-block" class="btn-ghost w-full justify-center text-red-400">Block User</button>
+      <?php else: ?>
+      <button type="button" id="friend-unblock" class="btn-ghost w-full justify-center">Unblock</button>
+      <?php endif; ?>
+      <div id="friend-msg" class="text-sm text-green-400 hidden"></div>
+    </div>
+    <?php endif; ?>
     <?php endif; ?>
   </div>
 
@@ -226,5 +251,37 @@
     e.preventDefault();
     sndPost('/api/sound/override', new FormData(ovForm), () => location.reload());
   });
+
+  const fa = document.getElementById('friend-actions');
+  if (fa) {
+    const uname = fa.dataset.friendUsername;
+    const fmsg = document.getElementById('friend-msg');
+    function friendPost(url, ok) {
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('username', uname);
+      fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+        .then(r => r.json()).then(j => {
+          if (j.error) { alert(j.error); return; }
+          if (fmsg) { fmsg.textContent = j.message || 'Done.'; fmsg.classList.remove('hidden'); }
+          if (ok) ok();
+          setTimeout(() => location.reload(), 800);
+        });
+    }
+    const addBtn = document.getElementById('friend-add');
+    if (addBtn) addBtn.addEventListener('click', () => friendPost('/api/friend/request'));
+    const cancelBtn = document.getElementById('friend-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => friendPost('/api/friend/cancel'));
+    const acceptBtn = document.getElementById('friend-accept');
+    if (acceptBtn) acceptBtn.addEventListener('click', () => friendPost('/api/friend/accept'));
+    const declineBtn = document.getElementById('friend-decline');
+    if (declineBtn) declineBtn.addEventListener('click', () => friendPost('/api/friend/decline'));
+    const removeBtn = document.getElementById('friend-remove');
+    if (removeBtn) removeBtn.addEventListener('click', () => { if (confirm('Remove this friend?')) friendPost('/api/friend/remove'); });
+    const blockBtn = document.getElementById('friend-block');
+    if (blockBtn) blockBtn.addEventListener('click', () => { if (confirm('Block this user?')) friendPost('/api/friend/block'); });
+    const unblockBtn = document.getElementById('friend-unblock');
+    if (unblockBtn) unblockBtn.addEventListener('click', () => friendPost('/api/friend/unblock'));
+  }
 })();
 </script>

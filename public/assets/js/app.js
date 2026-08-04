@@ -600,6 +600,7 @@
     if (j.dm_list) handleDmList(j.dm_list);
     if (j.channel_unread) updateChannelUnread(j.channel_unread);
     if (j.channel_presence) updateChannelPresence(j.channel_presence);
+    if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
   }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
@@ -795,6 +796,98 @@
     if (count) count.textContent = String(shown);
   }
 
+  // ── Friends sidebar ───────────────────────────────────────────────────────
+  const friendsSection = document.getElementById('friends-section');
+  const friendCount = document.getElementById('friend-count');
+  const friendBadge = document.getElementById('friend-badge');
+  let friendsSig = '';
+
+  function friendAvatar(f) {
+    if (f.avatar) return '<img src="' + esc(f.avatar) + '" alt="" loading="lazy" class="w-6 h-6 rounded-full object-cover">';
+    const initial = (f.username || '?').charAt(0).toUpperCase();
+    return '<div class="w-6 h-6 rounded-full bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600 shrink-0">' + esc(initial) + '</div>';
+  }
+
+  function updateFriendsSidebar(friends, requests) {
+    if (!friendsSection) return;
+    const online = friends.filter(f => f.is_online);
+    const offline = friends.filter(f => !f.is_online);
+    const sig = JSON.stringify([friends.map(f => [f.id, f.is_online]), requests.map(r => r.id)]);
+    if (sig === friendsSig) return;
+    friendsSig = sig;
+    if (friendCount) friendCount.textContent = String(friends.length);
+    if (friendBadge) {
+      if (requests.length) {
+        friendBadge.textContent = String(requests.length);
+        friendBadge.classList.remove('hidden');
+      } else {
+        friendBadge.classList.add('hidden');
+      }
+    }
+    let html = '';
+    if (requests.length) {
+      html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-blurple uppercase tracking-wide mb-1">Requests — ' + requests.length + '</div>';
+      requests.forEach(r => {
+        html += '<div class="friend-request flex items-center gap-2 px-2 py-1.5 rounded hover:bg-discord-600/40 text-sm" data-username="' + esc(r.username) + '">';
+        html += friendAvatar(r);
+        html += '<span class="truncate text-discord-200">' + esc(r.username) + '</span>';
+        html += '<div class="ml-auto flex gap-1">';
+        html += '<button type="button" class="friend-accept text-[10px] px-1.5 py-0.5 rounded bg-green-600 hover:bg-green-500 text-white">Accept</button>';
+        html += '<button type="button" class="friend-decline text-[10px] px-1.5 py-0.5 rounded bg-discord-700 hover:bg-discord-600 text-discord-300">Decline</button>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+    }
+    if (online.length) {
+      html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — ' + online.length + '</div>';
+      online.forEach(f => {
+        const dot = f.away ? 'bg-amber-400' : 'bg-green-500';
+        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="' + esc(f.username) + '">';
+        html += '<span class="w-2 h-2 rounded-full ' + dot + '"></span>';
+        html += friendAvatar(f);
+        html += '<span class="truncate">' + esc(f.username) + '</span></a>';
+      });
+      html += '</div>';
+    }
+    if (offline.length) {
+      html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — ' + offline.length + '</div>';
+      offline.forEach(f => {
+        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="' + esc(f.username) + '">';
+        html += '<span class="w-2 h-2 rounded-full bg-discord-500"></span>';
+        html += friendAvatar(f);
+        html += '<span class="truncate">' + esc(f.username) + '</span></a>';
+      });
+      html += '</div>';
+    }
+    if (!html) html = '<div class="p-4 text-xs text-discord-500">No friends yet.</div>';
+    friendsSection.innerHTML = html;
+    bindFriendActions();
+  }
+
+  function bindFriendActions() {
+    document.querySelectorAll('.friend-accept').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.friend-request');
+        post('/api/friend/accept', { username: row.dataset.username }, () => { friendsSig = ''; });
+      });
+    });
+    document.querySelectorAll('.friend-decline').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.friend-request');
+        post('/api/friend/decline', { username: row.dataset.username }, () => {
+          row.remove();
+          friendsSig = '';
+        });
+      });
+    });
+  }
+
+  bindFriendActions();
+
   // ── Bell / notifications ───────────────────────────────────────────────────
   const bell = document.getElementById('bell');
   const bellDot = document.getElementById('bell-dot');
@@ -817,6 +910,16 @@
           if (n.kind === 'dm') {
             return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
               <span class="text-discord-400">dm</span> from <a class="text-blurple hover:underline" href="/app?dm=${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'system')}</a>
+            </div>`;
+          }
+          if (n.kind === 'friend_request') {
+            return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
+              <span class="text-green-400">friend request</span> from <a class="text-blurple hover:underline" href="/u/${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'someone')}</a>
+            </div>`;
+          }
+          if (n.kind === 'friend_accepted') {
+            return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
+              <span class="text-green-400">friend accepted</span> — <a class="text-blurple hover:underline" href="/u/${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'someone')}</a> is now your friend
             </div>`;
           }
           return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
@@ -1426,7 +1529,8 @@
     }
     if (!isSelf) {
       items.push({ div: true });
-      items.push({ label: 'Ignore ' + nick, onClick: () => runCommand('/ignore ' + nick) });
+      items.push({ label: 'Add friend', onClick: () => post('/api/friend/request', { username: nick }, () => showReply('Friend request sent.')) });
+      items.push({ label: 'Block ' + nick, danger: true, onClick: () => post('/api/friend/block', { username: nick }, () => showReply(nick + ' has been blocked.')) });
     }
     ctxShow(x, y, items);
   }
