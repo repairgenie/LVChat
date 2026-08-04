@@ -72,6 +72,7 @@ $router->post('/support/{id}/reopen', [SupportController::class, 'reopen']);
 
 // Admin dashboard
 $router->get('/admin', [AdminController::class, 'overview']);
+$router->get('/admin/analytics', [AdminController::class, 'analytics']);
 $router->get('/admin/users', [AdminController::class, 'users']);
 $router->get('/admin/users/{id}', [AdminController::class, 'userShow']);
 $router->get('/admin/moderation', [AdminController::class, 'moderation']);

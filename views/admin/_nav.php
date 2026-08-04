@@ -11,6 +11,7 @@ function admin_nav(string $active, array $user): void {
   $isAdmin = ($user['role'] ?? '') === 'admin';
   $items = [
     'overview' => ['/admin', 'Overview', $isAdmin],
+    'analytics' => ['/admin/analytics', 'Analytics', $isAdmin],
     'moderation' => ['/admin/moderation', 'Moderation', $isStaff],
     'reports' => ['/admin/reports', 'Reports', $isStaff],
     'support' => ['/admin/support', 'Support', $isStaff],

@@ -37,6 +37,45 @@ final class AdminController
             'stats' => $stats,
             'recentAudit' => $recentAudit,
             'banned' => $banned,
+            'overviewMessages' => AnalyticsService::messagesDaily(AnalyticsService::rangeSince('30')),
+            'overviewTopUsers' => AnalyticsService::topUsers(AnalyticsService::rangeSince('30'), 5),
+        ]);
+    }
+
+    /** GET /admin/analytics — charts over chat, moderation, growth, and ops data. */
+    public static function analytics(): void
+    {
+        $admin = self::require();
+        $range = in_array($_GET['range'] ?? '30', AnalyticsService::ranges(), true) ? (string) $_GET['range'] : '30';
+        $since = AnalyticsService::rangeSince($range);
+        render_view('admin/analytics', [
+            'admin' => $admin,
+            'range' => $range,
+            'kpis' => AnalyticsService::kpis($since),
+            'active' => AnalyticsService::activeCounts(),
+            'messagesDaily' => AnalyticsService::messagesDaily($since),
+            'pmsDaily' => AnalyticsService::pmsDaily($since),
+            'registrationsDaily' => AnalyticsService::registrationsDaily($since),
+            'dauDaily' => AnalyticsService::dauDaily($since),
+            'topUsers' => AnalyticsService::topUsers($since),
+            'leastActive' => AnalyticsService::leastActive(12),
+            'hourly' => AnalyticsService::activityByHour($since),
+            'weekday' => AnalyticsService::activityByWeekday($since),
+            'topChannels' => AnalyticsService::topChannels($since),
+            'topDmSenders' => AnalyticsService::topDmSenders($since),
+            'censorLeaders' => AnalyticsService::censorLeaders($since),
+            'spamLeaders' => AnalyticsService::spamLeaders($since),
+            'topMatchedWords' => AnalyticsService::topMatchedWords($since),
+            'moderationDaily' => AnalyticsService::moderationDaily($since),
+            'moderationMix' => AnalyticsService::moderationMix($since),
+            'banMix' => AnalyticsService::banMix(),
+            'reportMix' => AnalyticsService::reportMix($since),
+            'topReported' => AnalyticsService::topReported($since),
+            'reportReasons' => AnalyticsService::reportReasons($since),
+            'auditDaily' => AnalyticsService::auditDaily($since),
+            'ticketsDaily' => AnalyticsService::ticketsDaily($since),
+            'inviteStats' => AnalyticsService::inviteStats($since),
+            'webhooks' => AnalyticsService::webhooks(),
         ]);
     }
 

@@ -14,6 +14,24 @@
   <?php endforeach; ?>
 </div>
 
+<?php require ROOT . '/views/admin/_charts.php'; ?>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+  <div class="card p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="font-semibold text-white text-sm">Messages, last 30 days</h2>
+      <a href="/admin/analytics?range=30" class="text-[11px] text-blurple hover:underline">Full analytics →</a>
+    </div>
+    <?= chart_line($overviewMessages, ['color' => '#5865f2']) ?>
+  </div>
+  <div class="card p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="font-semibold text-white text-sm">Most active users, last 30 days</h2>
+      <a href="/admin/analytics?range=30" class="text-[11px] text-blurple hover:underline">Full analytics →</a>
+    </div>
+    <?= chart_hbars($overviewTopUsers, ['color' => '#10b981', 'rowH' => 30]) ?>
+  </div>
+</div>
+
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
   <div class="card p-4">
     <h2 class="font-semibold text-white mb-3">Recent audit events</h2>

@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '15';
+    private const SCHEMA_VERSION = '16';
 
     public static function init(): void
     {
@@ -185,6 +185,13 @@ final class Database
             $pdo->exec('CREATE TABLE support_ticket_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, author_id INTEGER REFERENCES users(id) ON DELETE SET NULL, is_staff INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
             $pdo->exec('CREATE INDEX idx_support_replies_ticket ON support_ticket_replies(ticket_id, id)');
         }
+
+        // Analytics indexes (schema v16): keep range-aggregation charts off full scans.
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_chat_logs_created ON chat_logs(created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pm_created ON private_messages(created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_moderation_events_created ON moderation_events(created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at)');
 
         // Backfill the FTS index from any pre-existing messages (new rows are
         // indexed by the triggers created above). Only rebuild when it lags.

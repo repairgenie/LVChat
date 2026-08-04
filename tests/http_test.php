@@ -259,7 +259,7 @@ check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found
 
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
-foreach (['/admin', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks', '/admin/support'] as $p) {
+foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks', '/admin/support'] as $p) {
     [$s] = req('GET', $p, [], $cjA);
     check("GET $p 200", $s === 200, (string) $s);
 }
@@ -649,6 +649,10 @@ check('/privacy page 200', $s === 200, (string) $s);
 // Staff guard: a regular user (carol) gets 403 from the moderation pages.
 [$s] = req('GET', '/admin/moderation', [], $cjC);
 check('regular user denied from moderation page', $s === 403, (string) $s);
+[$s] = req('GET', '/admin/analytics', [], $cjC);
+check('regular user denied from analytics page', $s === 403, (string) $s);
+[$s] = req('GET', '/admin/analytics?range=90', [], $cjA);
+check('admin opens analytics page with range', $s === 200, (string) $s);
 [$s] = req('GET', '/admin/moderation', [], $cjA);
 check('admin opens moderation page', $s === 200, (string) $s);
 [$s] = req('GET', '/admin/reports', [], $cjA);

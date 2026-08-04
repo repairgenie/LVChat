@@ -427,7 +427,12 @@ CREATE TABLE IF NOT EXISTS support_ticket_replies (
 CREATE INDEX IF NOT EXISTS idx_support_replies_ticket ON support_ticket_replies(ticket_id, id);
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_logs_created ON chat_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_pm_pair ON private_messages(sender_id, recipient_id, id);
+CREATE INDEX IF NOT EXISTS idx_pm_created ON private_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_moderation_events_created ON moderation_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at);
 CREATE INDEX IF NOT EXISTS idx_pm_guest_pair ON private_messages(sender_guest_id, recipient_guest_id, id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON channel_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_members_guest ON channel_members(guest_id);
