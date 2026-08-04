@@ -90,12 +90,16 @@
 
 <script>
 function promptCopy(title, value) {
-  const ta = document.createElement('textarea');
-  ta.value = value;
-  document.body.appendChild(ta);
-  ta.select();
-  try { document.execCommand('copy'); } catch (e) {}
-  document.body.removeChild(ta);
-  alert(title + ' copied to clipboard: ' + value);
+  navigator.clipboard.writeText(value).then(function() {
+    alert(title + ' copied to clipboard.');
+  }).catch(function() {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    alert(title + ' copied to clipboard: ' + value);
+  });
 }
 </script>

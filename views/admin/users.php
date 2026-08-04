@@ -22,7 +22,7 @@
     </div>
     <div>
       <label class="label">Email</label>
-      <input class="input" type="email" name="email" required>
+      <input class="input" type="email" name="email">
     </div>
     <div>
       <label class="label">Role</label>
@@ -75,7 +75,7 @@
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/users">
             <input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
-            <select name="role_id" class="input !py-0.5 text-xs" onchange="this.form.submit()">
+            <select name="role_id" class="input !py-0.5 text-xs" onchange="if(confirm('Change this user\'s custom role?'))this.form.submit();else this.value='<?= (int) $u['role_id'] ?>';">
               <option value="0">— none —</option>
               <?php foreach ($roles as $r): ?>
               <option value="<?= (int) $r['id'] ?>" <?= (int) $u['role_id'] === (int) $r['id'] ? 'selected' : '' ?>><?= h($r['name']) ?></option>
@@ -89,7 +89,7 @@
         <td class="px-4 py-2 text-discord-400"><?= h(relative_time($u['last_seen'])) ?></td>
         <td class="px-4 py-2 font-mono text-[11px] text-discord-300"><?= h($u['last_ip'] ?? '—') ?></td>
         <td class="px-4 py-2">
-          <form method="post" action="/admin/action" class="flex gap-1 justify-end">
+          <form method="post" action="/admin/action" class="flex flex-wrap gap-1 justify-end max-w-xs">
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/users">
             <input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
@@ -106,7 +106,7 @@
               <?php if ($u['banned']): ?>
               <button name="action" value="user_unban" class="btn-ghost text-xs !py-1">Unban</button>
               <?php else: ?>
-              <button name="action" value="user_ban" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Ban this user?')">Ban</button>
+              <button name="action" value="user_ban" class="btn-ghost text-xs !py-1 text-red-400" onclick="return promptReason(event, 'Reason for ban:')">Ban</button>
               <?php endif; ?>
               <?php if (!empty($u['last_ip'])): ?>
               <button name="action" value="user_zline_ip" class="btn-ghost text-xs !py-1 text-orange-400" onclick="return confirm('Zline (ban) this IP?')">Zline IP</button>

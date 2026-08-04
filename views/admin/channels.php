@@ -40,7 +40,7 @@
                 <?= Csrf::field() ?>
                 <input type="hidden" name="back" value="/admin/channels">
                 <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
-                <input class="input !py-1 text-xs flex-1" name="topic" placeholder="Force topic…">
+                <input class="input !py-1 text-xs flex-1" name="topic" placeholder="Force topic…" value="<?= h($c['topic']) ?>">
                 <button name="action" value="channel_topic" class="btn-primary text-xs !py-1">Set</button>
               </form>
               <form method="post" action="/admin/action" class="flex gap-2 items-center">

@@ -69,6 +69,13 @@
     </div>
     <input type="checkbox" name="chat_logging_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['chat_logging_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
   </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
+      <div class="text-sm font-medium text-white">Webhooks</div>
+      <div class="text-xs text-discord-400">Allow external services to post into channels via webhook URLs</div>
+    </div>
+    <input type="checkbox" name="webhooks_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['webhooks_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
   <div>
     <label class="label">Giphy API key</label>
     <input class="input font-mono" name="giphy_api_key" value="<?= h($settings['giphy_api_key'] ?? '') ?>" placeholder="Get a free key at developers.giphy.com" autocomplete="off" spellcheck="false">
@@ -108,7 +115,7 @@
     </select>
     <p class="text-xs text-discord-400 mt-1">Used for timestamps shown to users in chat, logs and the admin dashboard. Server storage remains UTC.</p>
   </div>
-  <div class="grid grid-cols-2 gap-4">
+  <div id="poll-settings" class="grid grid-cols-2 gap-4" <?= ($settings['realtime'] ?? 'poll') === 'sse' ? 'style="opacity:0.4;pointer-events:none"' : '' ?>>
     <div>
       <label class="label">Poll interval (seconds)</label>
       <input class="input" type="number" min="1" name="poll_interval" value="<?= (int) $settings['poll_interval'] ?>">
@@ -120,6 +127,13 @@
       <p class="text-xs text-discord-400 mt-1">How often the server writes "last seen" per user. Most polls become pure reads.</p>
     </div>
   </div>
+  <script>
+  document.querySelector('select[name="realtime"]').addEventListener('change', function() {
+    var ps = document.getElementById('poll-settings');
+    if (this.value === 'sse') { ps.style.opacity = '0.4'; ps.style.pointerEvents = 'none'; }
+    else { ps.style.opacity = '1'; ps.style.pointerEvents = 'auto'; }
+  });
+  </script>
 
   <div class="pt-4 border-t border-discord-700">
     <div class="flex items-center justify-between mb-3">
@@ -129,7 +143,7 @@
       </div>
       <input type="checkbox" name="smtp_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['smtp_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
     </div>
-    <div class="grid grid-cols-2 gap-4">
+    <div id="smtp-fields" class="grid grid-cols-2 gap-4" <?= ($settings['smtp_enabled'] ?? '0') !== '1' ? 'style="opacity:0.4;pointer-events:none"' : '' ?>>
       <div>
         <label class="label">SMTP host</label>
         <input class="input" name="smtp_host" value="<?= h($settings['smtp_host'] ?? '') ?>" placeholder="smtp.example.com">
@@ -168,6 +182,13 @@
     </div>
   </div>
 
+  <script>
+  document.querySelector('input[name="smtp_enabled"]').addEventListener('change', function() {
+    var f = document.getElementById('smtp-fields');
+    if (!this.checked) { f.style.opacity = '0.4'; f.style.pointerEvents = 'none'; }
+    else { f.style.opacity = '1'; f.style.pointerEvents = 'auto'; }
+  });
+  </script>
   <button name="action" value="settings_save" class="btn-primary">Save settings</button>
 </form>
 

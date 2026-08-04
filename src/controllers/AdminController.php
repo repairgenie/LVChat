@@ -615,7 +615,7 @@ final class AdminController
                 break;
             case 'badword_add':
                 $word = strtolower(trim((string) ($_POST['word'] ?? '')));
-                $action = ($_POST['action'] ?? 'censor') === 'block' ? 'block' : 'censor';
+                $action = ($_POST['badword_action'] ?? 'censor') === 'block' ? 'block' : 'censor';
                 if ($word === '') {
                     $ok = false;
                     $message = 'A bad word is required.';

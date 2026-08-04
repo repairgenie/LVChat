@@ -113,6 +113,6 @@
 (function () {
   var toggle = document.getElementById('new-ticket-toggle');
   var form = document.getElementById('new-ticket-form');
-  if (toggle && form) toggle.addEventListener('click', function () { form.classList.toggle('hidden'); });
+  if (toggle && form) toggle.addEventListener('click', function () { var h = form.classList.toggle('hidden'); toggle.textContent = (h ? '＋ Open a ticket' : '✕ Cancel'); });
 })();
 </script>

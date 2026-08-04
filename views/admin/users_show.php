@@ -55,7 +55,7 @@
         <input type="hidden" name="back" value="/admin/users/<?= (int) $user['id'] ?>">
         <input type="hidden" name="id" value="<?= (int) $user['id'] ?>">
         <input type="hidden" name="action" value="user_suspend">
-        <input class="input mb-1" name="reason" placeholder="Reason (required)…">
+        <input class="input mb-1" name="reason" placeholder="Reason (required)…" required>
         <button class="btn-ghost w-full justify-center text-xs text-red-400">Suspend account</button>
       </form>
       <form method="post" action="/admin/action" class="mb-2">

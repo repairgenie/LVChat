@@ -12,7 +12,7 @@
       </div>
       <div>
         <label class="label">Action</label>
-        <select name="action" class="input">
+        <select name="badword_action" class="input">
           <option value="censor">Censor (replace with ****)</option>
           <option value="block">Remove the whole message</option>
         </select>
@@ -44,7 +44,7 @@
           </form>
           <form method="post" action="/admin/action">
             <?= Csrf::field() ?><input type="hidden" name="back" value="/admin/badwords"><input type="hidden" name="id" value="<?= (int) $w['id'] ?>">
-            <button name="action" value="badword_del" class="btn-ghost text-xs !py-1 text-red-400">Delete</button>
+            <button name="action" value="badword_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Delete this bad word?')">Delete</button>
           </form>
         </td>
       </tr>
