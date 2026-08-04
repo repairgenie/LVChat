@@ -2261,17 +2261,27 @@
   }
 
   function browseRow(c) {
-    const vis = c.visibility !== 'public' ? ' <span class="text-[10px]" title="Restricted">🔒</span>' : '';
-    const topic = esc((c.topic || c.description || '').slice(0, 128)) || '(no topic)';
-    const fullTopic = esc(c.topic || c.description || '');
+    const vis = c.visibility !== 'public' ? '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-discord-700 text-discord-400" title="Restricted">🔒</span>' : '';
+    const topicText = (c.topic || c.description || '').slice(0, 100);
+    const topic = topicText ? esc(topicText) : '<span class="text-discord-500 italic">No topic</span>';
     const action = c.joined
-      ? '<button class="browse-open btn-ghost text-xs !py-1" data-slug="' + esc(c.slug) + '">Open</button>'
-      : '<button class="browse-join btn-primary text-xs !py-1" data-name="' + esc(c.name) + '" data-slug="' + esc(c.slug) + '">Join</button>';
-    return '<tr class="border-b border-discord-800 hover:bg-discord-750/40" data-name="' + esc(c.name.toLowerCase()) + '" data-topic="' + esc((c.topic || c.description || '').toLowerCase()) + '" data-members="' + c.members + '" data-joined="' + (c.joined ? '1' : '0') + '">' +
-      '<td class="px-3 py-2 font-medium text-white whitespace-nowrap">' + esc(c.name) + vis + '</td>' +
-      '<td class="px-3 py-2 text-discord-300 max-w-md truncate" title="' + fullTopic + '">' + topic + '</td>' +
-      '<td class="px-3 py-2 text-right text-discord-300">' + c.members + '</td>' +
-      '<td class="px-3 py-2 text-right">' + action + '</td></tr>';
+      ? '<button class="browse-open px-4 py-1.5 rounded text-sm font-medium bg-discord-700 hover:bg-discord-600 text-discord-200 transition-colors" data-slug="' + esc(c.slug) + '">Open</button>'
+      : '<button class="browse-join px-4 py-1.5 rounded text-sm font-medium bg-blurple hover:bg-blurple/90 text-white transition-colors" data-name="' + esc(c.name) + '" data-slug="' + esc(c.slug) + '">Join</button>';
+    return '<div class="browse-item group flex items-center gap-4 p-4 rounded-lg bg-discord-750/50 hover:bg-discord-700/70 border border-discord-700 hover:border-discord-600 transition-all cursor-pointer" data-name="' + esc(c.name.toLowerCase()) + '" data-topic="' + esc((c.topic || c.description || '').toLowerCase()) + '" data-members="' + c.members + '" data-joined="' + (c.joined ? '1' : '0') + '">' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-center gap-2 mb-1">' +
+          '<span class="font-semibold text-white">' + esc(c.name) + '</span>' + vis +
+        '</div>' +
+        '<div class="text-sm text-discord-300 truncate">' + topic + '</div>' +
+      '</div>' +
+      '<div class="flex items-center gap-4 shrink-0">' +
+        '<div class="flex items-center gap-1.5 text-xs text-discord-400">' +
+          '<span class="w-1.5 h-1.5 rounded-full bg-discord-500"></span>' +
+          '<span>' + c.members + ' member' + (c.members === 1 ? '' : 's') + '</span>' +
+        '</div>' +
+        action +
+      '</div>' +
+    '</div>';
   }
 
   function renderBrowse() {
@@ -2295,25 +2305,25 @@
     const allFiltered = browseData.channels.filter(filterFn).sort(sortFn);
 
     const mySection = document.getElementById('browse-my-section');
-    const myTbody = document.getElementById('browse-my-tbody');
-    if (mySection && myTbody) {
+    const myList = document.getElementById('browse-my-list');
+    if (mySection && myList) {
       if (myFiltered.length) {
         mySection.classList.remove('hidden');
-        myTbody.innerHTML = myFiltered.map(browseRow).join('');
+        myList.innerHTML = myFiltered.map(browseRow).join('');
       } else {
         mySection.classList.add('hidden');
       }
     }
 
-    const tbody = document.getElementById('browse-tbody');
+    const list = document.getElementById('browse-list');
     const empty = document.getElementById('browse-empty');
     const countEl = document.getElementById('browse-count');
-    if (tbody) {
+    if (list) {
       if (allFiltered.length) {
-        tbody.innerHTML = allFiltered.map(browseRow).join('');
+        list.innerHTML = allFiltered.map(browseRow).join('');
         if (empty) empty.classList.add('hidden');
       } else {
-        tbody.innerHTML = '';
+        list.innerHTML = '';
         if (empty) empty.classList.remove('hidden');
       }
     }
@@ -2324,8 +2334,12 @@
     if (onlineEl) onlineEl.textContent = browseData.online;
     if (peakEl) peakEl.textContent = browseData.peak;
 
-    browseModal.querySelectorAll('.browse-open').forEach(btn => {
-      btn.addEventListener('click', () => { window.location.href = '/app?channel=' + encodeURIComponent(btn.dataset.slug); });
+    browseModal.querySelectorAll('.browse-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('.browse-join')) return;
+        const openBtn = item.querySelector('.browse-open');
+        if (openBtn) window.location.href = '/app?channel=' + encodeURIComponent(openBtn.dataset.slug);
+      });
     });
     browseModal.querySelectorAll('.browse-join').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2354,12 +2368,6 @@
       });
     });
 
-    // Update sort arrows
-    browseModal.querySelectorAll('th[data-bsort]').forEach(th => {
-      const arrow = th.querySelector('.bsort-arrow');
-      if (th.dataset.bsort === browseSortKey) arrow.textContent = browseSortDir === 1 ? '▲' : '▼';
-      else arrow.textContent = '⬍';
-    });
   }
 
   if (browseModal) {
@@ -2367,12 +2375,6 @@
     const filterEl = document.getElementById('browse-filter');
     if (searchEl) searchEl.addEventListener('input', renderBrowse);
     if (filterEl) filterEl.addEventListener('change', renderBrowse);
-    browseModal.querySelectorAll('th[data-bsort]').forEach(th => {
-      th.addEventListener('click', () => {
-        if (browseSortKey === th.dataset.bsort) browseSortDir *= -1;
-        else { browseSortKey = th.dataset.bsort; browseSortDir = browseSortKey === 'members' ? -1 : 1; }
-        renderBrowse();
-      });
-    });
+
   }
 })();

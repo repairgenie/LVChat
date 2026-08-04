@@ -654,56 +654,56 @@ function member_html(array $m, bool $online): string {
   <!-- Channel browser modal -->
   <div id="browse-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/70" data-browse-close></div>
-    <div class="relative card w-[min(96vw,900px)] shadow-2xl flex flex-col" style="max-height:85vh">
-      <div class="px-5 py-4 border-b border-discord-700 flex items-center justify-between shrink-0">
+    <div class="relative bg-discord-800 rounded-lg shadow-2xl w-[min(96vw,900px)] flex flex-col" style="max-height:85vh">
+      <div class="px-6 py-5 border-b border-discord-700 flex items-center justify-between shrink-0">
         <div>
-          <h2 class="text-lg font-bold text-white">Channel browser</h2>
-          <p class="text-xs text-discord-400 mt-0.5">Public channels on <?= h($site) ?>. Private channels are hidden.</p>
+          <h2 class="text-xl font-bold text-white">Channel Browser</h2>
+          <p class="text-sm text-discord-400 mt-1">Discover public channels on <?= h($site) ?></p>
         </div>
-        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-xl leading-none p-1">&times;</button>
+        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center rounded hover:bg-discord-700">&times;</button>
       </div>
-      <div class="px-5 py-3 border-b border-discord-700 flex flex-wrap gap-3 items-center shrink-0">
-        <div class="flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-green-500"></span>
-          <span class="text-sm text-white font-semibold" id="browse-online">0</span>
-          <span class="text-xs text-discord-400">online</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-          <span class="text-sm text-white font-semibold" id="browse-peak">0</span>
-          <span class="text-xs text-discord-400">peak</span>
-        </div>
-        <div class="ml-auto flex gap-2">
-          <input id="browse-search" class="input w-52 !py-1.5 text-sm" placeholder="Search name or topic…" autocomplete="off">
-          <select id="browse-filter" class="input w-36 !py-1.5 text-sm">
-            <option value="all">All channels</option>
-            <option value="open">Not joined</option>
-            <option value="joined">Joined</option>
-          </select>
-        </div>
-      </div>
-      <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-5 space-y-4">
-        <div id="browse-my-section" class="hidden">
-          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-2">My Channels</div>
-          <table class="w-full text-sm"><thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700 select-none">
-            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="name">Channel <span class="bsort-arrow">⬍</span></th>
-            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="topic">Topic <span class="bsort-arrow">⬍</span></th>
-            <th class="px-3 py-2 cursor-pointer hover:text-white text-right" data-bsort="members">Users <span class="bsort-arrow">⬍</span></th>
-            <th class="px-3 py-2 text-right">Action</th>
-          </tr></thead><tbody id="browse-my-tbody"></tbody></table>
-        </div>
-        <div>
-          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-2 flex items-center justify-between">
-            <span>All public channels</span>
-            <span id="browse-count" class="text-discord-500 font-normal"></span>
+      <div class="px-6 py-4 border-b border-discord-700 bg-discord-750/50 shrink-0">
+        <div class="flex flex-wrap gap-4 items-center">
+          <div class="flex items-center gap-3 px-4 py-2 bg-discord-800 rounded-lg">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-green-500 shadow-lg shadow-green-500/50"></span>
+              <span class="text-sm font-semibold text-white" id="browse-online">0</span>
+              <span class="text-xs text-discord-400">online</span>
+            </div>
           </div>
-          <table class="w-full text-sm"><thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700 select-none">
-            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="name">Channel <span class="bsort-arrow">⬍</span></th>
-            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="topic">Topic <span class="bsort-arrow">⬍</span></th>
-            <th class="px-3 py-2 cursor-pointer hover:text-white text-right" data-bsort="members">Users <span class="bsort-arrow">⬍</span></th>
-            <th class="px-3 py-2 text-right">Action</th>
-          </tr></thead><tbody id="browse-tbody"></tbody></table>
-          <div id="browse-empty" class="hidden py-6 text-center text-discord-500 text-sm">No channels found.</div>
+          <div class="flex items-center gap-3 px-4 py-2 bg-discord-800 rounded-lg">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50"></span>
+              <span class="text-sm font-semibold text-white" id="browse-peak">0</span>
+              <span class="text-xs text-discord-400">peak</span>
+            </div>
+          </div>
+          <div class="ml-auto flex gap-3">
+            <input id="browse-search" class="input w-64 !py-2 text-sm" placeholder="Search channels…" autocomplete="off">
+            <select id="browse-filter" class="input w-40 !py-2 text-sm">
+              <option value="all">All channels</option>
+              <option value="open">Not joined</option>
+              <option value="joined">Joined</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-6 py-5 space-y-6">
+        <div id="browse-my-section" class="hidden">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs font-bold uppercase tracking-wider text-blurple">My Channels</span>
+          </div>
+          <div id="browse-my-list" class="space-y-2"></div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-bold uppercase tracking-wider text-discord-400">All Public Channels</span>
+            <span id="browse-count" class="text-xs text-discord-500"></span>
+          </div>
+          <div id="browse-list" class="space-y-2"></div>
+          <div id="browse-empty" class="hidden py-12 text-center">
+            <div class="text-discord-500 text-sm">No channels found</div>
+          </div>
         </div>
       </div>
     </div>
