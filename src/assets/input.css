@@ -63,6 +63,13 @@
 /* The chat app is always a full-viewport fixed layer. */
 body.chat-app { position: fixed; inset: 0; overflow: hidden; }
 
+/* Mobile search reveal: animated fade-in on small screens only. */
+@media (max-width: 767.98px) {
+  #search-input { transition: opacity .18s ease, transform .18s ease; }
+  #search-input.search-open { display: block !important; opacity: 1; transform: translateY(0); pointer-events: auto; }
+  #search-input:not(.search-open) { opacity: 0; transform: translateY(-6px); pointer-events: none; }
+}
+
 /* Channel sidebar: off-canvas drawer on mobile, collapsible on desktop. */
 .sidebar { transition: transform .2s ease; }
 @media (min-width: 768px) {

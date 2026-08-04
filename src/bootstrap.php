@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 define('ROOT', dirname(__DIR__));
-define('LVC_VERSION', '1.6.0');
+define('LVC_VERSION', '1.7.0');
 
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
@@ -58,5 +58,6 @@ require ROOT . '/src/controllers/SoundController.php';
 require ROOT . '/src/controllers/WebhookController.php';
 require ROOT . '/src/controllers/SupportController.php';
 require ROOT . '/src/controllers/LegalController.php';
+require ROOT . '/src/controllers/PwaController.php';
 
 Database::init();

@@ -374,7 +374,7 @@
     bindMessageActions();
   }
 
-  function post(url, data, onOk) {
+  function post(url, data, onOk, onFail) {
     const fd = new FormData();
     fd.append('csrf', CSRF);
     fd.append('ajax', '1');
@@ -385,8 +385,76 @@
         if (j.error) { alert(j.error); return; }
         if (j.redirect) { window.location = j.redirect; return; }
         if (onOk) onOk(j);
+      })
+      .catch(() => { if (onFail) onFail(); });
+  }
+
+  // ── Offline detection + offline send queue (PWA) ─────────────────────────
+  // While disconnected the page keeps showing the last rendered messages, and
+  // anything the user types is queued (localStorage) and delivered in order as
+  // soon as the connection returns. The service worker handles serving the
+  // cached shell/history; this side just flips the banner and the queue.
+  const offlineBanner = document.getElementById('offline-banner');
+  let sendQueue = [];
+  try { sendQueue = JSON.parse(localStorage.getItem('lvc.offline.queue') || '[]'); } catch (e) { sendQueue = []; }
+  function persistQueue() {
+    try { localStorage.setItem('lvc.offline.queue', JSON.stringify(sendQueue)); } catch (e) {}
+  }
+  function enqueueSend(payload) {
+    sendQueue.push({ at: Date.now(), payload });
+    persistQueue();
+    showReply('📡 Offline — message queued. It will be delivered when you reconnect.');
+  }
+  function appendQueuedSent(item, j) {
+    // Only render a flushed message into the view it was sent to (the user may
+    // have navigated to another channel while the message sat in the queue).
+    if (!j.message) return;
+    const sentTo = item.payload.recipient || item.payload.channel;
+    if (item.payload.channel) {
+      if (CHANNEL === sentTo) appendMsg(j.message);
+    } else if (item.payload.recipient) {
+      if (DM && DM.toLowerCase() === String(sentTo).toLowerCase()) appendMsg(j.message);
+    }
+  }
+  function flushSendQueue() {
+    if (!sendQueue.length || !navigator.onLine) return;
+    const item = sendQueue[0];
+    const fd = new FormData();
+    fd.append('csrf', CSRF);
+    fd.append('ajax', '1');
+    Object.keys(item.payload).forEach((k) => fd.append(k, item.payload[k]));
+    fetch('/api/send', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
+      .then((r) => r.json().catch(() => ({ error: 'Server error' })))
+      .then((j) => {
+        if (j.redirect) { window.location = j.redirect; return; }
+        // Only drop the message once the server actually answered — a network
+        // blip keeps it queued, a server error surfaces it as undeliverable.
+        sendQueue.shift();
+        persistQueue();
+        if (j.error) {
+          showReply('⚠ A queued offline message could not be delivered: ' + j.error);
+          flushSendQueue();
+          return;
+        }
+        appendQueuedSent(item, j);
+        flushSendQueue();
+      })
+      .catch(() => {
+        // Still offline — the item stays at the front and retries when online.
       });
   }
+  function setOfflineUI(offline) {
+    document.body.classList.toggle('offline', offline);
+    if (offlineBanner) offlineBanner.classList.toggle('hidden', !offline);
+  }
+  function updateOnline() {
+    const off = !navigator.onLine;
+    setOfflineUI(off);
+    if (!off) flushSendQueue();
+  }
+  window.addEventListener('online', updateOnline);
+  window.addEventListener('offline', updateOnline);
+  updateOnline();
 
   // ── Sound alerts (channel messages + DMs) ────────────────────────────────
   // Data comes from data-sounds / data-sound-prefs / data-sound-overrides:
@@ -798,6 +866,9 @@
           }
         }
         clearPendingReply();
+      }, () => {
+        clearPendingReply();
+        enqueueSend(payload);
       });
     }
   });
@@ -1063,6 +1134,9 @@
         post('/api/send', payload, (j) => {
           if (j.message) appendMsg(j.message);
           gifClose();
+        }, () => {
+          gifClose();
+          enqueueSend(payload);
         });
       });
     });
@@ -1151,7 +1225,6 @@
     lightbox.querySelectorAll('[data-lightbox-close]').forEach((el) => el.addEventListener('click', closeLightbox));
     lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
   }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
 
   // ── Sidebar toggle (desktop collapse + mobile drawer) ─────────────────────
   (function () {
@@ -1177,7 +1250,6 @@
       }
     });
     if (backdrop) backdrop.addEventListener('click', closeSidebar);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSidebar(); });
     try {
       if (!isMobile() && localStorage.getItem('lvc.sidebar') === '0') {
         document.body.classList.add('sidebar-collapsed');
@@ -1294,7 +1366,6 @@
   function ctxHide() { if (ctxMenu) ctxMenu.classList.add('hidden'); }
   document.addEventListener('click', ctxHide);
   document.addEventListener('scroll', ctxHide, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ctxHide(); });
 
   function channelMenu(x, y, el) {
     const slug = el.dataset.ctxChannel;
@@ -1496,6 +1567,119 @@
     });
   }
 
+  // ── How to install modal (PWA) ─────────────────────────────────────────────
+  // Always offers the step-by-step guide; additionally, when the browser is
+  // installable (Chrome/Edge fire `beforeinstallprompt`) an "Install now" CTA
+  // appears at the top that triggers the native install flow.
+  const installModal = document.getElementById('install-modal');
+  const installNow = document.getElementById('install-now');
+  let deferredInstall = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstall = e;
+    if (installNow) installNow.classList.remove('hidden');
+  });
+  if (installNow) installNow.addEventListener('click', () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    deferredInstall.userChoice.then((choice) => {
+      if (choice.outcome === 'accepted' && installModal) installModal.classList.add('hidden');
+      deferredInstall = null;
+      if (installNow) installNow.classList.add('hidden');
+    }).catch(() => {});
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    if (installNow) installNow.classList.add('hidden');
+    if (installModal) installModal.classList.add('hidden');
+  });
+  const installBtn = document.getElementById('install-btn');
+  if (installBtn) installBtn.addEventListener('click', () => { if (installModal) installModal.classList.remove('hidden'); });
+  if (installModal) {
+    installModal.querySelectorAll('[data-install-close]').forEach((el) => el.addEventListener('click', () => installModal.classList.add('hidden')));
+    installModal.addEventListener('click', (e) => { if (e.target === installModal) installModal.classList.add('hidden'); });
+  }
+
+  // ── Header overflow dropdown (mobile) ───────────────────────────────────────
+  // On small screens the individual header buttons (Share, Mute, Embed, etc.)
+  // are hidden and replaced by a ⋮ dropdown that holds them plus the theme
+  // toggle (which is also hidden on mobile in the sidebar).
+  const hdrBtn = document.getElementById('header-menu-btn');
+  const hdrMenu = document.getElementById('header-menu');
+  function closeHdr() { if (hdrMenu) hdrMenu.classList.add('hidden'); }
+  if (hdrBtn) hdrBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (hdrMenu) hdrMenu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#header-menu-wrap')) closeHdr(); });
+  // Every item in the menu closes the dropdown once acted on.
+  if (hdrMenu) hdrMenu.addEventListener('click', (e) => {
+    if (e.target.closest('.dropdown-close')) closeHdr();
+  });
+
+  // Mobile search: reveal the (hidden) search input inside the header and
+  // focus it so the user can start typing immediately.
+  const mobileSearchBtn = document.getElementById('mobile-search');
+  if (mobileSearchBtn && searchInput) mobileSearchBtn.addEventListener('click', () => {
+    searchInput.classList.add('search-open');
+    searchInput.focus();
+  });
+  // Close the mobile search on Escape or when the search-results panel closes.
+  if (searchInput) searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && searchInput.classList.contains('search-open')) {
+      searchInput.classList.remove('search-open');
+    }
+  });
+
+  // Header theme toggle (mobile dropdown).
+  const hdrTheme = document.getElementById('header-theme-toggle');
+  if (hdrTheme) hdrTheme.addEventListener('click', () => {
+    const light = document.documentElement.classList.toggle('light');
+    const theme = light ? 'light' : 'dark';
+    try { localStorage.setItem('lvc.theme', theme); } catch (e) {}
+    setThemeIcon();
+    post('/api/profile', { theme }, () => {});
+  });
+
+  // ── Mute button (mobile menu copy) ────────────────────────────────────────
+  const muteBtnM = document.getElementById('mute-btn-m');
+  if (muteBtnM) {
+    // Sync state from the main mute button.
+    const syncMuteM = () => {
+      const m = muteBtn && muteBtn.dataset.mode;
+      if (m) muteBtnM.dataset.mode = m;
+      muteBtnM.textContent = m === 'muted' ? '🔕 Unmute' : m === 'mentions' ? '🔔 Mentions only' : '🔕 Mute';
+    };
+    syncMuteM();
+    muteBtnM.addEventListener('click', () => {
+      const order = ['all', 'mentions', 'muted'];
+      const cur = muteBtnM.dataset.mode || 'all';
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      if (CHANNEL) {
+        post('/api/channel/notify', { channel: CHANNEL, mode: next }, (j) => {
+          if (j.mode) {
+            muteBtnM.dataset.mode = j.mode;
+            if (muteBtn) { muteBtn.dataset.mode = j.mode; syncMuteM(); }
+          }
+        });
+      }
+    });
+  }
+
+  // Share / Part / Install / Create / Browse (mobile menu mirrors).
+  const shareBtnM = document.getElementById('share-btn-m');
+  if (shareBtnM) shareBtnM.addEventListener('click', () => {
+    if (shareBtn) shareBtn.click();
+    else if (CHANNEL) {
+      const url = window.location.origin + '/c/' + encodeURIComponent(CHANNEL);
+      copyText(url, (ok) => { showReply(ok ? 'Link copied.' : 'Copy failed.'); });
+    }
+  });
+  const partBtnM = document.getElementById('part-btn-m');
+  if (partBtnM) partBtnM.addEventListener('click', () => { if (partBtn) partBtn.click(); });
+  const installBtnM = document.getElementById('install-btn-m');
+  if (installBtnM) installBtnM.addEventListener('click', () => { if (installModal) installModal.classList.remove('hidden'); });
+
   // ── Load earlier messages (pagination) ───────────────────────────────────
   // Shared: render a page of OLDER messages (ascending id order) as one block
   // and insert it above the first visible message, anchored so the newest row
@@ -1582,6 +1766,9 @@
   }
   function hideSearchResults() {
     if (searchResults) searchResults.classList.add('hidden');
+    // On mobile the search input itself was revealed via the search-open class;
+    // close it again once the results panel is dismissed.
+    if (searchInput) searchInput.classList.remove('search-open');
   }
   if (searchInput) {
     searchInput.addEventListener('input', () => {
@@ -1594,9 +1781,6 @@
           .then((j) => { if (searchInput.value.trim()) showSearchResults(j); })
           .catch(() => {});
       }, 250);
-    });
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { hideSearchResults(); searchInput.blur(); }
     });
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#search-input') && !e.target.closest('#search-results')) hideSearchResults();
@@ -1642,6 +1826,30 @@
       tryLoad();
     }
   })();
+
+  // ── Unified Escape handler ─────────────────────────────────────────────────
+  // A single listener replaces the five individual document-level Escape
+  // handlers (lightbox, sidebar, context menu, install modal, search results)
+  // so that only the most relevant open panel is dismissed per keypress:
+  //   1. search-results dropdown  →  2. header dropdown  →  3. lightbox
+  //   4. sidebar backdrop  →  5. context menu  →  6. install modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (searchResults && !searchResults.classList.contains('hidden')) {
+      hideSearchResults();
+      if (searchInput) searchInput.blur();
+    } else if (hdrMenu && !hdrMenu.classList.contains('hidden')) {
+      closeHdr();
+    } else if (lightbox && !lightbox.classList.contains('hidden')) {
+      closeLightbox();
+    } else if (document.body.classList.contains('sidebar-open')) {
+      closeSidebar();
+    } else if (ctxMenu && !ctxMenu.classList.contains('hidden')) {
+      ctxHide();
+    } else if (installModal && !installModal.classList.contains('hidden')) {
+      installModal.classList.add('hidden');
+    }
+  });
 
   // ── Boot ───────────────────────────────────────────────────────────────────
   scrollBottom();

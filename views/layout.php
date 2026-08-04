@@ -14,6 +14,7 @@
   })();
   </script>
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
+  <?php require ROOT . '/views/partials/pwa.php'; ?>
 </head>
 <body class="bg-discord-900 text-discord-200 antialiased min-h-screen flex flex-col" data-csrf="<?= h(Csrf::token()) ?>">
   <header class="bg-discord-950/60 border-b border-discord-800">

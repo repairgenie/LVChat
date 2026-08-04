@@ -67,6 +67,17 @@ services from Anope.
   privileges (voice/kick/ban/`+imtk`) but not op-level modes (`+l`, `+C`, `+p`, `+s`, `+o`)
 - **Admin dashboard** — users, channels, global bans (kline/gline/zline/shun/qline),
   spam filters, MOTD, server settings, audit log, `/oper` privilege elevation
+- **Progressive Web App** — installable to the home screen / Start menu / dock on
+  desktop and mobile (manifest + icons + service worker, always on). Installed
+  apps open in their own window, load instantly, and keep previously viewed
+  channels/DMs readable **offline**; "Load earlier messages" works from cache
+  too. Messages sent while offline are queued in the browser and delivered
+  automatically on reconnect, with an offline banner while disconnected. The
+  chat header's **⬇ How to install** button walks through each platform, and
+  offers a one-click **Install now** where the browser supports it. Only
+  read-only pages (`/app`, `/browse`, `/terms`, `/privacy`) are cached —
+  auth/admin/support pages and all other API calls are always fetched live, and
+  logging out wipes a shared device's cached views.
 
 ## Requirements
 
@@ -218,16 +229,23 @@ and sends messages from the UI.
 ## Layout
 
 ```
-public/          front controller + .htaccess + JS + sounds
+public/          front controller + .htaccess + JS + sounds + PWA (sw.js, manifest, icons, offline.html)
 src/             bootstrap, router, DB, auth, services (commands), controllers
 views/           layout, auth, chat app, browse, admin pages
 bin/deploy.sh    post-upload restore + sanity check
+bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/test.sh      run the full automated test suite
 tests/smoke.php  319 command/service assertions
 tests/http_test.php  122 HTTP assertions
 schema.sql       SQLite schema (applied on boot)
 data/            SQLite database (beside public/, never web-served)
 ```
+
+The **PWA layer** ships as committed files — `public/sw.js` (service worker),
+`public/assets/pwa/*.png` (icons, regenerable via `php bin/make-icons.php`),
+`public/offline.html` (offline fallback page), a `/manifest` route generated
+from the site name, and the `views/partials/pwa.php` head block. `bin/deploy.sh`
+verifies the service worker, manifest MIME type, and icons after every upload.
 
 ## Security notes
 

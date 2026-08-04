@@ -62,6 +62,9 @@ $router->post('/api/sound/override/remove', [SoundController::class, 'removeOver
 $router->get('/terms', [LegalController::class, 'terms']);
 $router->get('/privacy', [LegalController::class, 'privacy']);
 
+// Progressive Web App manifest (installed app metadata)
+$router->get('/manifest', [PwaController::class, 'manifest']);
+
 // Support tickets (registered users + staff)
 $router->get('/support', [SupportController::class, 'index']);
 $router->post('/support', [SupportController::class, 'create']);

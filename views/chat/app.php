@@ -199,6 +199,7 @@ function member_html(array $m, bool $online): string {
   })();
   </script>
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
+  <?php require ROOT . '/views/partials/pwa.php'; ?>
 </head>
 <body class="chat-app bg-discord-800 text-discord-200 antialiased flex"
       data-csrf="<?= h($csrf) ?>"
@@ -228,7 +229,7 @@ function member_html(array $m, bool $online): string {
       <span class="font-bold text-white text-sm truncate"><?= h($site) ?></span>
       <?php endif; ?>
       <div class="flex items-center gap-1.5">
-        <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1" title="Switch theme">🌙</button>
+        <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1 md:block hidden" title="Switch theme">🌙</button>
         <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications">
           🔔<span id="bell-dot" class="hidden absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center"></span>
         </button>
@@ -350,22 +351,30 @@ function member_html(array $m, bool $online): string {
       <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= h($channel['topic']) ?></span>
       <div class="relative ml-auto flex items-center gap-2">
         <input id="search-input" type="search" placeholder="Search chat…" autocomplete="off"
-               class="input w-40 md:w-56 !py-1 !text-xs" title="Search messages in your channels and DMs">
+               class="input w-40 md:w-56 !py-1 !text-xs hidden md:block" title="Search messages in your channels and DMs">
         <div id="search-results" class="hidden absolute top-9 right-0 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin"></div>
-        <button id="share-btn" class="btn-ghost text-xs" title="Copy shareable link">🔗 Share</button>
-        <button id="mute-btn" class="btn-ghost text-xs" data-mode="<?= h($notifyMode) ?>" title="<?= h($notifyMode === 'muted' ? 'Unmute channel' : ($notifyMode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel')) ?>"><?= $notifyMode === 'muted' ? '🔕 Muted' : ($notifyMode === 'mentions' ? '🔔 Mentions' : '🔔') ?></button>
-        <button type="button" data-embed class="btn-ghost text-xs" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
-        <button id="part-btn" class="btn-ghost text-xs text-red-400" title="Leave channel">✕ Leave</button>
+        <button id="share-btn" class="btn-ghost text-xs hidden md:flex" title="Copy shareable link">🔗 Share</button>
+        <button id="mute-btn" class="btn-ghost text-xs hidden md:flex" data-mode="<?= h($notifyMode) ?>" title="<?= h($notifyMode === 'muted' ? 'Unmute channel' : ($notifyMode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel')) ?>"><?= $notifyMode === 'muted' ? '🔕 Muted' : ($notifyMode === 'mentions' ? '🔔 Mentions' : '🔔') ?></button>
+        <button type="button" data-embed class="btn-ghost text-xs hidden md:flex" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
+        <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
+        <button id="part-btn" class="btn-ghost text-xs text-red-400 hidden md:flex" title="Leave channel">✕ Leave</button>
+        <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php elseif ($dm): ?>
       <span class="font-bold text-white text-sm"><?= h($dm['username']) ?></span>
       <span class="text-xs text-discord-400">Private message</span>
+      <div class="relative ml-auto flex items-center gap-2">
+        <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
+        <?php require ROOT . '/views/partials/header-menu.php'; ?>
+      </div>
       <?php else: ?>
       <span class="font-bold text-white text-sm"><?= h($site) ?></span>
       <span class="text-xs text-discord-400 truncate">You are not in any channel. Create one or browse the list.</span>
-      <div class="ml-auto flex items-center gap-2">
-        <a href="/browse" class="btn-primary text-xs">Browse channels</a>
-        <button id="create-channel-2" class="btn-ghost text-xs">＋ New channel</button>
+      <div class="relative ml-auto flex items-center gap-2">
+        <a href="/browse" class="btn-primary text-xs hidden md:flex">Browse channels</a>
+        <button id="create-channel-2" class="btn-ghost text-xs hidden md:flex">＋ New channel</button>
+        <button id="install-btn" class="btn-ghost text-xs hidden md:flex">⬇ How to install</button>
+        <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php endif; ?>
     </header>
@@ -634,6 +643,11 @@ function member_html(array $m, bool $online): string {
   <!-- DM arrival toast (shown when a DM lands while you are elsewhere) -->
   <div id="dm-toast" class="hidden fixed bottom-4 right-4 z-[150] w-80 max-w-[calc(100vw-2rem)] card border border-blurple/40 shadow-2xl"></div>
 
+  <!-- Offline banner (shown while the connection is down; PWA offline reading) -->
+  <div id="offline-banner" class="hidden fixed top-0 inset-x-0 z-[250] bg-amber-500/90 text-amber-950 text-center text-xs font-semibold py-1.5 px-4" role="status">
+    You're offline — showing saved messages. Anything you send is queued and delivered when you reconnect.
+  </div>
+
   <!-- Embed code modal -->
   <div id="embed-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/70" data-embed-close></div>
@@ -644,6 +658,52 @@ function member_html(array $m, bool $online): string {
       <div class="flex gap-2 mt-4">
         <button id="embed-copy" class="btn-primary flex-1 justify-center">Copy code</button>
         <button data-embed-close class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- How to install modal (PWA install instructions) -->
+  <div id="install-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-install-close></div>
+    <div class="relative card shadow-2xl w-[min(92vw,480px)] flex flex-col max-h-[80vh]">
+      <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
+        <h2 class="text-lg font-bold text-white">How to install <?= h($site) ?></h2>
+        <button type="button" data-install-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+      </div>
+      <div id="install-body" class="px-6 py-4 overflow-y-auto scrollbar-thin space-y-5 text-sm">
+        <button id="install-now" class="hidden btn-primary w-full justify-center">⬇ Install now</button>
+
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">Windows · Mac · Linux</div>
+          <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
+            <li><strong class="text-white">Chrome or Edge</strong> — click the <span class="text-discord-400">⭣ install</span> icon in the address bar, or open the <span class="text-discord-400">⋮</span> menu → <em>Install <?= h($site) ?></em>.</li>
+            <li>The app opens in its own window and shows up in your Start menu / dock / app launcher, just like a native app.</li>
+            <li><strong class="text-white">Firefox</strong> — desktop install support is limited; use Chrome or Edge for the one-click install.</li>
+            <li><strong class="text-white">Safari (Mac)</strong> — use <em>File → Add to Dock</em> to pin it like an app.</li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">Android</div>
+          <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
+            <li>Open <?= h($site) ?> in <strong class="text-white">Chrome</strong>.</li>
+            <li>Tap the <span class="text-discord-400">⋮</span> menu → <em>Install app</em> (or <em>Add to Home screen</em>).</li>
+            <li>An icon appears on your home screen and opens the chat full-screen, like a native app.</li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">iPhone · iPad</div>
+          <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
+            <li>Open <?= h($site) ?> in <strong class="text-white">Safari</strong>.</li>
+            <li>Tap the <span class="text-discord-400">Share</span> button at the bottom of the screen.</li>
+            <li>Tap <em>Add to Home Screen</em>, then <em>Add</em>.</li>
+          </ul>
+        </div>
+
+        <div class="rounded-lg bg-discord-850 border border-discord-700 px-3 py-2.5 text-xs text-discord-400">
+          <strong class="text-discord-200">Works offline:</strong> the app opens instantly and keeps the messages you've already viewed available without a connection. Anything you send while offline is queued and delivered automatically when you reconnect.
+        </div>
       </div>
     </div>
   </div>

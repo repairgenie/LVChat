@@ -54,6 +54,8 @@ echo "PHP version: $(php -v | head -1)"
 php -m | grep -qi 'pdo_sqlite' && echo "pdo_sqlite: OK" || { echo "ERROR: pdo_sqlite extension missing."; exit 1; }
 [ -f public/assets/js/app.js ] && echo "app.js: present" || { echo "ERROR: public/assets/js/app.js is missing."; exit 1; }
 [ -f public/assets/css/app.css ] && echo "app.css: present" || { echo "ERROR: public/assets/css/app.css is missing (run npm run build locally)."; exit 1; }
+[ -f public/sw.js ] && echo "sw.js: present" || { echo "ERROR: public/sw.js is missing (PWA service worker)."; exit 1; }
+[ -f public/assets/pwa/icon-192.png ] && [ -f public/assets/pwa/icon-512.png ] && echo "pwa icons: present" || { echo "ERROR: PWA icons are missing (public/assets/pwa/*)."; exit 1; }
 
 echo "== 4/4 HTTP sanity check =="
 PORT="${DEPLOY_PORT:-8095}"
@@ -79,12 +81,29 @@ check /login 200
 check /register 200
 check /api/version 200
 check /does-not-exist 404
+check /manifest 200
+check /sw.js 200
 
 # Verify the JS asset is actually JavaScript (a broken rewrite would serve HTML here).
 JSBODY=$(curl -s "http://127.0.0.1:$PORT/assets/js/app.js" || true)
 case "$JSBODY" in
     *'(() =>'*) echo "  ok   app.js served as JavaScript" ;;
-    *) echo "  BAD  app.js served non-JS content (is the file present and the rewrite sane?)"; FAIL=1 ;;
+    *)  echo "  BAD  app.js served non-JS content (is the file present and the rewrite sane?)"; FAIL=1 ;;
+esac
+
+# Verify the service worker is served as JavaScript too (needed for PWA install).
+SWBODY=$(curl -s "http://127.0.0.1:$PORT/sw.js" || true)
+case "$SWBODY" in
+    *"'use strict'"*|*CACHE_STATIC*) echo "  ok   sw.js served as JavaScript" ;;
+    *)  echo "  BAD  sw.js served non-JS content (service worker will not register)"; FAIL=1 ;;
+esac
+
+# Verify the PWA manifest is real JSON with a valid MIME type.
+MANIFEST=$(curl -s -D- "http://127.0.0.1:$PORT/manifest" || true)
+MANIFEST_CT=$(printf '%s' "$MANIFEST" | tr -d '\r' | grep -i '^content-type:' | head -1)
+case "$MANIFEST_CT" in
+    *manifest+json*) echo "  ok   /manifest -> $MANIFEST_CT" ;;
+    *)  echo "  BAD  /manifest served as $MANIFEST_CT (wanted application/manifest+json)"; FAIL=1 ;;
 esac
 
 # Verify the CSS asset is actual CSS, not a rewritten HTML page.
