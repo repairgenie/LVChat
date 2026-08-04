@@ -57,6 +57,9 @@ of the Day) set by the admins. Typing **`/help`** lists every available command;
 `/info` shows server statistics. The site automatically creates a few default
 channels (`#general`, `#help`, `#staff`) on a new server.
 
+New users are **automatically joined to `#general`** on their first login, so
+you land in an active channel rather than an empty chat screen.
+
 ### 1.4 Who is the admin?
 
 Server administrators ("IRC Operators") are shown in **red** in message lists,
@@ -265,7 +268,27 @@ someone is in immediate danger, contact the authorities.
 
 ---
 
-## 5. Private messages (DMs)
+## 5. Friends
+
+Registered users can manage friends from the **Friends panel** in the right
+sidebar (above the member list) or from any user's profile page.
+
+- **Send a friend request** — click **Add Friend** on a user's profile, or use
+  the context menu. Guests cannot receive friend requests.
+- **Accept / Decline** — incoming requests appear at the top of the Friends
+  panel with Accept/Decline buttons, and also in the notification bell.
+- **Remove a friend** — click **Remove Friend** on their profile or cancel an
+  outgoing request with **Cancel Request**.
+- **Block / Unblock** — blocking a user removes any existing friendship and
+  prevents all private messages between you (in both directions). Use
+  **Block User** / **Unblock** on their profile. `/ignore <nick>` and
+  `/unignore <nick>` now delegate to the block system.
+- The Friends panel groups friends into **Online** and **Offline** sections,
+  shows a pending-request count badge, and clicking a friend opens a DM.
+
+---
+
+## 6. Private messages (DMs)
 
 - Start a DM by clicking a user's name in the member/online list, or with
   `/msg <nick> <message>` (aliases: `/pm`, `/query`).
@@ -275,13 +298,14 @@ someone is in immediate danger, contact the authorities.
 - **Messaging yourself** is allowed (an IRC hallmark) — handy for notes.
 - **Notices** (`/notice <nick> <message>`) are PMs that create no notification.
 - **Ignore** someone with `/ignore <nick>` — their DMs are dropped; `/unignore`
-  to reverse it. If you ignore someone, `/msg` to them tells you so.
-- The **notification bell** (top-left) aggregates mentions, DMs, invites, and
-  knocks; **Mark all read** clears them.
+  to reverse it. If you ignore someone, `/msg` to them tells you so. This now
+  uses the friend block system (see §5).
+- The **notification bell** (top-left) aggregates mentions, DMs, invites,
+  knocks, friend requests, and friend acceptances; **Mark all read** clears them.
 
 ---
 
-## 6. Your profile & settings
+## 7. Your profile & settings
 
 From the `⚙` menu next to your name in the sidebar, open **Profile & settings**
 (guests see their profile but no account forms — they have no password/vhost to
@@ -297,7 +321,7 @@ edit).
   rejoin with `/back`. While away, you appear offline to "online" lists and get the
   💤 symbol in member lists and profile.
 
-### 6.1 Notification sounds
+### 7.1 Notification sounds
 
 Audio alerts play in your browser when a message lands while you're looking
 elsewhere. Open your **Profile & settings** page (from the `⚙` menu) and scroll
@@ -318,18 +342,20 @@ to **Notification sounds**:
 Guests get the default sounds automatically but can't change them. Any sound the
 admin uploads is available to everyone — you can't upload your own.
 
-### 6.2 Hide your online status
+### 7.2 Hide your online status
 
 `/set hide on` hides you from the online list; `/set hide off` unhides.
 
-### 6.3 Your public profile
+### 7.3 Your public profile
 
 Every user has a profile at `/u/<username>` (click any nick, or right-click →
-**View profile**). It shows your avatar initial, status (Guest / IRC Operator /
-Staff / Registered + online/away/bot), registration date, and the channels
-you're in. A ✕ button in the corner returns you to the chat.
+**View profile**). It shows your avatar initial, status (Guest / Helper /
+IRC Operator / Staff / Registered + online/away/bot), registration date, and
+the channels you're in. For other registered users, the profile also shows
+friend actions (Add Friend / Accept / Decline / Remove / Block / Unblock).
+A ✕ button in the corner returns you to the chat.
 
-### 6.4 Support & legal
+### 7.4 Support & legal
 
 - **Support tickets:** from the `⚙` account menu choose **Support** to open
   tickets. Registered users can create a ticket (subject + description), reply
@@ -344,7 +370,7 @@ you're in. A ✕ button in the corner returns you to the chat.
 
 ---
 
-## 7. Right-click context menus
+## 8. Right-click context menus
 
 Right-click anywhere on:
 
@@ -358,7 +384,7 @@ Right-click anywhere on:
 
 ---
 
-## 8. Command reference
+## 9. Command reference
 
 Every command can be typed into the chat input, prefixed with `/`. Commands are
 grouped below exactly as `/help` groups them. For one command's details run
@@ -367,7 +393,7 @@ grouped below exactly as `/help` groups them. For one command's details run
 > **Notation:** `<>` = required, `[]` = optional. Durations read like `30m`,
 > `2h`, `1d`, `1w`, `1mo`, `1y` (a bare number is minutes).
 
-### 8.1 Core commands
+### 9.1 Core commands
 
 | Command | Description |
 |---|---|
@@ -392,7 +418,7 @@ grouped below exactly as `/help` groups them. For one command's details run
 | `/share [#channel]` | Show the shareable link for a channel (and copy it) |
 | `/search <term>` | Search your channels and private messages (or use the search box in the chat header) |
 
-### 8.2 Channel operator commands
+### 9.2 Channel operator commands
 
 *Apply to the current channel (or the one you name). Levels gate each command.*
 Use them from the member right-click menu or by typing:
@@ -416,7 +442,7 @@ only grant up to your own level (half-op grants voice; op grants voice/half-op/
 op; admin grants to admin; founder grants to admin). Server admins may do
 anything.
 
-### 8.3 NickServ / ChanServ commands (serv)
+### 9.3 NickServ / ChanServ commands (serv)
 
 | Command | Description |
 |---|---|
@@ -449,7 +475,7 @@ anything.
 - `/chaninfo <#channel>` — channel facts (founder, members, visibility, reg).
 - `/forbid <#channel> [off]` — forbid the channel entirely (nobody may join).
 
-### 8.4 MemoServ
+### 9.4 MemoServ
 
 | Command | Description |
 |---|---|
@@ -461,7 +487,7 @@ anything.
 | `/memo set <notify\|silent>` | Preferred notification mode |
 | `/ms ...` | Alias of `/memo` |
 
-### 8.5 HostServ
+### 9.5 HostServ
 
 | Command | Description |
 |---|---|
@@ -471,7 +497,7 @@ anything.
 | `/vhost status` | Show your current vhost |
 | `/hs <command>` | Alias of `/vhost` |
 
-### 8.6 OperServ & o:lines
+### 9.6 OperServ & o:lines
 
 Operating (`/oper`) is **per-user** on this server. An administrator issues an
 **o:line** in **Admin → O-lines** (your nick + a private password + an operator
@@ -488,7 +514,7 @@ owner. See the **Admin Guide**.
 
 ---
 
-## 9. Moderation & etiquette tips
+## 10. Moderation & etiquette tips
 
 - Follow the channel's MOTD, topic and listed rules.
 - Keep private-channel share links to people you trust — anyone with one can join
@@ -499,7 +525,7 @@ owner. See the **Admin Guide**.
 
 ---
 
-## 10. Performance notes
+## 11. Performance notes
 
 - Messages are capped at 2000 characters.
 - Sends are rate-limited: more than ~12 messages/DMs in 5 seconds will get a

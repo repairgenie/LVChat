@@ -6,7 +6,7 @@
 ?>
 <div class="relative shrink-0" id="header-menu-wrap">
   <button id="header-menu-btn" class="btn-ghost !p-1.5 text-lg leading-none md:hidden" title="Channel options" aria-label="Open channel menu">⋮</button>
-  <div id="header-menu" class="hidden absolute top-10 right-0 w-60 card p-1.5 shadow-2xl z-50 space-y-0.5">
+  <div id="header-menu" class="hidden absolute top-10 right-0 w-60 card p-1.5 shadow-2xl z-[65] space-y-0.5">
     <!-- Search (mobile) — reveals the existing search input in-place -->
     <?php if ($channel): ?>
     <button class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200" id="mobile-search">🔍 Search</button>
@@ -23,6 +23,13 @@
     <button id="install-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">⬇ How to install</button>
     <div class="h-px bg-discord-700 my-1"></div>
     <button id="part-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-red-400">✕ Leave channel</button>
+    <?php elseif ($dm): ?>
+    <div class="h-px bg-discord-700 my-1"></div>
+    <button id="dm-profile-btn" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200" data-username="<?= h($dm['username']) ?>">👤 View profile</button>
+    <button id="dm-mute-btn" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200" data-user-id="<?= (int) $dm['id'] ?>">🔕 Mute</button>
+    <button id="dm-block-btn" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-red-400" data-username="<?= h($dm['username']) ?>">🚫 Block user</button>
+    <div class="h-px bg-discord-700 my-1"></div>
+    <button id="install-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">⬇ How to install</button>
     <?php else: ?>
     <div class="h-px bg-discord-700 my-1"></div>
     <button id="install-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">⬇ How to install</button>

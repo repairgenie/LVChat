@@ -23,6 +23,7 @@ $modeDefs = [
     't' => ['short' => 'topic lock', 'title' => 'Topic lock (+t): only operators may change the topic.'],
     'p' => ['short' => 'private', 'title' => 'Private (+p): hidden from /list, joinable via its share link.'],
     's' => ['short' => 'secret', 'title' => 'Secret (+s): hidden entirely; join by invitation only.'],
+    'L' => ['short' => 'no-log', 'title' => 'No logging (+L): messages in this channel are not recorded in the server archive (opers only).'],
 ];
 $modeState = $channel ? [
     'i' => (int) $channel['invite_only'] === 1,
@@ -33,6 +34,7 @@ $modeState = $channel ? [
     't' => (int) $channel['topic_locked'] === 1,
     'p' => ($channel['visibility'] ?? '') === 'private',
     's' => ($channel['visibility'] ?? '') === 'secret',
+    'L' => (int) ($channel['no_logging'] ?? 0) === 1,
 ] : [];
 $canManageModes = $myLevelWeight >= 3 || $user['role'] === 'admin';
 
@@ -169,7 +171,9 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         . ' data-ctx-channel-name="' . h($c['name']) . '"'
         . ' data-owned="' . $owned . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
-        . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis . '</a>';
+        . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis
+        . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>'
+        . '</a>';
 }
 
 function member_html(array $m, bool $online): string {
@@ -178,10 +182,11 @@ function member_html(array $m, bool $online): string {
     $color = $m['role'] === 'admin' ? 'text-red-400' : ($online ? level_color($m['level']) : 'text-discord-400');
     $roleStyle = ($m['role'] !== 'admin' && !empty($m['role_color'])) ? ' style="color:' . h($m['role_color']) . '"' : '';
     $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
-    return '<a href="/app?dm=' . h(rawurlencode($m['username'])) . '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ' . $color . '"' . $roleStyle . ' data-username="' . h($m['username']) . '" data-level="' . h($m['level']) . '">
+    return '<a href="/app?dm=' . h(rawurlencode($m['username'])) . '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ' . $color . '"' . $roleStyle . ' data-username="' . h($m['username']) . '" data-user-id="' . (int) $m['id'] . '" data-level="' . h($m['level']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">
         <span class="text-[10px] font-bold w-3">' . h(level_symbol($m['level'])) . '</span>
         ' . avatar_img($m, 'w-6 h-6 rounded-full') . '
-        <span class="truncate">' . h($m['username']) . $guestTag . '</span>' . ($m['away'] ? '<span class="text-xs" title="' . h($m['away']) . '">💤</span>' : '') . $badge . '</a>';
+        <span class="truncate">' . h($m['username']) . $guestTag . '</span>' . ($m['away'] ? '<span class="text-xs" title="' . h($m['away']) . '">💤</span>' : '') . $badge
+        . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button></a>';
 }
 ?>
 <!DOCTYPE html>
@@ -291,11 +296,13 @@ function member_html(array $m, bool $online): string {
           <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = $d['away'] === null && !empty($d['last_seen']) && (time() - strtotime($d['last_seen'] . ' UTC')) <= 90; $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
           <a href="/app?dm=<?= h(rawurlencode($d['username'])) ?>"
              data-ctx-user="<?= h($d['username']) ?>"
+             data-user-id="<?= (int) ($d['id'] ?? 0) ?>"
              data-guest="<?= !empty($d['guest']) ? '1' : '0' ?>"
              class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $dmName === $d['username'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?> <?= $dOnline ? '' : 'italic opacity-70' ?>">
             <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : ($dOnline ? 'bg-green-500' : 'bg-discord-500') ?>"></span>
             <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?> <?= $unreadCls ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
             <?php if ($ucnt): ?><span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><?= $ucnt > 99 ? '99+' : $ucnt ?></span><?php endif; ?>
+            <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
           </a>
           <?php endforeach; ?>
         </div>
@@ -305,8 +312,9 @@ function member_html(array $m, bool $online): string {
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400">Online</div>
         <div class="mt-1 space-y-0.5">
           <?php foreach ($onlineUsers as $ou): ?>
-          <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" data-guest="<?= !empty($ou['guest']) ? '1' : '0' ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
+          <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" data-user-id="<?= (int) ($ou['id'] ?? 0) ?>" data-guest="<?= !empty($ou['guest']) ? '1' : '0' ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
             <span class="w-2 h-2 rounded-full bg-green-500"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
+            <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
           </a>
           <?php endforeach; ?>
           <?php if (!$onlineUsers): ?><div class="px-2 py-1 text-xs text-discord-500">Nobody online</div><?php endif; ?>
@@ -349,7 +357,7 @@ function member_html(array $m, bool $online): string {
 
   <!-- ── Center: chat ── -->
   <section class="flex-1 flex flex-col min-w-0 min-h-0 bg-discord-750">
-    <header class="h-12 pl-2 pr-4 border-b border-discord-800 bg-discord-750 flex items-center gap-3 shadow-sm shrink-0">
+    <header class="min-h-12 pl-2 pr-4 border-b border-discord-800 bg-discord-750 flex items-center gap-3 shadow-sm shrink-0">
       <button id="sidebar-toggle" class="btn-ghost !p-1.5 text-lg leading-none" title="Toggle channel list" aria-label="Toggle channel list">☰</button>
       <?php if ($channel): ?>
       <span class="font-bold text-white text-sm"><?= h($channel['name']) ?></span>
@@ -530,10 +538,11 @@ function member_html(array $m, bool $online): string {
       <div class="px-2 pt-2 pb-1">
         <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — <?= count($onlineFriends) ?></div>
         <?php foreach ($onlineFriends as $f): ?>
-        <a href="/app?dm=<?= h(rawurlencode($f['username'])) ?>" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="<?= h($f['username']) ?>">
+        <a href="/app?dm=<?= h(rawurlencode($f['username'])) ?>" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="<?= h($f['username']) ?>" data-user-id="<?= (int) $f['id'] ?>" data-friend="1">
           <span class="w-2 h-2 rounded-full <?= $f['away'] ? 'bg-amber-400' : 'bg-green-500' ?>"></span>
           <?= avatar_img(['username' => $f['username'], 'avatar' => $f['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
           <span class="truncate"><?= h($f['username']) ?></span>
+          <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
         </a>
         <?php endforeach; ?>
       </div>
@@ -542,10 +551,11 @@ function member_html(array $m, bool $online): string {
       <div class="px-2 pt-2 pb-1">
         <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — <?= count($offlineFriends) ?></div>
         <?php foreach ($offlineFriends as $f): ?>
-        <a href="/app?dm=<?= h(rawurlencode($f['username'])) ?>" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="<?= h($f['username']) ?>">
+        <a href="/app?dm=<?= h(rawurlencode($f['username'])) ?>" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="<?= h($f['username']) ?>" data-user-id="<?= (int) $f['id'] ?>" data-friend="1">
           <span class="w-2 h-2 rounded-full bg-discord-500"></span>
           <?= avatar_img(['username' => $f['username'], 'avatar' => $f['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
           <span class="truncate"><?= h($f['username']) ?></span>
+          <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
         </a>
         <?php endforeach; ?>
       </div>

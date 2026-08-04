@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS channels (
   topic_locked INTEGER NOT NULL DEFAULT 1,
   forbidden INTEGER NOT NULL DEFAULT 0,
   censor INTEGER NOT NULL DEFAULT 0,
+  no_logging INTEGER NOT NULL DEFAULT 0,
   successor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registered_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

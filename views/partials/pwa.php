@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="<?= h(mb_substr(config_get('site_name', 'LVChat') ?: 'LVChat', 0, 30)) ?>">
 <meta name="description" content="IRC-style web chat">
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
 <link rel="icon" href="/assets/pwa/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="/assets/pwa/apple-touch-icon.png">
 <script>

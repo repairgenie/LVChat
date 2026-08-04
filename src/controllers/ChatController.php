@@ -62,9 +62,9 @@ final class ChatController
             [$user['id'], $user['id']]
         );
         $onlineUsers = Database::all(
-            "SELECT username, role, guest FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND away IS NULL
+            "SELECT id, username, role, guest FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND away IS NULL
              UNION ALL
-             SELECT nick, 'user', 1 FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
+             SELECT id, nick, 'user', 1 FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
              ORDER BY username"
         );
         $motd = (string) config_get('motd', '');

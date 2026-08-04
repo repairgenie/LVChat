@@ -12,6 +12,7 @@ services from Anope.
 - **Admin account tools** — admins create accounts manually (auto-generated password shown once, optional welcome email), or **invite** people by email with a sign-up link that works even when open registration is closed; pending invites can be re-sent or revoked, and any account can be permanently **deleted** (owned channels pass on; the log archive keeps history). **Admin → Invites**, **Admin → Users**.
 - **Email (SMTP)** — a dependency-free SMTP client configured under **Admin → Settings** (host, port, STARTTLS/SSL, auth, from address) with a one-click **Send test email**; used for invite and welcome emails
 - **Channels** — create, register/deregister (temp channels vanish when empty, founder passes on), public/private/secret, invite-only, keyed, moderated, member limits, topics, ban lists, AKICK, access lists
+- **Friends** — registered users send/accept/decline friend requests, remove friends, block/unblock users; the right sidebar shows a Friends panel with online/offline grouping, pending requests with accept/decline buttons, and a request count badge; friend requests and acceptances appear in the notification bell; `/ignore` and `/unignore` now delegate to the friend block system
 - **Admin tools** — see every user's IP, ban by nick or IP/CIDR with duration and reason (kline/gline/zline/shun), manage the bad-word filter (censor to `****` or block the whole message with a ChanServ notice) via **Admin → Bad words**, per-channel `+C` flag, and a clickable mode bar with tooltips above each channel
 - **Admin presence** — operators' messages and nicks render in red throughout the chat and member lists
 - **Private messages** — `/msg`, notices, ignore list, unread badges, read receipts,
@@ -58,7 +59,18 @@ services from Anope.
   and private message is written to an append-only archive visible in full to admins, with a
   per-channel participant list; nothing is ever removed
 - **Custom roles & permissions** — admins create roles (name, colour, permissions) and assign
-  them to users; the `oper` permission turns a regular user into an IRC Operator
+  them to users; the `oper` permission turns a regular user into an IRC Operator. Marking a
+  role as **Helper** gives its members a green nick and automatic half-op (`%`) in every channel
+- **Helper users** — a distinct tier between regular users and staff; helpers are grouped
+  separately in the member list, show green nicks, and receive automatic half-op in all channels
+- **Analytics dashboard** — comprehensive admin-only dashboard at **Admin → Analytics** with
+  time-range filtering (7d/30d/90d/all time), server-side SVG charts (no JS dependencies),
+  KPI cards (users, online now, peak online, messages, PMs, censor hits, open reports),
+  activity charts (messages/day, daily active users, PMs/day, registrations/day, most active
+  users/channels/DM senders, activity by hour/weekday), moderation charts (censor/spam-filter
+  leaders, matched words, filter hits/day, moderation action mix, ban types, report status/reasons),
+  health charts (audit events/day, support tickets/day, invite stats, webhook activity)
+- **Auto-join** — new users are automatically joined to `#general` on first login
 - **Incoming webhooks** — Discord-compatible `POST /api/webhooks/<token>` endpoints post into
   a channel as a bot (JSON or form-encoded, `content` + `username` + `avatar_url` + `embeds`).
   Point FriendsOfFlarum/webhooks (or GitHub/GitLab/Zapier) at one per channel. Manage from
@@ -66,7 +78,9 @@ services from Anope.
 - **Channel operator rules** — ops can promote other members to op; half-ops get standard IRC
   privileges (voice/kick/ban/`+imtk`) but not op-level modes (`+l`, `+C`, `+p`, `+s`, `+o`)
 - **Admin dashboard** — users, channels, global bans (kline/gline/zline/shun/qline),
-  spam filters, MOTD, server settings, audit log, `/oper` privilege elevation
+  spam filters, MOTD, server settings, audit log, `/oper` privilege elevation, analytics
+- **Footer links** — the browse and admin pages include a footer with project links
+  (GitHub, Buy me a coffee)
 - **Progressive Web App** — installable to the home screen / Start menu / dock on
   desktop and mobile (manifest + icons + service worker, always on). Installed
   apps open in their own window, load instantly, and keep previously viewed

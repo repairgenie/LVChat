@@ -57,6 +57,13 @@
     </div>
     <input type="checkbox" name="gifs_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['gifs_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
   </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
+      <div class="text-sm font-medium text-white">Chat logging</div>
+      <div class="text-xs text-discord-400">Record all channel and DM messages in the append-only archive (Admin → Logs). When off, no new messages are logged. Individual channels can also disable logging with /mode +L (opers only).</div>
+    </div>
+    <input type="checkbox" name="chat_logging_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['chat_logging_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
   <div>
     <label class="label">Giphy API key</label>
     <input class="input font-mono" name="giphy_api_key" value="<?= h($settings['giphy_api_key'] ?? '') ?>" placeholder="Get a free key at developers.giphy.com" autocomplete="off" spellcheck="false">

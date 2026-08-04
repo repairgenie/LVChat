@@ -650,11 +650,13 @@
     const unreadCls = d.unread ? ' font-semibold' + (isAdmin ? '' : ' text-white') : '';
     return `<a href="/app?dm=${encodeURIComponent(d.username)}"
          data-ctx-user="${esc(d.username)}"
+         data-user-id="${d.user_id || d.id || ''}"
          data-guest="${d.guest ? '1' : '0'}"
          class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'} ${online ? '' : 'italic opacity-70'}">
       <span class="w-2 h-2 rounded-full ${dot}"></span>
       <span class="truncate ${nameCls}${unreadCls}">${esc(d.username)}${guestTag}</span>
       ${d.unread ? `<span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">${d.unread > 99 ? '99+' : d.unread}</span>` : ''}
+      <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
     </a>`;
   }
 
@@ -853,20 +855,22 @@
       html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — ' + online.length + '</div>';
       online.forEach(f => {
         const dot = f.away ? 'bg-amber-400' : 'bg-green-500';
-        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="' + esc(f.username) + '">';
+        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="' + esc(f.username) + '" data-user-id="' + (f.id || '') + '" data-friend="1">';
         html += '<span class="w-2 h-2 rounded-full ' + dot + '"></span>';
         html += friendAvatar(f);
-        html += '<span class="truncate">' + esc(f.username) + '</span></a>';
+        html += '<span class="truncate">' + esc(f.username) + '</span>';
+        html += '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button></a>';
       });
       html += '</div>';
     }
     if (offline.length) {
       html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — ' + offline.length + '</div>';
       offline.forEach(f => {
-        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="' + esc(f.username) + '">';
+        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="' + esc(f.username) + '" data-user-id="' + (f.id || '') + '" data-friend="1">';
         html += '<span class="w-2 h-2 rounded-full bg-discord-500"></span>';
         html += friendAvatar(f);
-        html += '<span class="truncate">' + esc(f.username) + '</span></a>';
+        html += '<span class="truncate">' + esc(f.username) + '</span>';
+        html += '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button></a>';
       });
       html += '</div>';
     }
@@ -1428,12 +1432,29 @@
     const btn = e.target.closest('.msg-ctx-btn');
     if (!btn) return;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
     const msg = btn.closest('.msg[data-id]');
     if (msg) {
       const rect = btn.getBoundingClientRect();
       msgMenu(rect.left, rect.bottom + 4, msg);
     }
+  });
+
+  // ── Mobile context menu buttons on sidebar items ───────────────────────────
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.ctx-btn');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const parent = btn.closest('[data-ctx-channel],[data-ctx-user],.member[data-username]');
+    if (!parent) return;
+    const rect = btn.getBoundingClientRect();
+    const x = rect.left;
+    const y = rect.bottom + 4;
+    const ch = parent.closest('[data-ctx-channel]');
+    if (ch) { channelMenu(x, y, ch); return; }
+    const u = parent.closest('[data-ctx-user],.member[data-username]');
+    if (u) { userMenu(x, y, u); }
   });
 
   // ── Share / part / create ──────────────────────────────────────────────────
@@ -1612,9 +1633,18 @@
     }
     if (!isSelf) {
       items.push({ div: true });
-      if (!isGuest) {
+      const isFriend = el.dataset.friend === '1';
+      if (!isGuest && !isFriend) {
         items.push({ label: 'Add friend', onClick: () => post('/api/friend/request', { username: nick }, () => showReply('Friend request sent.')) });
       }
+      items.push({ label: 'Mute ' + nick, onClick: () => {
+        const uid = el.dataset.userId || el.closest('[data-user-id]')?.dataset.userId || '';
+        if (uid && parseInt(uid, 10) > 0) {
+          post('/api/sound/override', { target_user_id: uid, sound: '0' }, () => showReply('Muted ' + nick + '.'));
+        } else {
+          runCommand('/ignore ' + nick);
+        }
+      } });
       items.push({ label: 'Block ' + nick, danger: true, onClick: () => post('/api/friend/block', { username: nick }, () => showReply(nick + ' has been blocked.')) });
     }
     ctxShow(x, y, items);
@@ -1891,6 +1921,26 @@
   if (partBtnM) partBtnM.addEventListener('click', () => { if (partBtn) partBtn.click(); });
   const installBtnM = document.getElementById('install-btn-m');
   if (installBtnM) installBtnM.addEventListener('click', () => { if (installModal) installModal.classList.remove('hidden'); });
+
+  // ── DM header menu: profile, mute, block ──────────────────────────────────
+  const dmProfileBtn = document.getElementById('dm-profile-btn');
+  if (dmProfileBtn) dmProfileBtn.addEventListener('click', () => {
+    const nick = dmProfileBtn.dataset.username;
+    if (nick) window.location = '/u/' + encodeURIComponent(nick);
+  });
+  const dmMuteBtn = document.getElementById('dm-mute-btn');
+  if (dmMuteBtn) dmMuteBtn.addEventListener('click', () => {
+    const uid = parseInt(dmMuteBtn.dataset.userId || '0', 10);
+    if (!uid) return;
+    post('/api/sound/override', { target_user_id: uid, sound: '0' }, () => showReply('Muted.'));
+  });
+  const dmBlockBtn = document.getElementById('dm-block-btn');
+  if (dmBlockBtn) dmBlockBtn.addEventListener('click', () => {
+    const nick = dmBlockBtn.dataset.username;
+    if (nick && confirm('Block ' + nick + '?')) {
+      post('/api/friend/block', { username: nick }, () => showReply(nick + ' has been blocked.'));
+    }
+  });
 
   // ── Load earlier messages (pagination) ───────────────────────────────────
   // Shared: render a page of OLDER messages (ascending id order) as one block

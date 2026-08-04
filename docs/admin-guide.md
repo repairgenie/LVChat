@@ -50,8 +50,51 @@ sidebar in the chat app for admins.
   resets is recorded here.
 - **Banned / restricted users** — accounts currently marked banned or covered
   by an active global ban.
+- **Full analytics** links at the top navigate to the dedicated Analytics page.
 
-### 2.2 Users (`/admin/users`)
+### 2.2 Analytics (`/admin/analytics`)
+
+A comprehensive admin-only dashboard with server-side SVG charts (no JavaScript
+dependencies). Use the time-range selector (7d / 30d / 90d / All time) to filter
+all charts at once.
+
+**KPI cards** across the top: total users, online now, peak online (all-time
+record), messages (range), private messages (range), censor hits (range), open
+reports.
+
+**Active accounts** summary: distinct users active today, in 7 days, in 30
+days, plus guests active in 30 days.
+
+**Activity charts:**
+- Messages per day (line)
+- Daily active users — distinct people who spoke (line)
+- Private messages per day (line)
+- New registrations per day (line)
+- Most active users — channel messages + DMs (horizontal bars)
+- Activity by hour of day, UTC (vertical bars)
+- Activity by weekday, UTC (vertical bars)
+- Most active channels (horizontal bars)
+- Top DM senders (horizontal bars)
+- Least active accounts table (user, messages, PMs, registered, last seen, status)
+
+**Moderation charts:**
+- Censor leaders — users who tripped the bad-word filter (horizontal bars)
+- Spam-filter leaders (horizontal bars)
+- Most common matched words/patterns (horizontal bars)
+- Filter hits per day — bad words + spam filters (line)
+- Moderation action mix — kicks/bans/klines/etc. (donut)
+- Ban types — global + channel, all-time (donut)
+- Reports by status (donut)
+- Most reported users (horizontal bars)
+- Report reasons (horizontal bars)
+
+**Health & operations charts:**
+- Audit events per day (line)
+- Support tickets per day (line)
+- Account invites — used / pending / expired (donut)
+- Webhook activity — last-used timestamps per webhook
+
+### 2.3 Users (`/admin/users`)
 
 Search by username or email, then act. Columns show the user's role, an
 **account status** (active / **pending approval** / **suspended**), channel
@@ -91,7 +134,7 @@ credentials" is ticked, the credentials are also emailed (`user_create`).
 
 > The Users page lists up to 200 rows, ordered by registration date.
 
-### 2.3 Moderation queue (`/admin/moderation`, staff+admin)
+### 2.4 Moderation queue (`/admin/moderation`, staff+admin)
 
 A running record of moderation activity across the server, in two views:
 
@@ -106,7 +149,7 @@ A running record of moderation activity across the server, in two views:
 Use this with the user timeline (§2.5) to build a case file for a problem
 account before acting.
 
-### 2.4 Reports (`/admin/reports`, staff+admin)
+### 2.5 Reports (`/admin/reports`, staff+admin)
 
 User-submitted message reports (right-click → **Report message** in the chat).
 Each report **snapshots** the reported sender, message kind, and content —
@@ -119,7 +162,7 @@ even if the message is later edited or deleted.
   (`Report #id … — resolved: …`).
 - One report per message per reporter is enforced server-side.
 
-### 2.5 User detail — moderation history (`/admin/users/<id>`, staff+admin)
+### 2.6 User detail — moderation history (`/admin/users/<id>`, staff+admin)
 
 The staff-only timeline for one account: every action taken *against* it
 (bans, *lines, kicks, status changes, role changes, password resets, deletion,
@@ -127,7 +170,7 @@ report outcomes) **and** free-form **staff notes**, newest first, each with the
 acting staff member. The matching moderation events (filter hits, etc.) are
 shown alongside. Notes are append-only and invisible to the user.
 
-### 2.6 Channels (`/admin/channels`)
+### 2.7 Channels (`/admin/channels`)
 
 Search channels by name; ordered by membership. Each row links to the channel
 and to **logs** filtered to that channel (`/admin/logs?channel=#name`).
@@ -141,7 +184,7 @@ The **Actions** menu offers:
   (renders the channel off-limits server-side).
 - **Drop** — permanently delete the channel and its data stream.
 
-### 2.7 Bans
+### 2.9 Bans
 
 Two tables: **Global bans** (kline / gline / zline / shun / qline, channel-less)
 and **Channel bans**.
@@ -164,7 +207,7 @@ IP/zline bans) online matching users are force-kicked.
 Removing: **Remove** on any row (`ban_del`). Also possible in-chat with the
 `un*` commands (below).
 
-### 2.8 Spam filters
+### 2.10 Spam filters
 
 Rules that block messages by content. Fields:
 
@@ -178,7 +221,7 @@ new filters store the targets field as `cpntu`. The whole server toggle is
 **Settings → Spam filters**. If a filter hits, the message is rejected before
 it's stored.
 
-### 2.9 Bad words
+### 2.11 Bad words
 
 The bad-word (censor) filter with two actions per word:
 
@@ -193,11 +236,12 @@ bar). Actions:
 Words are matched against `[a-z0-9_]` boundaries. From the table you can add
 words (with an action), enable/disable them, and delete them.
 
-### 2.10 Roles & permissions
+### 2.12 Roles & permissions
 
 Role-based access lets you hand IRCop powers to trusted users without making
 them full admins. Each role has a **name**, a **colour** (applied to the user's
-name in the member list), and a set of **permissions**:
+name in the member list), a set of **permissions**, and an optional **Helper**
+flag:
 
 | Permission | Grants |
 |---|---|
@@ -208,6 +252,12 @@ name in the member list), and a set of **permissions**:
 | `manage_badwords` | Manage the bad-word filter |
 | `manage_roles` | Create / edit roles |
 
+**Helper flag:** ticking **Helper** on a role gives its members a **green nick**
+and automatic **half-op (`%`) in every channel**. Helpers are grouped separately
+in the member list (between Staff and Registered). This is a distinct tier for
+trusted community members who should have basic moderation privileges everywhere
+without being full staff.
+
 **Admins always have every permission.** Assign roles to users on the **Users**
 page (the role dropdown); deleting a role unassigns it from all members.
 
@@ -215,12 +265,12 @@ page (the role dropdown); deleting a role unassigns it from all members.
 > otherwise "normal" — the OperServ commands are enabled by the backend when
 > `Auth::isOper` is true.
 
-### 2.11 MOTD
+### 2.13 MOTD
 
 The **Message of the Day** shows at the top of every chat window (a multi-line
 textarea). Newlines render fine. Empty = no banner.
 
-### 2.12 Chat logs
+### 2.14 Chat logs
 
 The **append-only** archive. Every channel message, action, and system event
 (join/part/kick/ban/topic/mode/nick/system/notice), plus every PM, is written
@@ -240,7 +290,7 @@ lines, PMs rendered as `sendername -> recipient`). Guests are marked `(guest)`.
 - This is your forensics tool for moderation disputes — every day of every
   channel (public, private, staff, even long-deleted) is recoverable here.
 
-### 2.13 O-lines (`/admin/opers`)
+### 2.15 O-lines (`/admin/opers`)
 
 Per-user operator lines. Each row ties a **nickname** to an **operator class**
 and an enable flag. **Add o:line** takes:
@@ -257,7 +307,7 @@ changes are audited (`oper_add`, `oper_del`, `oper_toggle`).
 > There is **no shared operator password** on this server — `/oper` only works
 > for the account matching an enabled o:line.
 
-### 2.14 Operclasses
+### 2.16 Operclasses
 
 Permission bundles that define *what* an o:line can actually do. Each class has
 a **name**, a **colour**, and a set of **permissions**. Four are created and
@@ -292,7 +342,7 @@ operclass permissions**.
 > **operclass** of any active `/oper` session (`Auth::can`), so a user can
 > operate with a class *and* keep role-granted powers.
 
-### 2.15 Settings
+### 2.17 Settings
 
 | Setting | Meaning |
 |---|---|
@@ -321,7 +371,7 @@ stored one.
 > managed exclusively via **O-lines**. Settings writes appear in the audit log
 > (`settings_save`).
 
-### 2.16 Invites (`/admin/invites`)
+### 2.18 Invites (`/admin/invites`)
 
 Invite people by email instead of (or in addition to) open registration. Enter
 an email (plus an optional personal message) and a sign-up link is generated,
@@ -341,7 +391,7 @@ invited address. Clicking the emailed link is the proof of access, so an invite
 and still admit people you've invited. Invites are audited
 (`invite_create`, `invite_resend`, `invite_revoke`).
 
-### 2.17 Sound alerts (`/admin/sounds`)
+### 2.19 Sound alerts (`/admin/sounds`)
 
 Server-wide audio alerts for channel messages and DMs. Anything you upload here
 is offered to **every user** in their Profile → **Notification sounds** settings
@@ -358,7 +408,7 @@ is offered to **every user** in their Profile → **Notification sounds** settin
   are regenerated automatically on boot if missing, so there are always alerts
   to pick from. Upload actions are audited (`sound_add`, `sound_del`).
 
-### 2.18 Support tickets (`/admin/support`)
+### 2.20 Support tickets (`/admin/support`)
 
 Staff and admins manage the support inbox. The **＋ Open a ticket** button
 starts a ticket for either:
@@ -377,7 +427,7 @@ SMTP (see §6) — to the ticket's email for email-only tickets, or to the linke
 account's address. Users see their own tickets at `/support` in the app; an
 email-only ticket is never visible to another user.
 
-### 2.19 Terms & Privacy (`/admin/legal`)
+### 2.21 Terms & Privacy (`/admin/legal`)
 
 Edit the public **Terms of Service** and **Privacy Policy** with the full
 kitchen-sink rich-text editor — headings (H1–H6), bold/italic/underline/
@@ -393,7 +443,7 @@ horizontal rules, links, images, and tables. Both documents render at
 - **Reset to boilerplate** replaces the selected document with the built-in
   US-federal / Nevada boilerplate (COPPA, NRS 597.790/597.795).
 
-### 2.20 Webhooks (`/admin/webhooks`)
+### 2.22 Webhooks (`/admin/webhooks`)
 
 Discord-compatible incoming webhooks post into a channel as a bot — the full
 API is documented in **§6.5** below. This page manages them:

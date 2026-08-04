@@ -123,6 +123,15 @@ final class MessageService
     /** Append-only archive write (never deleted, survives channel lifecycle). */
     public static function logRow(?string $channelName, ?int $userId, ?string $username, string $kind, string $content, int $guest = 0): void
     {
+        if (config_get('chat_logging_enabled', '1') !== '1') {
+            return;
+        }
+        if ($channelName !== null) {
+            $noLog = Database::scalar('SELECT no_logging FROM channels WHERE name = ? COLLATE NOCASE', [$channelName]);
+            if ((int) $noLog === 1) {
+                return;
+            }
+        }
         Database::query(
             'INSERT INTO chat_logs (channel_name, user_id, username, kind, content, guest) VALUES (?, ?, ?, ?, ?, ?)',
             [$channelName, $userId, $username, $kind, $content, $guest]
@@ -132,6 +141,9 @@ final class MessageService
     /** Log a private message exchange into the archive (channel_name = "PM: nick"). */
     public static function logPm(int $senderId, string $senderName, string $recipientName, string $content, int $guest = 0): void
     {
+        if (config_get('chat_logging_enabled', '1') !== '1') {
+            return;
+        }
         Database::query(
             'INSERT INTO chat_logs (channel_name, user_id, username, kind, content, guest) VALUES (?, ?, ?, "pm", ?, ?)',
             ['PM: ' . $recipientName, $senderId, $senderName, $content, $guest]

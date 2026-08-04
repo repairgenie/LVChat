@@ -271,6 +271,7 @@ final class OpCommands
             '  +t  topic lock     — only operators may change the topic.',
             '  +p  private        — hidden from /list, joinable via share link.',
             '  +s  secret         — hidden entirely; join by invitation only.',
+            '  +L  no-log         — disable chat logging for this channel (opers only).',
             '  +b <mask>          — ban a mask; /mode -b <mask> removes it.',
             'Current: ' . self::currentModeString($ch),
         ];
@@ -302,6 +303,9 @@ final class OpCommands
         }
         if (($ch['visibility'] ?? '') === 'secret') {
             $on .= 's';
+        }
+        if ((int) ($ch['no_logging'] ?? 0) === 1) {
+            $on .= 'L';
         }
         return $on === '' ? 'no modes set' : '+' . $on;
     }
@@ -366,6 +370,12 @@ final class OpCommands
                 }
                 ChannelService::update($channel['id'], ['topic_locked' => $add ? 1 : 0]);
                 return ['channel_id' => $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ($add ? ' locked' : ' unlocked') . ' the topic (+' . ($add ? '' : '-') . 't) on ' . $name];
+            case 'L':
+                if (!Auth::isOper($user)) {
+                    return 'Only server operators can change +L.';
+                }
+                ChannelService::update($channel['id'], ['no_logging' => $add ? 1 : 0]);
+                return ['channel_id' => $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ($add ? ' disabled' : ' enabled') . ' chat logging (+L) on ' . $name];
             case 'p':
             case 's':
                 if (!$isOp) {
