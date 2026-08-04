@@ -403,12 +403,48 @@
   } catch (e) {}
 
   const audioCache = {};
+  // Sounds play through the Web Audio API: HTMLMediaElement output is
+  // throttled/suspended in background tabs, while AudioContext keeps playing
+  // once it has been unlocked by a user gesture. Decoded buffers are cached.
+  const bufferCache = {};
+  let audioCtx = null;
+  function ensureCtx() {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (Ctor) {
+      if (!audioCtx) {
+        try { audioCtx = new Ctor(); } catch (e) { audioCtx = null; }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
+  }
+  function startBuffer(buffer) {
+    const ctx = ensureCtx();
+    if (!ctx) return;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (e) {}
+  }
   function playSound(id) {
     const s = SOUND_DATA.sounds[id];
     if (!s) return;
-    let a = audioCache[id];
+    const ctx = ensureCtx();
+    if (!ctx) { htmlPlaySound(s.url); return; }
+    if (bufferCache[s.url]) { startBuffer(bufferCache[s.url]); return; }
+    fetch(s.url)
+      .then((r) => { if (!r.ok) throw new Error('load'); return r.arrayBuffer(); })
+      .then((buf) => ctx.decodeAudioData(buf))
+      .then((buffer) => { bufferCache[s.url] = buffer; startBuffer(buffer); })
+      .catch(() => htmlPlaySound(s.url));
+  }
+  // Fallback for browsers without the Web Audio API (or undecodable files).
+  function htmlPlaySound(url) {
+    let a = audioCache[url];
     if (!a) {
-      a = audioCache[id] = new Audio(s.url);
+      a = audioCache[url] = new Audio(url);
       a.preload = 'auto';
     }
     a.currentTime = 0;
@@ -424,10 +460,18 @@
   }
   // Browsers only allow audio after a user gesture; prime the pipeline once so
   // poll-driven plays work the moment the user clicks/types anywhere.
+  function primeAudio() {
+    try { ensureCtx(); } catch (e) {}
+    // Also unlock the HTML-audio fallback path.
+    try { const a = new Audio(); a.volume = 0; a.play().catch(() => {}); } catch (e) {}
+  }
   ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
-    document.addEventListener(ev, () => {
-      try { const a = new Audio(); a.volume = 0; a.play().catch(() => {}); } catch (e) {}
-    }, { once: true, passive: true });
+    document.addEventListener(ev, primeAudio, { once: true, passive: true });
+  });
+  // Gestures only fire while the tab is focused, so re-arm whenever the tab
+  // comes back into view — otherwise a backgrounded tab never unlocks audio.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) primeAudio();
   });
 
   // Background-channel messages: the server returns new real messages in every
@@ -523,11 +567,12 @@
     const online = !!d.last_seen && !d.away && (Date.now() - timeTs(d.last_seen)) < 90000;
     const dot = d.away ? 'bg-amber-400' : (online ? 'bg-green-500' : 'bg-discord-500');
     const nameCls = isAdmin ? 'text-red-400' : '';
+    const unreadCls = d.unread ? ' font-semibold' + (isAdmin ? '' : ' text-white') : '';
     return `<a href="/app?dm=${encodeURIComponent(d.username)}"
          data-ctx-user="${esc(d.username)}"
          class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'} ${online ? '' : 'italic opacity-70'}">
       <span class="w-2 h-2 rounded-full ${dot}"></span>
-      <span class="truncate ${nameCls}">${esc(d.username)}${guestTag}</span>
+      <span class="truncate ${nameCls}${unreadCls}">${esc(d.username)}${guestTag}</span>
       ${d.unread ? `<span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">${d.unread > 99 ? '99+' : d.unread}</span>` : ''}
     </a>`;
   }
@@ -594,16 +639,27 @@
     document.querySelectorAll('a[data-ctx-channel]').forEach((a) => {
       const slug = a.dataset.ctxChannel;
       const n = map[slug] || 0;
+      const isActive = a.classList.contains('bg-discord-600/50');
+      const nameEl = a.querySelector('span.truncate');
+      const visEl = a.querySelector('.chan-vis');
       let badge = a.querySelector('.unread-badge');
       if (n > 0) {
+        if (nameEl) nameEl.classList.add('font-semibold', 'text-white');
+        if (visEl) visEl.classList.remove('ml-auto');
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center';
           a.appendChild(badge);
         }
         badge.textContent = n > 99 ? '99+' : n;
-      } else if (badge) {
-        badge.remove();
+      } else {
+        if (nameEl) {
+          nameEl.classList.remove('font-semibold');
+          // Only drop the brightened color we added; the active link keeps its own.
+          if (!isActive) nameEl.classList.remove('text-white');
+        }
+        if (visEl) visEl.classList.add('ml-auto');
+        if (badge) badge.remove();
       }
     });
   }

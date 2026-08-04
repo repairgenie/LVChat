@@ -152,18 +152,19 @@ function channel_link(array $c, string $channelSlug, array $user): string {
     $owned = (int) ($c['owner_id'] ?? 0) === (int) $user['id'] ? '1' : '0';
     $unread = (int) ($c['unread'] ?? 0);
     $vis = $c['visibility'] !== 'public'
-        ? '<span class="text-[10px] text-discord-400 ml-auto">' . ($c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁')) . '</span>'
+        ? '<span class="chan-vis text-[10px] text-discord-400' . ($unread > 0 ? '' : ' ml-auto') . '">' . ($c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁')) . '</span>'
         : '';
     $badge = $unread > 0
         ? '<span class="unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">' . ($unread > 99 ? '99+' : $unread) . '</span>'
         : '';
+    $nameCls = $unread > 0 ? 'font-semibold text-white' : '';
     $cls = $channelSlug === $c['slug'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white';
     return '<a href="/app?channel=' . h(rawurlencode($c['slug'])) . '"'
         . ' data-ctx-channel="' . h($c['slug']) . '"'
         . ' data-ctx-channel-name="' . h($c['name']) . '"'
         . ' data-owned="' . $owned . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
-        . '<span class="truncate">' . h($c['name']) . '</span>' . ($vis ?: $badge) . '</a>';
+        . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $badge . $vis . '</a>';
 }
 
 function member_html(array $m, bool $online): string {
@@ -281,13 +282,13 @@ function member_html(array $m, bool $online): string {
           <?php if (!$dmPartners): ?>
           <div class="px-2 py-1 text-xs text-discord-500">No conversations yet</div>
           <?php endif; ?>
-          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = $d['away'] === null && !empty($d['last_seen']) && (time() - strtotime($d['last_seen'] . ' UTC')) <= 90; ?>
+          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = $d['away'] === null && !empty($d['last_seen']) && (time() - strtotime($d['last_seen'] . ' UTC')) <= 90; $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
           <a href="/app?dm=<?= h(rawurlencode($d['username'])) ?>"
              data-ctx-user="<?= h($d['username']) ?>"
              class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $dmName === $d['username'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?> <?= $dOnline ? '' : 'italic opacity-70' ?>">
             <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : ($dOnline ? 'bg-green-500' : 'bg-discord-500') ?>"></span>
-            <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
-            <?php if ($ucnt): ?><span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><?= $ucnt ?></span><?php endif; ?>
+            <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?> <?= $unreadCls ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
+            <?php if ($ucnt): ?><span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><?= $ucnt > 99 ? '99+' : $ucnt ?></span><?php endif; ?>
           </a>
           <?php endforeach; ?>
         </div>
