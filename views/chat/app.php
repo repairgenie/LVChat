@@ -185,7 +185,7 @@ function member_html(array $m, bool $online): string {
 <html lang="en" class="dark h-full" data-theme="<?= h($theme) ?>">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title><?= h($channel ? $channel['name'] : ($dm ? 'DM: ' . $dm['username'] : $site)) ?> · <?= h($site) ?></title>
   <script>
   (function () {
@@ -445,7 +445,7 @@ function member_html(array $m, bool $online): string {
       <?php endif; ?>
     </div>
 
-    <div class="px-4 pt-2 pb-4 shrink-0 bg-discord-750">
+    <div id="composer" class="px-4 pt-2 pb-4 shrink-0 bg-discord-750">
       <div id="autocomplete" class="hidden mb-2 card max-h-56 overflow-y-auto scrollbar-thin"></div>
       <div id="emoji-panel" class="hidden mb-2 card p-2 grid grid-cols-8 gap-1 max-h-56 overflow-y-auto scrollbar-thin"></div>
       <div id="gif-panel" class="hidden mb-2 card max-h-96 flex flex-col">

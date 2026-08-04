@@ -63,6 +63,12 @@
 /* The chat app is always a full-viewport fixed layer. */
 body.chat-app { position: fixed; inset: 0; overflow: hidden; }
 
+/* PWA safe areas: content fills behind the notch / home indicator when
+   viewport-fit=cover is set. env() falls to 0 outside standalone mode. */
+.chat-app header { padding-top: env(safe-area-inset-top); }
+.chat-app aside { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.chat-app #composer { padding-bottom: env(safe-area-inset-bottom); }
+
 /* Mobile search reveal: animated fade-in on small screens only. */
 @media (max-width: 767.98px) {
   #search-input { transition: opacity .18s ease, transform .18s ease; }

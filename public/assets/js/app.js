@@ -1620,15 +1620,15 @@
   // Mobile search: reveal the (hidden) search input inside the header and
   // focus it so the user can start typing immediately.
   const mobileSearchBtn = document.getElementById('mobile-search');
-  if (mobileSearchBtn && searchInput) mobileSearchBtn.addEventListener('click', () => {
-    searchInput.classList.add('search-open');
-    searchInput.focus();
+  if (mobileSearchBtn) mobileSearchBtn.addEventListener('click', () => {
+    const si = document.getElementById('search-input');
+    if (si) { si.classList.add('search-open'); si.focus(); }
   });
   // Close the mobile search on Escape or when the search-results panel closes.
-  if (searchInput) searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && searchInput.classList.contains('search-open')) {
-      searchInput.classList.remove('search-open');
-    }
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const si = document.getElementById('search-input');
+    if (si && si.classList.contains('search-open')) si.classList.remove('search-open');
   });
 
   // Header theme toggle (mobile dropdown).
