@@ -247,6 +247,12 @@ function member_html(array $m, bool $online): string {
       </nav>
       <?php endif; ?>
 
+      <nav class="px-2 pt-3">
+        <a href="https://buymeacoffee.com/georgethegeek" target="_blank" rel="noopener" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-amber-300 hover:bg-discord-600/40 hover:text-amber-200" title="Support the project">
+          <span class="text-discord-400">☕</span> Buy me a coffee
+        </a>
+      </nav>
+
       <?php if ($myChannels): ?>
       <nav class="px-2 pt-2 pb-1">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400">My Channels</div>

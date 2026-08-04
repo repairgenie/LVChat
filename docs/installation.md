@@ -1,9 +1,10 @@
 # LVChat — Installation & Administration Guide
 
-LVChat is a Discord-style IRC web chat written in **PHP + SQLite**. It needs no
-Node.js on the server and no internet access to a CDN: the compiled
-`public/assets/css/app.css` and `public/assets/js/app.js` ship with the app
-folder. A front-controller rewrite gives clean URLs (`/login`, `/app`,
+LVChat is a Discord-style IRC web chat written in **PHP + SQLite** (v1.6). It
+needs no Node.js on the server and no internet access to a CDN: the compiled
+`public/assets/css/app.css`, `public/assets/js/app.js`, and the vendored
+`public/assets/vendor/tiptap/tiptap-bundle.js` (the rich-text editor) ship with
+the app folder. A front-controller rewrite gives clean URLs (`/login`, `/app`,
 `/c/gaming`, `/admin/...`).
 
 This guide covers:
@@ -14,6 +15,8 @@ This guide covers:
 - The SQLite database and configuration
 - Upgrading and backing up
 - Verification and troubleshooting
+- Scaling knobs for shared hosting
+- The optional desktop launcher
 
 ---
 
@@ -22,26 +25,29 @@ This guide covers:
 | Component | Requirement |
 |---|---|
 | PHP | 8.1 or newer |
-| PHP extensions | `pdo_sqlite` (the SQLite driver) |
-| Node.js + npm | **Only on your own machine** if you edit views — the shipped CSS never needs rebuilding on the server |
-| Disk space | A few MB for the app; the SQLite database grows with chat history |
+| PHP extensions | `pdo_sqlite` (required). Optional, each is used best-effort and skipped when absent: **GD** (re-encodes/downscales image uploads and avatars to WebP), **cURL** (the Giphy GIF-search proxy falls back to a stream read), **`finfo`** (audio MIME validation on sound uploads), **FTS5** (full-text search; search falls back to `LIKE` without it) |
+| Node.js + npm | **Only on your own machine** if you edit views or the editor — `npm run build` compiles the Tailwind CSS *and* the Tiptap editor bundle; the server never needs Node |
+| Writable dirs | `data/` (the database) and the runtime upload folders under `public/` (created automatically on first request: `public/uploads/`, `public/assets/avatars/`) |
+| Disk space | A few MB for the app; the SQLite database and uploaded images grow with usage |
 
 Check your server before going further:
 
 ```bash
-php -v                # must report PHP 8.1+
-php -m | grep pdo_sqlite   # must list pdo_sqlite
+php -v                      # must report PHP 8.1+
+php -m | grep pdo_sqlite    # must list pdo_sqlite
+php -m | grep -E 'gd|curl'  # optional: GD + cURL enable downscaling + Giphy proxy
 ```
 
-> **Note:** `bin/deploy.sh` runs both checks automatically and aborts if
-> `pdo_sqlite` is missing.
+> **Note:** `bin/deploy.sh` runs the PHP/`pdo_sqlite`/asset checks automatically
+> and aborts if the essentials are missing.
 
 ---
 
 ## 2. Local development
 
-If you changed any view, rebuild the committed stylesheet first (this only needs
-Node on *your* machine):
+If you changed any view **or the editor**, rebuild the committed assets first
+(this only needs Node on *your* machine). `npm run build` compiles both the
+Tailwind stylesheet and the Tiptap editor bundle:
 
 ```bash
 npm install && npm run build
@@ -59,11 +65,17 @@ Open <http://127.0.0.1:8000> in a browser.
 
 - `src/Database.php` applies `schema.sql` (all tables + indexes) and creates the
   database at `data/chat.db` (or wherever `CHAT_DB` points).
-- On a *fresh* database it seeds `server_config` defaults and three channels:
-  `#general` (public), `#help` (public), `#staff` (staff only).
+- On a *fresh* database it seeds `server_config` defaults (site name, MOTD,
+  registration/approval flags, spam filter, uploads, reactions, GIF search,
+  webhooks, channel cap, presence throttle, poll interval, realtime mode) and
+  three channels: `#general` (public), `#help` (public), `#staff` (staff only).
+- The four default **operator classes** (`netadmin`, `serveradmin`, `globalop`,
+  `localop`) and three **sound alerts** (`Ding`, `Pop`, `Chime` — generated with
+  a dependency-free PHP WAV writer, no ffmpeg) are seeded automatically.
 - **The first account you register automatically becomes the server admin.**
-  Every later account is a regular user. (See the Admin Guide for promoting
-  others, or the `/oper` operator-password path.)
+  Every later account is a regular user — unless you enable admin approval (see
+  the Admin Guide). Registration (and joining as a guest) requires certifying
+  you are 18+.
 
 ---
 
@@ -97,6 +109,11 @@ scp -r ./ user@host:/srv/lvchat/
 The document root must be the **`public/` folder**. Only `public/` is web-accessible;
 `data/`, `src/`, `views/`, and `bin/` stay outside the document root and can
 never be fetched over HTTP.
+
+Two folders inside `public/` are **runtime writable** and created automatically
+on first use: `public/uploads/` (image uploads) and `public/assets/avatars/`.
+Make sure the PHP process can write to them (and to `data/`). The committed
+`public/assets/sounds/` holds the three default alert WAVs.
 
 #### Apache
 
@@ -207,6 +224,8 @@ Deploy check passed. The app is ready.
 - `public/` must be readable by the web user.
 - `data/` must be **writable** by the PHP process (SQLite needs to create and
   update the database file plus its `-wal`/`-shm` companions).
+- `public/uploads/` and `public/assets/avatars/` must be **writable** so image
+  uploads and avatars can be stored (they are created automatically on first use).
 - Never make `data/`, `src/`, `views/`, or `bin/` reachable over HTTP.
 
 ---
@@ -219,20 +238,26 @@ On a fresh database the following channels are created automatically:
 |---|---|---|
 | `#general` | public | everyone |
 | `#help` | public | everyone |
-| `#general` | public | everyone |
-| `#help` | public | everyone |
 | `#staff` | staff | admins and `staff`-role users only |
 
 The first registered account becomes the server admin — the second and later
-accounts are regular users. After that, admins can promote other users from
-**Admin → Users**, or create an **o:line** in **Admin → O-lines** (username +
-password + operator class) so a user can run `/oper <their nick> <password>` to
-operate with that class's permissions. There is **no shared operator password.**
+accounts are regular users **unless you enable "require admin approval"** in
+Settings (new accounts then start as `pending`, able to browse but not chat,
+until approved). After that, admins can promote other users from **Admin →
+Users**, or create an **o:line** in **Admin → O-lines** (username + password +
+operator class) so a user can run `/oper <their nick> <password>` to operate
+with that class's permissions. There is **no shared operator password.**
 
-Anyone — including people who don't want an account — can also **Join as
-guest** from the login page with just a nickname (see the User Guide).
-Guests are labeled `(guest)`, can chat in existing channels but cannot create
-channels, and are purged after a day of inactivity.
+Anyone — including people who don't want an account — can **Join as guest**
+from the login page (or an embedded channel link) with just a nickname and an
+18+ certification. Guests are labeled `(guest)`, can chat in existing channels
+but cannot create channels; a guest nick frees up on logout and is reclaimed on
+re-login so its DM thread survives.
+
+**Optional features start unconfigured** until you add a key on **Admin →
+Settings**: email (SMTP) for invites/welcome/support replies, the **Giphy API
+key** for GIF search, and a **logo URL**. Uploads, reactions, GIF search, and
+webhooks are enabled by default and each can be switched off in Settings.
 
 There are **no hardcoded default credentials.**
 
@@ -253,15 +278,20 @@ Upgrades are the same procedure as a fresh install:
 - re-creates `.htaccess`.
 - backs the database up automatically on every run.
 - migrations are applied on app boot (`Database::init()` adds missing columns
-  like `last_ip`, `role_id`, `guest`, and `censor` and creates missing tables
-  such as `badwords`, `roles`, `operclasses`, `opers`, and `chat_logs`
-  automatically), so old databases gain new features without manual SQL. The
-  four built-in operator classes are seeded idempotently on every boot.
+  and creates missing tables automatically — `theme`, `avatar`, `status`,
+  `age_verified_at`, `reactions`, `channel_notify`, `sound_alerts`, `webhooks`,
+  `login_attempts`, `registration_invites`, `moderation_events`, `reports`,
+  `user_notes`, `support_tickets`, the `guests`/`guest_sessions` tables, the FTS
+  search index, and more). Older installs whose guests lived in `users` are
+  migrated into the dedicated `guests` table on boot, so DMs/memberships/history
+  survive. The four default operator classes and three default sounds are seeded
+  idempotently.
 - older installs that stored the DB one level above the project are migrated
   back into `data/` automatically.
 
-**Cache-busting is automatic** — CSS and JS are linked with
-`?v=<file-mtime>`, so browsers never keep stale copies of `app.js`/`app.css`
+**Cache-busting is automatic** — CSS and JS (including the editor bundle) are
+linked with `?v=<file-mtime>`, so browsers never keep stale copies after an
+upload.
 after an upload.
 
 ---
@@ -271,7 +301,7 @@ after an upload.
 - **`/api/version`** returns the running build, e.g.
 
   ```json
-  {"version":"1.5.1","site":"LVChat"}
+  {"version":"1.6.0","site":"LVChat"}
   ```
 
 - **`bin/deploy.sh`** runs the full HTTP sanity check described in section 3.3.
@@ -281,34 +311,97 @@ after an upload.
 
 ---
 
-## 7. Troubleshooting
+## 7. Scaling on shared hosting
+
+With PHP + SQLite + polling, the ceiling on a shared host is the **PHP worker
+pool** and **SQLite write serialization**. Realistically ~25–75 concurrent users
+out of the box, and ~100–250 with the tuning knobs below (both set under
+**Admin → Settings**):
+
+- **`poll_interval`** (seconds, default **2**) — how often a client fetches new
+  messages. Raising to 3–5s cuts requests proportionally.
+- **`presence_throttle`** (seconds, default **30**) — how often the server writes
+  "last seen" per user. With it, ~28 of every 30 polls become pure reads instead
+  of one write each.
+
+Benchmark your own server:
+
+```bash
+php tests/load_check.php 10 10   # concurrent requests × rounds → req/s
+```
+
+Beyond a few hundred concurrent users move to a VPS (more php-fpm workers) and/or
+switch **Realtime mode → SSE** under Settings. SSE streams live updates over one
+connection per client instead of repeated polls, but each connection holds a PHP
+worker the whole time, so it suits php-fpm/VPS far better than shared hosting.
+The client automatically falls back to polling if the stream drops.
+
+---
+
+## 8. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Chat page shows "Chat scripts did not RUN" | `/assets/js/app.js` is being served as HTML — broken rewrite or missing file | Re-upload the app folder; run `bash bin/deploy.sh`; verify `curl -sI https://host/assets/js/app.js` returns `Content-Type: application/javascript` |
 | "Chat scripts crashed" warning | A JavaScript error at runtime | Open the browser console; the message lists the first 3 errors. Usually a stale `app.js` — re-run deploy |
+| Legal-page rich editor missing/blank | `public/assets/vendor/tiptap/tiptap-bundle.js` not uploaded or stale | Re-upload it (or rebuild locally with `npm run build:editor`) and re-run deploy |
 | Clean URLs return 404 (`/login`) | `.htaccess` missing or `mod_rewrite` off (Apache) | Run `bash bin/deploy.sh` (rewrites `.htaccess`); or use nginx config from section 3.2 |
 | Still works but URL has `index.php/` | Rewrite not applied yet | Same as above |
 | 500 on first load / "pdo_sqlite missing" | PHP lacks the SQLite driver | Install the `pdo_sqlite` extension and restart PHP-FPM |
 | Database permission error | `data/` not writable by the web user | `chown -R <php-user> data/` or `chmod` to make it writable |
+| Image uploads fail ("could not store") | `public/uploads/` (or `public/assets/avatars/`) not writable | Create it and make it writable by the PHP user |
+| GIF picker says not configured | No Giphy API key yet | Add **Giphy API key** under Admin → Settings and tick **GIF search (Giphy)** |
+| GIF picker says disabled | `gifs_enabled` off, or webhook/upload flag turned off | Turn the corresponding feature back on in Settings |
+| SMTP test email fails | Wrong host/port/encryption/credentials, or port blocked | Re-check **Admin → Settings → SMTP**; use the **Send test email** button |
 | `/api/version` wrong build | Old upload | Re-upload everything except `data/`, rerun `deploy.sh` |
+| Slow with many users | Polling + shared PHP worker pool | Raise `poll_interval`/`presence_throttle`, or switch Realtime → SSE |
 
 ---
 
-## 8. Security notes
+## 9. Optional: desktop launcher
+
+The `desktop/` folder contains an **Electron multi-site chat launcher** for
+Windows/macOS/Linux. It manages several chat sites (name + URL), opens each in
+its own isolated window, and keeps running in the system tray.
+
+```bash
+cd desktop
+npm install
+npm run start          # run from source
+npm run dist:linux     # or dist:win / dist:mac — packages an installer
+```
+
+This is purely a client convenience — the web app works fully in a normal
+browser and nothing on the server depends on it.
+
+---
+
+## 10. Security notes
 
 - Passwords: `argon2id` via `password_hash`/`password_verify`; rehashed
   automatically on login if the algorithm parameters change.
-- Channel keys are also stored hashed with `argon2id`.
+- Channel keys and webhook tokens (SHA-256 of the token; the raw token is shown
+  once) are stored hashed.
 - CSRF tokens are required on every POST (forms and the AJAX API).
-- All output is HTML-escaped; a small safe-markup renderer enables `**bold**`,
-  `` `code` ``, `@mention`, and link-highlighting.
+- **Login throttling** per IP: after 10 failed attempts within 10 minutes the
+  next attempts are refused (`login_attempts`).
+- All output is HTML-escaped; chat markup (bold/italic/code/blocks/mentions) is
+  rendered from escaped input, and the legal-page rich text is sanitized against
+  a tag/attribute allow-list (event handlers and `javascript:`/`data:` URIs
+  stripped).
 - Sending is rate-limited (per user, 12 messages/DMs per 5 seconds); global spam
   filters, shuns, and `*line` bans are enforced server-side, not just in the UI.
+- Uploads are validated by real MIME sniffing (`getimagesize`), size-capped
+  (5 MB chat images, 1 MB avatars), and stored with random names under `public/`;
+  audio alerts are capped at 2 MB with MIME checking.
 - Operators authenticate with per-user **o:lines** (**Admin → O-lines** — username
   + password + operator class). There is no shared operator password: `/oper`
-  only works for the account matching the o:line's nickname. Guest accounts are
-  ephemeral and auto-purged after a day of inactivity.
+  only works for the account matching the o:line's nickname. Guests live in a
+  dedicated `guests` table (never in `users`), are age-gated, and are purged
+  after a day of inactivity.
+- The **Giphy API key** never reaches browsers — all search/trending calls go
+  through the server-side `/api/gifs` proxy, and posted GIF URLs are limited to
+  known media hosts. The SMTP password is write-only (never echoed back).
 - There is an append-only `chat_logs` archive of every channel message and PM;
   nothing is ever removed from it. Admins have full visibility into this log.
 

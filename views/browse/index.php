@@ -1,4 +1,5 @@
 <?php $title = 'Browse channels'; ?>
+<?php $donateFooter = true; ?>
 <?php
 function channel_row(array $c, array $joinedMap): string {
     $joined = isset($joinedMap[$c['id']]);

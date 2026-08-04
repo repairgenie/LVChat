@@ -19,12 +19,19 @@ messaging, private messages, your profile, and the complete command reference.
   `- _ [ ] { } ^ \` |` — this is your nick on the server.
 - **Email:** a valid address (used only for account recovery / admin tools).
 - **Password:** at least 8 characters.
+- **18+ gate:** you must certify you are at least 18 (recorded on the account)
+  and agree to the linked **Terms of Service** and **Privacy Policy**.
 
 If open registration is turned off, the **Register** page instead says that only
 invite links can create accounts. When a server admin invites you, you'll get an
 email with a **create-account link** — opening it lands you on the registration
 form with your email already filled in (and locked). Just pick a username and
 password and you're in.
+
+If new registrations **require admin approval**, your new account starts as
+**pending**: you can log in and browse channels, but you cannot chat until an
+admin approves you. If an account is ever **suspended** instead, login shows the
+reason and chat access is blocked until it's lifted.
 
 Log in with your username and password. Sessions last 30 days. Too many failed
 login attempts from the same IP within 10 minutes locks that IP out briefly.
@@ -38,8 +45,10 @@ nickname and you're in immediately — no email, no password.
   nick is shown with a `(guest)` tag.
 - **Guests cannot create channels** — when you try, you're told to make an
   account instead.
-- Guest sessions are ephemeral: accounts with a day of inactivity are purged,
-  so a guest nick can free up for reuse.
+- A guest nick **frees up on logout** (or after a day of inactivity) and is
+  **reclaimed on re-login**, so the same nick keeps its DM history. Registering
+  an account with that nick later converts the guest into a real account and
+  carries the DMs/memberships over.
 
 ### 1.3 First visit
 
@@ -69,12 +78,14 @@ may appear in their assigned colour. Users operating through an **o:line**
 - **Hide the chat list** with the ☰ button in the top-left of the message area:
   on desktop it collapses the sidebar (your choice is remembered), on mobile it
   opens a drawer over the chat.
-- The message composer supports **slash commands** with autocomplete (type `/`
-  to see suggestions, arrow keys to move, `Tab` to accept).
-- Open the **😀 emoji picker** next to the composer to drop an emoji at the
-  cursor.
+- Switch **light/dark** with the 🌙 button in the channel header (remembered per
+  browser).
+- The composer has four buttons next to the input: **📎** (image upload), **GIF**
+  (Giphy GIF picker), **😀** (emoji picker), and **➤** (send). It also supports
+  **slash commands** with autocomplete (type `/` to see suggestions, arrow keys
+  to move, `Tab` to accept).
 - Type **`@nick`** to mention a user — they get a notification bell.
-- `Enter` sends. Messages are limited to 2000 characters.
+- `Enter` sends; **Shift+Enter** is a newline. Messages are limited to 2000 characters.
 
 ### 2.1 Text formatting
 
@@ -136,6 +147,11 @@ Every channel has a shareable link of the form `/c/<slug>` (e.g. `/c/gaming`):
 - Private (`+p`) channels are hidden from `/list` but still joinable via their
   share link.
 - Get the link for the current channel with **Share** (top-right) or `/share`.
+
+You can also embed a channel on another page with its **embed URL**
+(`/embed/<slug>`): logged-out visitors see a small card with a **Chat as
+guest** box (plus Log in / Register), and signing in drops them straight into
+the channel. It's the same flow as a share link, formatted for an iframe.
 
 ### 3.3 Creating and registering channels
 
@@ -216,6 +232,12 @@ Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
   fully in view — but if you scroll up to read earlier chat, it holds your place
   instead of yanking you back down. If an administrator has disabled uploads
   you'll be told so.
+- **GIFs:** click **GIF** in the composer to open the picker — it loads trending
+  GIFs and searches as you type, and posts the one you click straight into the
+  channel or DM. GIF messages render inline, stay searchable by their title, and
+  are subject to the server's filters like any message. GIFs require the admin to
+  configure a **Giphy API key** (Admin → Settings) — until then the picker says
+  GIF search isn't configured.
 - **Reply (quote):** right-click somebody's message → **Reply** sets a "Replying to @nick — excerpt" chip above the composer; your message then carries the quoted context, and the quoted line is shown under the author's name in the timeline. Click the `↪` line to jump to (and briefly highlight) the original message.
 - **Mentions:** mention a member of the current channel with `@nick`; they get a
   notification bell. Mute a channel from its 🔔 header button to stop its
@@ -229,6 +251,17 @@ messages**. Results show the channel, author, and a snippet; clicking a result
 opens the channel and **jumps straight to** (and highlights) that message.
 Admins can additionally search the full append-only archive on the **Admin →
 Chat logs** page. Search only ever covers messages you are allowed to see.
+
+### 4.2 Reporting a message
+
+Right-click any channel or DM message and choose **Report message**. Pick a
+preset reason (Harassment / Bullying, Spam or advertising, Hate speech,
+Inappropriate / NSFW content, Threatening violence, Personal information /
+doxxing) or **Other** with a short description. The report snapshots the sender,
+message type, and content (inline images/GIFs included), so it survives later
+edits or deletes. You can report a message once; staff review reports on the
+**Admin → Reports** queue. Reporting is not a substitute for an emergency — if
+someone is in immediate danger, contact the authorities.
 
 ---
 
@@ -296,14 +329,27 @@ Every user has a profile at `/u/<username>` (click any nick, or right-click →
 Staff / Registered + online/away/bot), registration date, and the channels
 you're in. A ✕ button in the corner returns you to the chat.
 
+### 6.4 Support & legal
+
+- **Support tickets:** from the `⚙` account menu choose **Support** to open
+  tickets. Registered users can create a ticket (subject + description), reply
+  to the thread, and close it. Staff may reply, assign, reopen, or open tickets
+  on your behalf — and each staff reply is emailed to your registered address
+  via the server's SMTP settings. Guests can't open tickets (they have no
+  account/email); log in or register first.
+- **Terms of Service & Privacy Policy:** every server publishes editable pages
+  at **/terms** and **/privacy**, linked from the account menu, the login and
+  registration forms, and the guest box. They're maintained by the admin under
+  **Admin → Terms & Privacy**.
+
 ---
 
 ## 7. Right-click context menus
 
 Right-click anywhere on:
 
-- a **message** — Reply, Copy text, Edit (your own), Delete, Message author,
-  Copy username;
+- a **message** — Reply, Copy text, Edit (your own), Delete, **Report message**,
+  Message author, Copy username;
 - a **user / member / nick** — Message, View profile, Whois, Copy username, plus
   (if you're a channel op) Voice / Half-op / Op / Mute / Kick / Ban, and
   Ignore;

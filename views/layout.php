@@ -56,6 +56,16 @@
   <main class="flex-1 w-full <?= !empty($fullWidth) ? 'max-w-none px-4 md:px-8 py-6' : 'max-w-5xl mx-auto px-4 py-8' ?>">
     <?= $content ?>
   </main>
+  <?php if (!empty($donateFooter)): ?>
+  <footer class="border-t border-discord-800">
+    <div class="max-w-5xl mx-auto px-4 py-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      <span class="text-discord-400">Enjoying <?= h(config_get('site_name', 'LVChat')) ?>?</span>
+      <a href="https://buymeacoffee.com/georgethegeek" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-amber-300 hover:text-amber-200 hover:underline">
+        ☕ <span>Buy me a coffee</span>
+      </a>
+    </div>
+  </footer>
+  <?php endif; ?>
   <script>
   (function () {
     var btn = document.getElementById('theme-toggle');
