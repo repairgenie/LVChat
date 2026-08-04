@@ -394,7 +394,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -847,6 +847,7 @@ final class AdminController
                 break;
             case 'settings_save':
                 config_set('site_name', trim((string) ($_POST['site_name'] ?? 'LVChat')));
+                config_set('site_tagline', trim((string) ($_POST['site_tagline'] ?? 'IRC-style web chat')));
                 config_set('logo_url', trim((string) ($_POST['logo_url'] ?? '')));
                 config_set('registration_enabled', ($_POST['registration_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('registration_requires_approval', ($_POST['registration_requires_approval'] ?? '0') === '1' ? '1' : '0');

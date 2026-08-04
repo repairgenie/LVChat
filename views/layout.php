@@ -27,7 +27,7 @@
         <?php endif; ?>
         <div>
           <div class="font-semibold leading-tight"><?= h(config_get('site_name', 'LVChat')) ?></div>
-          <div class="text-xs text-discord-400 leading-tight">IRC-style web chat</div>
+          <div class="text-xs text-discord-400 leading-tight"><?= h(config_get('site_tagline', 'IRC-style web chat') ?: 'IRC-style web chat') ?></div>
         </div>
       </div>
       <?php if (isset($user) && $user): ?>
