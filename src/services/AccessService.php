@@ -33,16 +33,28 @@ final class AccessService
             [$channelId, $id]
         );
         if ($access) {
-            return $access['level'];
+            $level = (string) $access['level'];
+        } else {
+            $m = self::member($channelId, $actor);
+            $level = $m ? (string) $m['level'] : 'normal';
         }
-        $m = self::member($channelId, $actor);
-        if (!$m) {
-            return 'normal';
+        // Helper roles are always at least half-op in any channel.
+        if (self::actorIsHelper($actor) && level_weight($level) < level_weight('halfop')) {
+            return 'halfop';
         }
-        if (level_weight($m['level']) > level_weight($access['level'] ?? 'normal')) {
-            return $m['level'];
+        return $level;
+    }
+
+    /** Helper check that accepts either a user row or a bare user id. */
+    private static function actorIsHelper(int|array $actor): bool
+    {
+        if (is_array($actor)) {
+            return Auth::isHelper($actor);
         }
-        return $access['level'] ?? $m['level'];
+        return (bool) Database::scalar(
+            'SELECT 1 FROM roles r JOIN users u ON u.role_id = r.id WHERE u.id = ? AND r.helper = 1',
+            [(int) $actor]
+        );
     }
 
     public static function setLevel(int|string $channelId, int $userId, string $level): void

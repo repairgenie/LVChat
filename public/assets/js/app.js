@@ -531,6 +531,7 @@
     if (typeof j.notify_count === 'number') setBell(j.notify_count);
     if (j.dm_list) handleDmList(j.dm_list);
     if (j.channel_unread) updateChannelUnread(j.channel_unread);
+    if (j.channel_presence) updateChannelPresence(j.channel_presence);
   }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
@@ -664,13 +665,50 @@
     });
   }
 
+  // ── Live "active chatters" count per sidebar channel ───────────────────────
+  let chanPresenceSig = '';
+  function updateChannelPresence(list) {
+    const map = {};
+    list.forEach((c) => { map[c.slug] = c.online; });
+    const sig = JSON.stringify(map);
+    if (sig === chanPresenceSig) return;
+    chanPresenceSig = sig;
+    document.querySelectorAll('a[data-ctx-channel]').forEach((a) => {
+      const n = map[a.dataset.ctxChannel] || 0;
+      const nameEl = a.querySelector('span.truncate');
+      let el = a.querySelector('.chan-online');
+      if (n > 0) {
+        if (!el) {
+          el = document.createElement('span');
+          el.className = 'chan-online text-[10px] text-discord-400 shrink-0';
+          if (nameEl) nameEl.insertAdjacentElement('afterend', el);
+          else a.insertBefore(el, a.firstChild);
+        }
+        el.textContent = '(' + n + ')';
+      } else if (el) {
+        el.remove();
+      }
+    });
+  }
+
   function applyPresence(list) {
     const el = document.getElementById('member-list');
     if (!el) return;
-    const online = list.filter((m) => m.is_online);
-    // Offline list only shows registered users — anonymous guests aren't listed when away.
-    const offline = list.filter((m) => !m.is_online && !m.guest);
-    const mk = (arr, on) => arr.map((m) => {
+    // Group by user type. Offline guests are skipped entirely (anonymous).
+    const groups = [];
+    const admins = [], staff = [], helpers = [], registered = [], guests = [];
+    list.forEach((m) => {
+      if (m.role === 'admin') admins.push(m);
+      else if (m.role === 'staff') staff.push(m);
+      else if (m.role_helper) helpers.push(m);
+      else if (m.guest) { if (m.is_online) guests.push(m); }
+      else registered.push(m);
+    });
+    [['Admins', admins], ['Staff', staff], ['Helpers', helpers], ['Registered', registered], ['Guests', guests]].forEach(([label, arr]) => {
+      if (arr.length) groups.push([label, arr]);
+    });
+    const mk = (arr) => arr.map((m) => {
+      const on = !!m.is_online;
       const rs = (m.role !== 'admin' && m.role_color) ? ' style="color:' + esc(m.role_color) + '"' : '';
       const cc = m.role === 'admin' ? 'text-red-400' : (on ? (COLORS[m.level] || COLORS.normal) : 'text-discord-400');
       return `<a href="/app?dm=${encodeURIComponent(m.username)}" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ${cc}"${rs} data-username="${esc(m.username)}" data-level="${esc(m.level || 'normal')}">
@@ -678,11 +716,15 @@
         ${m.avatar ? `<img src="${esc(m.avatar)}" alt="" loading="lazy" class="w-6 h-6 rounded-full object-cover">` : ''}
         <span class="truncate">${esc(m.username)}</span>${m.away ? '<span class="text-xs">💤</span>' : ''}${m.role === 'admin' ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-400">admin</span>' : (m.role === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '')}</a>`;
     }).join('');
-    el.innerHTML =
-      `<div class="px-2 py-2"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — ${online.length}</div>${mk(online, true)}</div>` +
-      `<div class="px-2 pb-2"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — ${offline.length}</div>${mk(offline, false)}</div>`;
+    let shown = 0;
+    groups.forEach((g) => { shown += g[1].length; });
+    el.innerHTML = groups.map(([label, arr], i) =>
+      `<div class="px-2 ${i === 0 ? 'pt-2' : 'pt-3'} pb-2">
+        <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">${label} — ${arr.length}</div>
+        ${mk(arr)}
+      </div>`).join('');
     const count = document.getElementById('member-count');
-    if (count) count.textContent = String(list.filter((m) => m.is_online && !m.guest).length);
+    if (count) count.textContent = String(shown);
   }
 
   // ── Bell / notifications ───────────────────────────────────────────────────

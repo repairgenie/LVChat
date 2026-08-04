@@ -151,6 +151,7 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
 function channel_link(array $c, string $channelSlug, array $user): string {
     $owned = (int) ($c['owner_id'] ?? 0) === (int) $user['id'] ? '1' : '0';
     $unread = (int) ($c['unread'] ?? 0);
+    $online = (int) ($c['online'] ?? 0);
     $vis = $c['visibility'] !== 'public'
         ? '<span class="chan-vis text-[10px] text-discord-400' . ($unread > 0 ? '' : ' ml-auto') . '">' . ($c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁')) . '</span>'
         : '';
@@ -158,13 +159,14 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         ? '<span class="unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">' . ($unread > 99 ? '99+' : $unread) . '</span>'
         : '';
     $nameCls = $unread > 0 ? 'font-semibold text-white' : '';
+    $onlineHtml = $online > 0 ? '<span class="chan-online text-[10px] text-discord-400 shrink-0">(' . $online . ')</span>' : '';
     $cls = $channelSlug === $c['slug'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white';
     return '<a href="/app?channel=' . h(rawurlencode($c['slug'])) . '"'
         . ' data-ctx-channel="' . h($c['slug']) . '"'
         . ' data-ctx-channel-name="' . h($c['name']) . '"'
         . ' data-owned="' . $owned . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
-        . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $badge . $vis . '</a>';
+        . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis . '</a>';
 }
 
 function member_html(array $m, bool $online): string {
@@ -478,21 +480,34 @@ function member_html(array $m, bool $online): string {
   <!-- ── Right: member list ── -->
   <aside class="hidden md:flex w-60 bg-discord-800 flex-col shrink-0 min-h-0">
     <?php if ($channel): ?>
-    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members — <span id="member-count"><?= ChannelService::memberCount((int) $channel['id']) ?></span></div>
+    <?php
+    // Group by user type. Offline guests are skipped entirely (anonymous).
+    $typeGroups = ['Admins' => [], 'Staff' => [], 'Helpers' => [], 'Registered' => [], 'Guests' => []];
+    foreach ($members as $m) {
+        if ($m['role'] === 'admin') {
+            $typeGroups['Admins'][] = $m;
+        } elseif ($m['role'] === 'staff') {
+            $typeGroups['Staff'][] = $m;
+        } elseif (!empty($m['role_helper'])) {
+            $typeGroups['Helpers'][] = $m;
+        } elseif (!empty($m['guest'])) {
+            if (!empty($m['is_online'])) {
+                $typeGroups['Guests'][] = $m;
+            }
+        } else {
+            $typeGroups['Registered'][] = $m;
+        }
+    }
+    $memberCount = array_sum(array_map('count', $typeGroups));
+    ?>
+    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members — <span id="member-count"><?= (int) $memberCount ?></span></div>
     <div id="member-list" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-      <?php
-      $online = array_filter($members, fn ($m) => !empty($m['is_online']));
-      // Offline list only shows registered users — anonymous guests aren't listed when away.
-      $offline = array_filter($members, fn ($m) => empty($m['is_online']) && empty($m['guest']));
-      ?>
-      <div class="px-2 py-2">
-        <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — <?= count($online) ?></div>
-        <?php foreach ($online as $m): ?><?= member_html($m, true) ?><?php endforeach; ?>
+      <?php foreach ($typeGroups as $label => $list): if (!$list) continue; ?>
+      <div class="px-2 <?= $label === 'Admins' ? 'pt-2' : 'pt-3' ?> pb-2">
+        <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1"><?= h($label) ?> — <?= count($list) ?></div>
+        <?php foreach ($list as $m): ?><?= member_html($m, !empty($m['is_online'])) ?><?php endforeach; ?>
       </div>
-      <div class="px-2 pb-2">
-        <div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — <?= count($offline) ?></div>
-        <?php foreach ($offline as $m): ?><?= member_html($m, false) ?><?php endforeach; ?>
-      </div>
+      <?php endforeach; ?>
     </div>
     <?php else: ?>
     <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members</div>

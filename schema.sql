@@ -197,7 +197,8 @@ CREATE TABLE IF NOT EXISTS roles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   color TEXT NOT NULL DEFAULT '#5865f2',
-  perms TEXT NOT NULL DEFAULT '[]'
+  perms TEXT NOT NULL DEFAULT '[]',
+  helper INTEGER NOT NULL DEFAULT 0
 );
 
 -- IRC-style operator classes (permission bundles) and o:lines (per-user oper accounts).

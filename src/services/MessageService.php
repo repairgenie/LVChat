@@ -64,9 +64,14 @@ final class MessageService
                     CASE WHEN m.sender_guest_id IS NOT NULL THEN 1 ELSE 0 END AS guest,
                     CASE WHEN m.sender_guest_id IS NOT NULL THEN 0 ELSE COALESCE((SELECT u.bot FROM users u WHERE u.id = m.sender_id), 0) END AS bot,
                     CASE WHEN m.sender_guest_id IS NOT NULL THEN \'normal\'
-                         ELSE (SELECT cm.level FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id)
+                         ELSE (SELECT CASE WHEN r.helper = 1 AND COALESCE(cm.level, \'normal\') NOT IN (\'halfop\',\'op\',\'admin\',\'founder\')
+                                           THEN \'halfop\' ELSE COALESCE(cm.level, \'normal\') END
+                               FROM channel_members cm
+                               LEFT JOIN roles r ON r.id = (SELECT u.role_id FROM users u WHERE u.id = m.sender_id)
+                               WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id)
                     END AS level,
-                    (SELECT r.color FROM roles r WHERE r.id = (SELECT u.role_id FROM users u WHERE u.id = m.sender_id)) AS role_color,
+                    (SELECT CASE WHEN r.helper = 1 THEN \'' . Auth::HELPER_COLOR . '\' ELSE r.color END
+                     FROM roles r WHERE r.id = (SELECT u.role_id FROM users u WHERE u.id = m.sender_id)) AS role_color,
                     (SELECT slug FROM channels c WHERE c.id = m.channel_id) AS channel_slug,
                     (SELECT COALESCE(u2.username, g2.nick) FROM messages pm
                         LEFT JOIN users u2 ON u2.id = pm.sender_id

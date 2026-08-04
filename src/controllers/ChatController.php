@@ -467,9 +467,15 @@ final class ChatController
         $out['dm_list'] = MessageService::dmSummaries($user);
         // Live unread badges for the channel sidebar (cleared when a channel is
         // opened; the client updates the sidebar from this on every poll).
+        $joined = ChannelService::joinedChannelNames($user);
         $out['channel_unread'] = array_map(
             fn ($c) => ['slug' => $c['slug'], 'unread' => (int) $c['unread']],
-            ChannelService::joinedChannelNames($user)
+            $joined
+        );
+        // Live "active chatters" count for each sidebar channel.
+        $out['channel_presence'] = array_map(
+            fn ($c) => ['slug' => $c['slug'], 'online' => (int) $c['online']],
+            $joined
         );
         // Background channel messages since the client's global watermark — the
         // fuel for channel audio alerts. Excludes the channel being viewed.
@@ -524,6 +530,7 @@ final class ChatController
                     'role' => $m['role'],
                     'bot' => (int) $m['bot'],
                     'guest' => (int) $m['guest'],
+                    'role_helper' => (int) ($m['role_helper'] ?? 0),
                     'role_color' => $m['role_color'] ?? null,
                     'avatar' => $m['avatar'] ?? null,
                 ];

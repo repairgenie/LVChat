@@ -440,6 +440,22 @@ final class Auth
         return $user['away'] === null && !empty($user['last_seen']) && (time() - strtotime($user['last_seen'] . ' UTC')) <= $within;
     }
 
+    /** Nick colour forced on Helper-role users (they always show green). */
+    public const HELPER_COLOR = '#22c55e';
+
+    /** Whether a user holds a Helper role (green nick + auto half-op everywhere). */
+    public static function isHelper(array $user): bool
+    {
+        if (!empty($user['role_helper'])) {
+            return (int) $user['role_helper'] === 1;
+        }
+        $roleId = $user['role_id'] ?? null;
+        if (!$roleId) {
+            return false;
+        }
+        return (bool) Database::scalar('SELECT helper FROM roles WHERE id = ?', [(int) $roleId]);
+    }
+
     public static function isAdmin(array $user): bool
     {
         return $user['role'] === 'admin';

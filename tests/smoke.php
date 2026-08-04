@@ -705,6 +705,31 @@ Database::query('UPDATE users SET role_id = NULL WHERE username = "frank"');
 $frank = Auth::attempt('frank', 'password123');
 check('removing role revokes oper', Auth::isOper($frank) === false);
 
+// ── Helper role: green nick + always half-op ─────────────────────────────────
+echo "== helper role ==\n";
+Database::query('INSERT INTO roles (name, color, perms, helper) VALUES ("Helper", "#5865f2", "[]", 1)');
+$helperRole = (int) Database::lastId();
+Database::query('UPDATE users SET role_id = ? WHERE username = "frank"', [$helperRole]);
+$frank = Auth::attempt('frank', 'password123');
+check('helper role detected', Auth::isHelper($frank) === true);
+ChannelService::join($ch, $frank);
+check('helper effectiveLevel is halfop', AccessService::effectiveLevel($ch['id'], $frank) === 'halfop');
+$frankMsg = MessageService::send((int) $ch['id'], $frank, 'hello from helper');
+check('helper message level is halfop', ($frankMsg['level'] ?? '') === 'halfop');
+check('helper message nick is green', ($frankMsg['role_color'] ?? '') === Auth::HELPER_COLOR);
+foreach (ChannelService::members((string) $ch['id']) as $mm) {
+    if ($mm['username'] === 'frank') {
+        check('member list shows helper level', $mm['level'] === 'halfop');
+        check('member list shows helper color', $mm['role_color'] === Auth::HELPER_COLOR);
+        check('member list flags role_helper', (int) $mm['role_helper'] === 1);
+    }
+}
+Database::query('DELETE FROM messages WHERE id = ?', [(int) $frankMsg['id']]);
+Database::query('UPDATE users SET role_id = NULL WHERE username = "frank"');
+Database::query('DELETE FROM roles WHERE id = ?', [$helperRole]);
+$frank = Auth::attempt('frank', 'password123');
+check('helper removed on role delete', Auth::isHelper($frank) === false);
+
 // ── Chanop promotion + half-op limits (standard IRC) ────────────────────────
 echo "== chanop promotion + half-op ==\n";
 ChannelService::join($ch, $erin);

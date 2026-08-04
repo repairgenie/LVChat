@@ -615,6 +615,7 @@ final class AdminController
                 $id = (int) ($_POST['id'] ?? 0);
                 $name = trim((string) ($_POST['name'] ?? ''));
                 $color = trim((string) ($_POST['color'] ?? '#5865f2'));
+                $helper = ($_POST['helper'] ?? '0') === '1' ? 1 : 0;
                 $perms = array_map('strval', (array) ($_POST['perms'] ?? []));
                 $allowedPerms = ['oper', 'manage_users', 'manage_channels', 'manage_bans', 'manage_badwords', 'manage_roles'];
                 $perms = array_values(array_intersect($allowedPerms, $perms));
@@ -622,11 +623,11 @@ final class AdminController
                     $ok = false;
                     $message = 'A role name is required.';
                 } elseif ($id > 0) {
-                    Database::query('UPDATE roles SET name = ?, color = ?, perms = ? WHERE id = ?', [$name, $color, json_encode($perms), $id]);
+                    Database::query('UPDATE roles SET name = ?, color = ?, perms = ?, helper = ? WHERE id = ?', [$name, $color, json_encode($perms), $helper, $id]);
                     log_audit('role_update', $name);
                     $message = 'Role updated.';
                 } else {
-                    Database::query('INSERT INTO roles (name, color, perms) VALUES (?, ?, ?)', [$name, $color, json_encode($perms)]);
+                    Database::query('INSERT INTO roles (name, color, perms, helper) VALUES (?, ?, ?, ?)', [$name, $color, json_encode($perms), $helper]);
                     log_audit('role_add', $name);
                     $message = "Role '$name' created.";
                 }

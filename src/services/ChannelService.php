@@ -204,11 +204,14 @@ final class ChannelService
                     COALESCE(u.role, 'user') AS role, COALESCE(u.bot, 0) AS bot,
                     u.avatar,
                     CASE WHEN g.id IS NOT NULL THEN 1 ELSE 0 END AS guest,
-                    cm.level,
-                    (SELECT r.color FROM roles r WHERE r.id = u.role_id) AS role_color
+                    CASE WHEN r.helper = 1 AND COALESCE(cm.level, 'normal') NOT IN ('halfop','op','admin','founder')
+                         THEN 'halfop' ELSE cm.level END AS level,
+                    CASE WHEN r.helper = 1 THEN '" . Auth::HELPER_COLOR . "' ELSE r.color END AS role_color,
+                    COALESCE(r.helper, 0) AS role_helper
              FROM channel_members cm
              LEFT JOIN users u ON u.id = cm.user_id
              LEFT JOIN guests g ON g.id = cm.guest_id
+             LEFT JOIN roles r ON r.id = u.role_id
              WHERE cm.channel_id = ?
              ORDER BY cm.level DESC, COALESCE(u.username, g.nick) ASC",
             [$channelId]
@@ -230,13 +233,19 @@ final class ChannelService
     public static function joinedChannelNames(array $actor): array
     {
         $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id';
+        // Online chatter count: members (users + guests) seen within 30s, users not away.
+        $onlineSql = '((SELECT COUNT(*) FROM channel_members om JOIN users ou ON ou.id = om.user_id
+                         WHERE om.channel_id = c.id AND ou.away IS NULL AND ou.last_seen >= datetime("now", "-30 seconds"))
+                        + (SELECT COUNT(*) FROM channel_members om JOIN guests og ON og.id = om.guest_id
+                         WHERE om.channel_id = c.id AND og.last_seen >= datetime("now", "-30 seconds")))';
         if (Auth::isGuest($actor)) {
             $rows = Database::all(
                 "SELECT $cols,
                         (SELECT COUNT(*) FROM messages m
                          WHERE m.channel_id = c.id AND m.deleted = 0 AND m.sender_guest_id IS NOT NULL
                            AND m.sender_guest_id != ? AND m.id > COALESCE(cm.last_read_id, 0)
-                           AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')) AS unread
+                           AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')) AS unread,
+                        $onlineSql AS online
                  FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
                  WHERE cm.guest_id = ?
                  ORDER BY c.name COLLATE NOCASE",
@@ -248,7 +257,8 @@ final class ChannelService
                         (SELECT COUNT(*) FROM messages m
                          WHERE m.channel_id = c.id AND m.deleted = 0 AND m.sender_id IS NOT NULL
                            AND m.sender_id != ? AND m.id > COALESCE(cm.last_read_id, 0)
-                           AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')) AS unread
+                           AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')) AS unread,
+                        $onlineSql AS online
                  FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
                  WHERE cm.user_id = ?
                  ORDER BY c.name COLLATE NOCASE",
@@ -257,6 +267,7 @@ final class ChannelService
         }
         foreach ($rows as &$r) {
             $r['unread'] = (int) $r['unread'];
+            $r['online'] = (int) $r['online'];
         }
         unset($r);
         return $rows;

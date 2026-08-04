@@ -32,12 +32,15 @@ $permLabels = [
         </label>
         <?php endforeach; ?>
       </div>
+      <label class="flex items-center gap-2 text-xs text-discord-300 cursor-pointer">
+        <input type="checkbox" name="helper" value="1" class="accent-blurple"> <span>Helper — <span class="text-green-400">green nick</span> + auto half-op in every channel</span>
+      </label>
       <button name="action" value="role_save" class="btn-primary w-full justify-center">Create role</button>
     </form>
   </details>
 </div>
 <?php require ROOT . '/views/admin/_nav.php'; ?>
-<div class="text-xs text-discord-500 mb-3">Admins always have every permission. Custom roles grant permissions to otherwise regular users (an IRC Operator is anyone with the <b>oper</b> permission).</div>
+<div class="text-xs text-discord-500 mb-3">Admins always have every permission. Custom roles grant permissions to otherwise regular users (an IRC Operator is anyone with the <b>oper</b> permission). Marking a role as a <b>Helper</b> gives its members a green nick and automatic half-op (<b>%</b>) in every channel.</div>
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
   <?php if (!$roles): ?><div class="text-sm text-discord-500">No custom roles yet.</div><?php endif; ?>
@@ -69,6 +72,9 @@ $permLabels = [
         </label>
         <?php endforeach; ?>
       </div>
+      <label class="flex items-center gap-2 text-xs text-discord-300 cursor-pointer">
+        <input type="checkbox" name="helper" value="1" <?= (int) $r['helper'] === 1 ? 'checked' : '' ?> class="accent-blurple"> <span>Helper — <span class="text-green-400">green nick</span> + auto half-op in every channel</span>
+      </label>
       <div class="flex gap-2">
         <button name="action" value="role_save" class="btn-primary text-xs !py-1.5">Save</button>
         <button name="action" value="role_del" class="btn-ghost text-xs !py-1.5 text-red-400" onclick="return confirm('Delete this role? Members lose its permissions.')">Delete</button>

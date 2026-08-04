@@ -115,6 +115,12 @@ final class Database
         if (!in_array('roles', $tables, true)) {
             $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT "#5865f2", perms TEXT NOT NULL DEFAULT "[]")');
         }
+        if (in_array('roles', $tables, true)) {
+            $roleCols = array_column($pdo->query('PRAGMA table_info(roles)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('helper', $roleCols, true)) {
+                $pdo->exec('ALTER TABLE roles ADD COLUMN helper INTEGER NOT NULL DEFAULT 0');
+            }
+        }
         if (!in_array('operclasses', $tables, true)) {
             $pdo->exec('CREATE TABLE operclasses (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT "#ffd700", perms TEXT NOT NULL DEFAULT "[]", is_default INTEGER NOT NULL DEFAULT 0)');
         }
