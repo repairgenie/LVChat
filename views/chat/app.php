@@ -652,29 +652,12 @@ function member_html(array $m, bool $online): string {
   <?php endif; ?>
 
   <!-- Notifications panel -->
-  <div id="notif-panel" class="hidden fixed top-14 right-4 w-80 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin">
-    <div class="px-3 py-2 border-b border-discord-700 text-sm font-semibold flex items-center justify-between">
+  <div id="notif-panel" class="hidden fixed top-14 right-4 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 flex flex-col" style="max-height:70vh">
+    <div class="px-3 py-2 border-b border-discord-700 text-sm font-semibold flex items-center justify-between shrink-0">
       <span>Notifications</span>
-      <button id="notif-clear" class="text-xs text-discord-400 hover:text-white">Mark all read</button>
+      <button id="notif-clear" class="text-xs text-discord-400 hover:text-white cursor-pointer">Mark all read</button>
     </div>
-    <div id="notif-list" class="p-1.5 text-sm">
-      <?php foreach ($notifications as $n): ?>
-      <div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
-        <?php if ($n['kind'] === 'dm' && !empty($n['sender'])): ?>
-        <span class="text-discord-400">dm</span> from <a class="text-blurple hover:underline" href="/app?dm=<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a>
-        <?php elseif ($n['kind'] === 'friend_request' && !empty($n['sender'])): ?>
-        <span class="text-green-400">friend request</span> from <a class="text-blurple hover:underline" href="/u/<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a>
-        <?php elseif ($n['kind'] === 'friend_accepted' && !empty($n['sender'])): ?>
-        <span class="text-green-400">friend accepted</span> — <a class="text-blurple hover:underline" href="/u/<?= h(rawurlencode($n['sender'])) ?>"><?= h($n['sender']) ?></a> is now your friend
-        <?php else: ?>
-        <span class="text-discord-400"><?= h($n['kind']) ?></span>
-        <?php if ($n['channel_name']): ?>→ <a class="text-blurple hover:underline" href="/app?channel=<?= h(rawurlencode(ChannelService::nameToSlug($n['channel_name']))) ?>"><?= h($n['channel_name']) ?></a><?php endif; ?>
-        <span class="text-discord-400">from</span> <?= h($n['sender'] ?? 'system') ?>
-        <?php endif; ?>
-      </div>
-      <?php endforeach; ?>
-      <?php if (!$notifications): ?><div class="px-2 py-3 text-discord-500 text-center">Nothing new</div><?php endif; ?>
-    </div>
+    <div id="notif-list" class="flex-1 overflow-y-auto scrollbar-thin p-1.5 text-sm min-h-0"></div>
   </div>
 
   <!-- Mobile sidebar backdrop -->

@@ -912,43 +912,78 @@
     if (n > 0) { bellDot.classList.remove('hidden'); bellDot.textContent = n > 99 ? '99+' : n; }
     else bellDot.classList.add('hidden');
   }
+  function renderNotifItem(n) {
+    let link = '';
+    let label = '';
+    if (n.kind === 'dm') {
+      link = '/app?dm=' + encodeURIComponent(n.sender || '');
+      label = '<span class="text-discord-400">dm</span> from <span class="text-blurple">' + esc(n.sender || 'system') + '</span>';
+    } else if (n.kind === 'friend_request') {
+      link = '/u/' + encodeURIComponent(n.sender || '');
+      label = '<span class="text-green-400">friend request</span> from <span class="text-blurple">' + esc(n.sender || 'someone') + '</span>';
+    } else if (n.kind === 'friend_accepted') {
+      link = '/u/' + encodeURIComponent(n.sender || '');
+      label = '<span class="text-green-400">friend accepted</span> — <span class="text-blurple">' + esc(n.sender || 'someone') + '</span> is now your friend';
+    } else {
+      if (n.channel_name) {
+        link = '/app?channel=' + encodeURIComponent(n.channel_name.replace(/^#/, ''));
+        label = '<span class="text-discord-400">' + esc(n.kind) + '</span> → <span class="text-blurple">' + esc(n.channel_name) + '</span>';
+      } else {
+        label = '<span class="text-discord-400">' + esc(n.kind) + '</span>';
+      }
+      if (n.sender) label += ' <span class="text-discord-400">from</span> ' + esc(n.sender);
+    }
+    const time = n.created_at ? '<span class="text-[10px] text-discord-500 ml-auto shrink-0">' + esc(n.created_at) + '</span>' : '';
+    return `<div class="notif-item group flex items-center gap-2 px-2 py-2 rounded hover:bg-discord-750 text-discord-300 cursor-pointer" data-id="${n.id}" data-link="${esc(link)}">
+      <div class="flex-1 min-w-0 truncate">${label}</div>
+      ${time}
+      <button class="notif-dismiss opacity-0 group-hover:opacity-100 text-discord-500 hover:text-red-400 text-xs px-1 shrink-0" data-id="${n.id}" title="Dismiss">&times;</button>
+    </div>`;
+  }
+  function loadNotifications() {
+    const list = document.getElementById('notif-list');
+    if (!list) return;
+    fetch('/api/notifications').then((r) => r.json()).then((j) => {
+      if (!j.notifications || !j.notifications.length) {
+        list.innerHTML = '<div class="px-2 py-3 text-discord-500 text-center">Nothing new</div>';
+        return;
+      }
+      list.innerHTML = j.notifications.map(renderNotifItem).join('');
+      list.querySelectorAll('.notif-item').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          if (e.target.closest('.notif-dismiss')) return;
+          const link = el.dataset.link;
+          if (link) window.location.href = link;
+        });
+      });
+      list.querySelectorAll('.notif-dismiss').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.id;
+          post('/api/notifications/dismiss', { id }, (j) => {
+            const item = btn.closest('.notif-item');
+            if (item) item.remove();
+            setBell(j.notify_count || 0);
+            const remaining = document.querySelectorAll('.notif-item');
+            if (!remaining.length) {
+              document.getElementById('notif-list').innerHTML = '<div class="px-2 py-3 text-discord-500 text-center">Nothing new</div>';
+            }
+          });
+        });
+      });
+    });
+  }
   if (bell) bell.addEventListener('click', () => {
     notifPanel.classList.toggle('hidden');
-    if (!notifPanel.classList.contains('hidden')) {
-      fetch('/api/notifications').then((r) => r.json()).then((j) => {
-        const list = document.getElementById('notif-list');
-        if (!j.notifications || !j.notifications.length) {
-          list.innerHTML = '<div class="px-2 py-3 text-discord-500 text-center">Nothing new</div>';
-          return;
-        }
-        list.innerHTML = j.notifications.map((n) => {
-          if (n.kind === 'dm') {
-            return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
-              <span class="text-discord-400">dm</span> from <a class="text-blurple hover:underline" href="/app?dm=${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'system')}</a>
-            </div>`;
-          }
-          if (n.kind === 'friend_request') {
-            return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
-              <span class="text-green-400">friend request</span> from <a class="text-blurple hover:underline" href="/u/${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'someone')}</a>
-            </div>`;
-          }
-          if (n.kind === 'friend_accepted') {
-            return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
-              <span class="text-green-400">friend accepted</span> — <a class="text-blurple hover:underline" href="/u/${encodeURIComponent(n.sender || '')}">${esc(n.sender || 'someone')}</a> is now your friend
-            </div>`;
-          }
-          return `<div class="px-2 py-1.5 rounded hover:bg-discord-750 text-discord-300">
-            <span class="text-discord-400">${esc(n.kind)}</span>
-            ${n.channel_name ? `→ <a class="text-blurple hover:underline" href="/app?channel=${encodeURIComponent(n.channel_name.replace(/^#/, ''))}">${esc(n.channel_name)}</a>` : ''}
-            <span class="text-discord-400">from</span> ${esc(n.sender || 'system')}
-          </div>`;
-        }).join('');
-      });
-    }
+    if (!notifPanel.classList.contains('hidden')) loadNotifications();
   });
   const notifClear = document.getElementById('notif-clear');
   if (notifClear) notifClear.addEventListener('click', () => {
-    post('/api/notifications/read', {}, () => { setBell(0); });
+    post('/api/notifications/read', {}, () => {
+      setBell(0);
+      const list = document.getElementById('notif-list');
+      if (list) list.innerHTML = '<div class="px-2 py-3 text-discord-500 text-center">Nothing new</div>';
+    });
   });
 
   // ── Sending / commands ─────────────────────────────────────────────────────

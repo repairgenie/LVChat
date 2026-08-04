@@ -32,6 +32,7 @@ $router->get('/api/poll', [ChatController::class, 'poll']);
 $router->get('/api/stream', [ChatController::class, 'stream']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
 $router->post('/api/notifications/read', [ChatController::class, 'readNotifications']);
+$router->post('/api/notifications/dismiss', [ChatController::class, 'dismissNotification']);
 $router->post('/api/channels', [ChannelController::class, 'create']);
 $router->post('/api/join', [ChannelController::class, 'join']);
 $router->post('/api/part', [ChannelController::class, 'part']);

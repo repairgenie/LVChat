@@ -707,6 +707,18 @@ final class ChatController
         json_out(['ok' => true]);
     }
 
+    public static function dismissNotification(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id > 0) {
+            Database::query('DELETE FROM notifications WHERE id = ? AND (user_id = ? OR guest_user_id = ?)', [$id, $user['id'], $user['id']]);
+        }
+        $count = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0', [$user['id'], $user['id']]);
+        json_out(['ok' => true, 'notify_count' => $count]);
+    }
+
     public static function deleteMessage(): void
     {
         $user = self::requireUser();
