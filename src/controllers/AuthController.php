@@ -7,9 +7,9 @@ final class AuthController
     public static function loginForm(): void
     {
         if (Auth::user()) {
-            redirect('/');
+            redirect('/app?channel=general');
         }
-        $next = $_GET['next'] ?? '/';
+        $next = $_GET['next'] ?? '/app?channel=general';
         render_view('auth/login', [
             'next' => $next,
             'error' => flash(),
@@ -21,7 +21,7 @@ final class AuthController
         Csrf::verify();
         $username = trim($_POST['username'] ?? '');
         $password = (string) ($_POST['password'] ?? '');
-        $next = $_POST['next'] ?? '/';
+        $next = $_POST['next'] ?? '/app?channel=general';
 
         if (login_attempt_count() >= login_attempt_max()) {
             flash('Too many failed login attempts. Please wait a few minutes and try again.');
@@ -55,9 +55,9 @@ final class AuthController
     public static function registerForm(): void
     {
         if (Auth::user()) {
-            redirect('/');
+            redirect('/app?channel=general');
         }
-        $next = $_GET['next'] ?? '/';
+        $next = $_GET['next'] ?? '/app?channel=general';
         $inviteToken = trim((string) ($_GET['invite'] ?? ''));
         $invite = null;
         if ($inviteToken !== '') {
@@ -80,7 +80,7 @@ final class AuthController
     public static function register(): void
     {
         Csrf::verify();
-        $next = $_POST['next'] ?? '/';
+        $next = $_POST['next'] ?? '/app?channel=general';
         $inviteToken = trim((string) ($_POST['invite'] ?? ''));
         $username = trim($_POST['username'] ?? '');
         $email = trim($_POST['email'] ?? '');
@@ -135,7 +135,7 @@ final class AuthController
     public static function guestLogin(): void
     {
         Csrf::verify();
-        $next = $_POST['next'] ?? '/';
+        $next = $_POST['next'] ?? '/app?channel=general';
         $nick = trim((string) ($_POST['nick'] ?? ''));
         $age18 = ($_POST['age18'] ?? '0') === '1';
         if (login_attempt_count() >= login_attempt_max()) {

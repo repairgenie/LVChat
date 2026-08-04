@@ -9,7 +9,7 @@ final class BrowseController
         if (!Auth::user()) {
             redirect('/login');
         }
-        redirect('/browse');
+        redirect('/app?channel=general');
     }
 
     public static function browse(): void
