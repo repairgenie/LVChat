@@ -280,9 +280,9 @@ function member_html(array $m, bool $online): string {
           <button id="create-channel" class="text-discord-400 hover:text-white text-sm" title="Create a channel">＋</button>
         </div>
         <div class="mt-1 space-y-0.5">
-          <a href="/browse" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm">
+          <button id="browse-btn-sidebar" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm w-full text-left cursor-pointer">
             <span class="text-discord-400">🌐</span> Browse channels
-          </a>
+          </button>
           <?php foreach ($otherChannels as $c): ?><?= channel_link($c, $channelSlug, $user) ?><?php endforeach; ?>
         </div>
       </nav>
@@ -386,7 +386,7 @@ function member_html(array $m, bool $online): string {
       <span class="font-bold text-white text-sm"><?= h($site) ?></span>
       <span class="text-xs text-discord-400 truncate">You are not in any channel. Create one or browse the list.</span>
       <div class="relative ml-auto flex items-center gap-2">
-        <a href="/browse" class="btn-primary text-xs hidden md:flex">Browse channels</a>
+        <button id="browse-btn-header" class="btn-primary text-xs hidden md:flex cursor-pointer">Browse channels</button>
         <button id="create-channel-2" class="btn-ghost text-xs hidden md:flex">＋ New channel</button>
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex">⬇ How to install</button>
         <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
@@ -650,6 +650,64 @@ function member_html(array $m, bool $online): string {
   })();
   </script>
   <?php endif; ?>
+
+  <!-- Channel browser modal -->
+  <div id="browse-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-browse-close></div>
+    <div class="relative card w-[min(96vw,900px)] shadow-2xl flex flex-col" style="max-height:85vh">
+      <div class="px-5 py-4 border-b border-discord-700 flex items-center justify-between shrink-0">
+        <div>
+          <h2 class="text-lg font-bold text-white">Channel browser</h2>
+          <p class="text-xs text-discord-400 mt-0.5">Public channels on <?= h($site) ?>. Private channels are hidden.</p>
+        </div>
+        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-xl leading-none p-1">&times;</button>
+      </div>
+      <div class="px-5 py-3 border-b border-discord-700 flex flex-wrap gap-3 items-center shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-green-500"></span>
+          <span class="text-sm text-white font-semibold" id="browse-online">0</span>
+          <span class="text-xs text-discord-400">online</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span class="text-sm text-white font-semibold" id="browse-peak">0</span>
+          <span class="text-xs text-discord-400">peak</span>
+        </div>
+        <div class="ml-auto flex gap-2">
+          <input id="browse-search" class="input w-52 !py-1.5 text-sm" placeholder="Search name or topic…" autocomplete="off">
+          <select id="browse-filter" class="input w-36 !py-1.5 text-sm">
+            <option value="all">All channels</option>
+            <option value="open">Not joined</option>
+            <option value="joined">Joined</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-5 space-y-4">
+        <div id="browse-my-section" class="hidden">
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-2">My Channels</div>
+          <table class="w-full text-sm"><thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700 select-none">
+            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="name">Channel <span class="bsort-arrow">⬍</span></th>
+            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="topic">Topic <span class="bsort-arrow">⬍</span></th>
+            <th class="px-3 py-2 cursor-pointer hover:text-white text-right" data-bsort="members">Users <span class="bsort-arrow">⬍</span></th>
+            <th class="px-3 py-2 text-right">Action</th>
+          </tr></thead><tbody id="browse-my-tbody"></tbody></table>
+        </div>
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-2 flex items-center justify-between">
+            <span>All public channels</span>
+            <span id="browse-count" class="text-discord-500 font-normal"></span>
+          </div>
+          <table class="w-full text-sm"><thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700 select-none">
+            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="name">Channel <span class="bsort-arrow">⬍</span></th>
+            <th class="px-3 py-2 cursor-pointer hover:text-white" data-bsort="topic">Topic <span class="bsort-arrow">⬍</span></th>
+            <th class="px-3 py-2 cursor-pointer hover:text-white text-right" data-bsort="members">Users <span class="bsort-arrow">⬍</span></th>
+            <th class="px-3 py-2 text-right">Action</th>
+          </tr></thead><tbody id="browse-tbody"></tbody></table>
+          <div id="browse-empty" class="hidden py-6 text-center text-discord-500 text-sm">No channels found.</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Notifications panel -->
   <div id="notif-panel" class="hidden fixed w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 flex flex-col" style="max-height:70vh" data-pos="auto">

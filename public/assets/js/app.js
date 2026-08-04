@@ -1021,6 +1021,7 @@
       post('/api/command', { channel: CHANNEL, text }, (j) => {
         if (j.redirect) { window.location = j.redirect; return; }
         if (j.action === 'clear') { msgsEl.innerHTML = ''; return; }
+        if (j.action === 'browse') { openBrowse(); (j.replies || []).forEach((r) => showReply(r)); return; }
         if (j.copy) copyText(j.copy);
         (j.replies || []).forEach((r) => showReply(r));
       });
@@ -2223,5 +2224,155 @@
   } else {
     setTimeout(poll, Math.floor(Math.random() * pollMs));
     schedulePoll();
+  }
+
+  // ── Channel browser modal ──────────────────────────────────────────────────
+  const browseModal = document.getElementById('browse-modal');
+  let browseData = null;
+  let browseSortKey = 'members';
+  let browseSortDir = -1;
+
+  function openBrowse() {
+    if (!browseModal) return;
+    browseModal.classList.remove('hidden');
+    if (!browseData) {
+      fetch('/api/browse').then(r => r.json()).then(j => {
+        if (j.ok) { browseData = j; renderBrowse(); }
+      });
+    } else {
+      renderBrowse();
+    }
+  }
+  function closeBrowse() {
+    if (browseModal) browseModal.classList.add('hidden');
+  }
+
+  ['browse-btn-sidebar', 'browse-btn-header'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', openBrowse);
+  });
+  if (browseModal) {
+    browseModal.querySelectorAll('[data-browse-close]').forEach(el => {
+      el.addEventListener('click', closeBrowse);
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !browseModal.classList.contains('hidden')) closeBrowse();
+    });
+  }
+
+  function browseRow(c) {
+    const vis = c.visibility !== 'public' ? ' <span class="text-[10px]" title="Restricted">🔒</span>' : '';
+    const topic = esc((c.topic || c.description || '').slice(0, 128)) || '(no topic)';
+    const fullTopic = esc(c.topic || c.description || '');
+    const action = c.joined
+      ? '<button class="browse-open btn-ghost text-xs !py-1" data-slug="' + esc(c.slug) + '">Open</button>'
+      : '<button class="browse-join btn-primary text-xs !py-1" data-name="' + esc(c.name) + '" data-slug="' + esc(c.slug) + '">Join</button>';
+    return '<tr class="border-b border-discord-800 hover:bg-discord-750/40" data-name="' + esc(c.name.toLowerCase()) + '" data-topic="' + esc((c.topic || c.description || '').toLowerCase()) + '" data-members="' + c.members + '" data-joined="' + (c.joined ? '1' : '0') + '">' +
+      '<td class="px-3 py-2 font-medium text-white whitespace-nowrap">' + esc(c.name) + vis + '</td>' +
+      '<td class="px-3 py-2 text-discord-300 max-w-md truncate" title="' + fullTopic + '">' + topic + '</td>' +
+      '<td class="px-3 py-2 text-right text-discord-300">' + c.members + '</td>' +
+      '<td class="px-3 py-2 text-right">' + action + '</td></tr>';
+  }
+
+  function renderBrowse() {
+    if (!browseData) return;
+    const q = ((document.getElementById('browse-search') || {}).value || '').trim().toLowerCase();
+    const f = (document.getElementById('browse-filter') || {}).value || 'all';
+
+    const filterFn = c => {
+      if (f === 'joined' && !c.joined) return false;
+      if (f === 'open' && c.joined) return false;
+      if (q && c.name.toLowerCase().indexOf(q) === -1 && (c.topic || c.description || '').toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    };
+    const sortFn = (a, b) => {
+      let va = a[browseSortKey], vb = b[browseSortKey];
+      if (browseSortKey === 'members') return ((parseInt(va) || 0) - (parseInt(vb) || 0)) * browseSortDir;
+      return String(va || '').localeCompare(String(vb || '')) * browseSortDir;
+    };
+
+    const myFiltered = browseData.myChannels.filter(filterFn).sort(sortFn);
+    const allFiltered = browseData.channels.filter(filterFn).sort(sortFn);
+
+    const mySection = document.getElementById('browse-my-section');
+    const myTbody = document.getElementById('browse-my-tbody');
+    if (mySection && myTbody) {
+      if (myFiltered.length) {
+        mySection.classList.remove('hidden');
+        myTbody.innerHTML = myFiltered.map(browseRow).join('');
+      } else {
+        mySection.classList.add('hidden');
+      }
+    }
+
+    const tbody = document.getElementById('browse-tbody');
+    const empty = document.getElementById('browse-empty');
+    const countEl = document.getElementById('browse-count');
+    if (tbody) {
+      if (allFiltered.length) {
+        tbody.innerHTML = allFiltered.map(browseRow).join('');
+        if (empty) empty.classList.add('hidden');
+      } else {
+        tbody.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
+      }
+    }
+    if (countEl) countEl.textContent = allFiltered.length + ' channel' + (allFiltered.length === 1 ? '' : 's');
+
+    const onlineEl = document.getElementById('browse-online');
+    const peakEl = document.getElementById('browse-peak');
+    if (onlineEl) onlineEl.textContent = browseData.online;
+    if (peakEl) peakEl.textContent = browseData.peak;
+
+    browseModal.querySelectorAll('.browse-open').forEach(btn => {
+      btn.addEventListener('click', () => { window.location.href = '/app?channel=' + encodeURIComponent(btn.dataset.slug); });
+    });
+    browseModal.querySelectorAll('.browse-join').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.textContent = 'Joining…';
+        const fd = new FormData();
+        fd.append('csrf', CSRF);
+        fd.append('ajax', '1');
+        fd.append('name', btn.dataset.name);
+        fetch('/api/join', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
+          .then(r => r.json().catch(() => ({ error: 'Server error' })))
+          .then(j => {
+            if (j.redirect) { window.location.href = j.redirect; return; }
+            if (j.error === 'need_key' || (j.error || '').toLowerCase().indexOf('password') !== -1 || (j.error || '').toLowerCase().indexOf('key') !== -1) {
+              window.location.href = '/app?join=' + encodeURIComponent(btn.dataset.slug);
+              return;
+            }
+            btn.disabled = false;
+            btn.textContent = 'Join';
+            if (j.error) alert(j.error);
+          })
+          .catch(() => {
+            btn.disabled = false;
+            btn.textContent = 'Join';
+          });
+      });
+    });
+
+    // Update sort arrows
+    browseModal.querySelectorAll('th[data-bsort]').forEach(th => {
+      const arrow = th.querySelector('.bsort-arrow');
+      if (th.dataset.bsort === browseSortKey) arrow.textContent = browseSortDir === 1 ? '▲' : '▼';
+      else arrow.textContent = '⬍';
+    });
+  }
+
+  if (browseModal) {
+    const searchEl = document.getElementById('browse-search');
+    const filterEl = document.getElementById('browse-filter');
+    if (searchEl) searchEl.addEventListener('input', renderBrowse);
+    if (filterEl) filterEl.addEventListener('change', renderBrowse);
+    browseModal.querySelectorAll('th[data-bsort]').forEach(th => {
+      th.addEventListener('click', () => {
+        if (browseSortKey === th.dataset.bsort) browseSortDir *= -1;
+        else { browseSortKey = th.dataset.bsort; browseSortDir = browseSortKey === 'members' ? -1 : 1; }
+        renderBrowse();
+      });
+    });
   }
 })();

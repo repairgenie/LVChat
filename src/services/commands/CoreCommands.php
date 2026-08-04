@@ -252,7 +252,7 @@ CommandRegistry::register('list', [
     'desc' => 'Open the public channel browser.',
     'usage' => '/list',
     'run' => function (array $args, array $user, ?array $channel) {
-        return ['replies' => ['Opening channel browser...'], 'redirect' => '/browse'];
+        return ['replies' => ['Opening channel browser...'], 'action' => 'browse'];
     },
 ]);
 
@@ -261,7 +261,7 @@ CommandRegistry::register('channels', [
     'desc' => 'Alias of /list (public channel browser).',
     'usage' => '/channels',
     'run' => function (array $args, array $user, ?array $channel) {
-        return ['replies' => ['Opening channel browser...'], 'redirect' => '/browse'];
+        return ['replies' => ['Opening channel browser...'], 'action' => 'browse'];
     },
 ]);
 

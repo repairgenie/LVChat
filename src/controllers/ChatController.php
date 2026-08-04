@@ -682,6 +682,29 @@ final class ChatController
         json_out(['ok' => true, 'results' => ['channels' => $channels, 'dms' => $dms]]);
     }
 
+    public static function browseData(): void
+    {
+        $user = self::requireUser();
+        $myChannels = ChannelService::ownedChannels($user);
+        $myIds = array_column($myChannels, 'id');
+        $channels = array_values(array_filter(
+            ChannelService::publicChannels(''),
+            fn ($c) => !in_array($c['id'], $myIds, true)
+        ));
+        $joined = ChannelService::joinedChannelNames($user);
+        $joinedMap = [];
+        foreach ($joined as $c) {
+            $joinedMap[$c['id']] = true;
+        }
+        json_out([
+            'ok' => true,
+            'channels' => array_map(fn ($c) => ['id' => (int) $c['id'], 'name' => $c['name'], 'slug' => $c['slug'], 'topic' => $c['topic'] ?? '', 'description' => $c['description'] ?? '', 'members' => (int) $c['members'], 'visibility' => $c['visibility'], 'joined' => isset($joinedMap[$c['id']])], $channels),
+            'myChannels' => array_map(fn ($c) => ['id' => (int) $c['id'], 'name' => $c['name'], 'slug' => $c['slug'], 'topic' => $c['topic'] ?? '', 'description' => $c['description'] ?? '', 'members' => (int) $c['members'], 'visibility' => $c['visibility'], 'joined' => true], $myChannels),
+            'online' => online_count(),
+            'peak' => (int) (config_get('peak_online', '0') ?? 0),
+        ]);
+    }
+
     public static function notifications(): void
     {
         $user = self::requireUser();

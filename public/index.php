@@ -31,6 +31,7 @@ $router->post('/api/command', [ChatController::class, 'command']);
 $router->get('/api/poll', [ChatController::class, 'poll']);
 $router->get('/api/stream', [ChatController::class, 'stream']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
+$router->get('/api/browse', [ChatController::class, 'browseData']);
 $router->post('/api/notifications/read', [ChatController::class, 'readNotifications']);
 $router->post('/api/notifications/dismiss', [ChatController::class, 'dismissNotification']);
 $router->post('/api/channels', [ChannelController::class, 'create']);
