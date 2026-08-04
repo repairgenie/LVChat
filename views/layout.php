@@ -32,13 +32,11 @@
       </div>
       <?php if (isset($user) && $user): ?>
       <nav class="flex items-center gap-2">
-        <button id="theme-toggle" class="px-2 py-1.5 rounded-md hover:bg-discord-750 text-sm" title="Switch theme">🌙</button>
-        <a href="/browse" class="px-3 py-1.5 rounded-md hover:bg-discord-750 text-sm">Browse channels</a>
-        <a href="/app" class="px-3 py-1.5 rounded-md hover:bg-discord-750 text-sm">Chat</a>
+        <a href="/app" class="px-3 py-1.5 rounded-md hover:bg-discord-750 text-sm hidden md:inline-flex">Chat</a>
         <?php if ($user['role'] === 'admin'): ?>
-        <a href="/admin" class="px-3 py-1.5 rounded-md hover:bg-discord-750 text-sm text-amber-400">Admin</a>
+        <a href="/admin" class="px-3 py-1.5 rounded-md hover:bg-discord-750 text-sm text-amber-400 hidden md:inline-flex">Admin</a>
         <?php endif; ?>
-        <a href="/u/<?= h(rawurlencode($user['username'])) ?>" class="px-3 py-1.5 rounded-md bg-discord-750 text-sm font-medium"><?= h($user['username']) ?></a>
+        <a href="/u/<?= h(rawurlencode($user['username'])) ?>" class="px-3 py-1.5 rounded-md bg-discord-750 text-sm font-medium truncate max-w-[120px] sm:max-w-none"><?= h($user['username']) ?></a>
         <form method="post" action="/logout">
           <?= Csrf::field() ?>
           <button class="px-3 py-1.5 rounded-md hover:bg-discord-750 text-sm text-red-400">Log out</button>

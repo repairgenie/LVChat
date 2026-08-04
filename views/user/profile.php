@@ -1,6 +1,8 @@
 <?php $title = $user['username']; ?>
 <!-- X button: return to the chat -->
-<button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost fixed top-4 right-4 z-40 !p-2" title="Back to chat" aria-label="Close profile">✕</button>
+<div class="flex justify-end mb-2">
+  <button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost !p-2" title="Back to chat" aria-label="Close profile">✕</button>
+</div>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
   <div class="card p-6 text-center md:col-span-1">
     <div class="mx-auto w-20 h-20">
@@ -32,6 +34,10 @@
     <?php if ($user['away']): ?><div class="mt-2 text-sm text-amber-400">💤 <?= h($user['away']) ?></div><?php endif; ?>
     <?php if ($user['bot']): ?><div class="mt-2 text-sm text-blurple">Bot</div><?php endif; ?>
     <div class="mt-4 text-xs text-discord-400">Registered <?= date('M j, Y', strtotime($user['registered_at'] . ' UTC')) ?></div>
+
+    <?php if ($isSelf): ?>
+    <button id="profile-theme-toggle" class="btn-ghost w-full justify-center mt-4 text-sm">🌙 Dark mode</button>
+    <?php endif; ?>
 
     <?php if (!$isSelf): ?>
     <a href="/app?dm=<?= h(rawurlencode($user['username'])) ?>" class="btn-primary w-full justify-center mt-5">Send message</a>
@@ -251,6 +257,23 @@
     e.preventDefault();
     sndPost('/api/sound/override', new FormData(ovForm), () => location.reload());
   });
+
+  const themeBtn = document.getElementById('profile-theme-toggle');
+  if (themeBtn) {
+    function setIcon() { themeBtn.textContent = document.documentElement.classList.contains('light') ? '☀️ Light mode' : '🌙 Dark mode'; }
+    setIcon();
+    themeBtn.addEventListener('click', () => {
+      const light = document.documentElement.classList.toggle('light');
+      const theme = light ? 'light' : 'dark';
+      try { localStorage.setItem('lvc.theme', theme); } catch (e) {}
+      setIcon();
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('ajax', '1');
+      fd.append('theme', theme);
+      fetch('/api/profile', { method: 'POST', body: fd }).catch(() => {});
+    });
+  }
 
   const fa = document.getElementById('friend-actions');
   if (fa) {
