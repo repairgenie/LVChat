@@ -315,6 +315,7 @@ function member_html(array $m, bool $online): string {
     </div>
 
     <div class="border-t border-discord-700 bg-discord-800 p-2 shrink-0">
+      <a href="https://georgethegeek.com" target="_blank" rel="noopener" class="block text-center text-[10px] text-discord-500 hover:text-discord-300 py-1 transition-colors">Made with ❤️ in Las Vegas</a>
       <div class="flex items-center gap-2 rounded-md hover:bg-discord-600/40 px-2 py-1.5">
         <div class="w-8 h-8 rounded-full bg-blurple flex items-center justify-center text-sm font-bold text-white"><?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?></div>
         <div class="min-w-0 flex-1">
@@ -403,7 +404,7 @@ function member_html(array $m, bool $online): string {
     <?php endif; ?>
 
     <?php if ($channel): ?>
-    <div class="px-3 py-1.5 border-b border-discord-700 bg-discord-850 flex items-center gap-1.5 flex-wrap shrink-0">
+    <div class="hidden md:flex px-3 py-1.5 border-b border-discord-700 bg-discord-850 items-center gap-1.5 flex-wrap shrink-0">
       <span class="text-[10px] font-bold uppercase tracking-wide text-discord-400 mr-1">Modes</span>
       <?php foreach ($modeDefs as $flag => $def): ?>
       <button type="button"
