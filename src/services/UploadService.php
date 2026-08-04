@@ -6,14 +6,28 @@ final class UploadService
 {
     private const AVATAR_DIR = '/assets/avatars';
     private const UPLOAD_DIR = '/uploads';
+    private const TICKET_DIR = '/uploads/tickets';
     private const AVATAR_MAX_BYTES = 1048576;   // 1 MB
     private const IMAGE_MAX_BYTES = 5242880;    // 5 MB
+    private const TICKET_MAX_BYTES = 26214400;  // 25 MB
     private const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    private const TICKET_ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'txt', 'pdf', 'docx', 'odt'];
+    private const TICKET_ALLOWED_MIME = [
+        'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+        'text/plain',
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.oasis.opendocument.text',
+    ];
 
     /** Absolute path to a public runtime dir (created if missing). */
     public static function dir(string $kind): string
     {
-        $rel = $kind === 'avatar' ? self::AVATAR_DIR : self::UPLOAD_DIR;
+        $rel = match ($kind) {
+            'avatar' => self::AVATAR_DIR,
+            'ticket' => self::TICKET_DIR,
+            default => self::UPLOAD_DIR,
+        };
         $abs = ROOT . '/public' . $rel;
         if (!is_dir($abs)) {
             @mkdir($abs, 0775, true);
@@ -47,6 +61,51 @@ final class UploadService
             return ['ok' => false, 'error' => 'Only JPEG, PNG, WebP, and GIF images are allowed.'];
         }
         return ['ok' => true, 'ext' => $mimeToExt[$mime], 'mime' => $mime];
+    }
+
+    public static function validateTicketFile(array $file): array
+    {
+        if ((int) $file['error'] !== UPLOAD_ERR_OK) {
+            return ['ok' => false, 'error' => 'Upload failed (error ' . (int) $file['error'] . ').'];
+        }
+        if ((int) $file['size'] > self::TICKET_MAX_BYTES) {
+            return ['ok' => false, 'error' => 'File is too large (max 25 MB).'];
+        }
+        $ext = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, self::TICKET_ALLOWED_EXT, true)) {
+            return ['ok' => false, 'error' => 'Allowed formats: JPG, PNG, WebP, GIF, TXT, PDF, DOCX, ODT.'];
+        }
+        $finfo = new \finfo(FILEINFO_MIME_TYPE);
+        $mime = (string) $finfo->file((string) $file['tmp_name']);
+        if (!in_array($mime, self::TICKET_ALLOWED_MIME, true)) {
+            if ($ext === 'txt' && str_starts_with($mime, 'text/')) {
+                // accept any text/* for .txt
+            } else {
+                return ['ok' => false, 'error' => 'File type not allowed.'];
+            }
+        }
+        return ['ok' => true, 'ext' => $ext, 'mime' => $mime, 'original_name' => (string) $file['name']];
+    }
+
+    public static function storeTicketFile(array $file): array
+    {
+        $v = self::validateTicketFile($file);
+        if (!$v['ok']) {
+            return $v;
+        }
+        $abs = self::dir('ticket');
+        $name = bin2hex(random_bytes(16)) . '.' . $v['ext'];
+        $target = $abs . '/' . $name;
+        if (!move_uploaded_file((string) $file['tmp_name'], $target)) {
+            return ['ok' => false, 'error' => 'Could not store the uploaded file.'];
+        }
+        @chmod($target, 0644);
+        return ['ok' => true, 'url' => self::TICKET_DIR . '/' . $name, 'name' => $v['original_name'], 'ext' => $v['ext']];
+    }
+
+    public static function isImageExt(string $ext): bool
+    {
+        return in_array(strtolower($ext), ['jpg', 'jpeg', 'png', 'webp', 'gif'], true);
     }
 
     /** Store a validated upload with a random name. Returns the public URL path. */

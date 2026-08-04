@@ -12,10 +12,15 @@ final class SupportService
 {
     public const STATUS_LABELS = ['open' => 'Open', 'answered' => 'Answered', 'closed' => 'Closed'];
 
-    /** Create a ticket for a registered user (user-facing form). */
-    public static function create(array $user, string $subject, string $content): array
+    private static function sanitizeHtml(string $html): string
     {
-        return self::createTicket($user['id'], null, $user['id'], $subject, $content, null);
+        return LegalService::sanitize($html);
+    }
+
+    /** Create a ticket for a registered user (user-facing form). */
+    public static function create(array $user, string $subject, string $content, array $attachments = []): array
+    {
+        return self::createTicket($user['id'], null, $user['id'], $subject, $content, null, $attachments);
     }
 
     /**
@@ -23,14 +28,14 @@ final class SupportService
      * resolve to a contact; if an email matches a registered user, it links to
      * that account. Returns ['ok' => bool, 'id' => int, 'error' => ?string].
      */
-    public static function createStaff(?int $userId, string $email, int $openedBy, string $subject, string $content, ?int $assignedTo): array
+    public static function createStaff(?int $userId, string $email, int $openedBy, string $subject, string $content, ?int $assignedTo, array $attachments = []): array
     {
         $subject = trim($subject);
         $content = trim($content);
         if ($subject === '') {
             return ['ok' => false, 'error' => 'A subject is required.'];
         }
-        if ($content === '') {
+        if (trim(strip_tags($content)) === '') {
             return ['ok' => false, 'error' => 'Please describe the issue.'];
         }
         $userId = $userId ? (int) $userId : null;
@@ -49,20 +54,22 @@ final class SupportService
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return ['ok' => false, 'error' => 'That email address is not valid.'];
         }
-        return self::createTicket($userId, $email !== '' ? mb_substr($email, 0, 254) : null, $openedBy, $subject, $content, $assignedTo);
+        return self::createTicket($userId, $email !== '' ? mb_substr($email, 0, 254) : null, $openedBy, $subject, $content, $assignedTo, $attachments);
     }
 
     /** Shared insert: opens the ticket and adds the opening message as a reply. */
-    private static function createTicket(?int $userId, ?string $email, int $authorId, string $subject, string $content, ?int $assignedTo): array
+    private static function createTicket(?int $userId, ?string $email, int $authorId, string $subject, string $content, ?int $assignedTo, array $attachments = []): array
     {
         Database::query(
             'INSERT INTO support_tickets (user_id, email, subject, assigned_to, opened_by) VALUES (?, ?, ?, ?, ?)',
             [$userId, $email, mb_substr($subject, 0, 120), $assignedTo ? (int) $assignedTo : null, $authorId]
         );
         $id = (int) Database::lastId();
+        $attJson = !empty($attachments) ? json_encode($attachments) : null;
+        $safeContent = self::sanitizeHtml($content);
         Database::query(
-            'INSERT INTO support_ticket_replies (ticket_id, author_id, is_staff, content) VALUES (?, ?, 1, ?)',
-            [$id, $authorId, $content]
+            'INSERT INTO support_ticket_replies (ticket_id, author_id, is_staff, content, attachments) VALUES (?, ?, 1, ?, ?)',
+            [$id, $authorId, $safeContent, $attJson]
         );
         log_audit('support_ticket_staff_open', 'ticket#' . $id, $subject);
         return ['ok' => true, 'id' => $id];
@@ -148,11 +155,11 @@ final class SupportService
         return null;
     }
 
-    public static function reply(int $ticketId, array $user, string $content): array
+    public static function reply(int $ticketId, array $user, string $content, array $attachments = []): array
     {
         $content = trim($content);
-        if ($content === '') {
-            return ['ok' => false, 'error' => 'A reply is required.'];
+        if (trim(strip_tags($content)) === '' && empty($attachments)) {
+            return ['ok' => false, 'error' => 'A reply or attachment is required.'];
         }
         $ticket = self::get($ticketId);
         if (!$ticket) {
@@ -163,9 +170,11 @@ final class SupportService
         if (!$isStaff && !$isOwner) {
             return ['ok' => false, 'error' => 'You cannot reply to this ticket.'];
         }
+        $attJson = !empty($attachments) ? json_encode($attachments) : null;
+        $safeContent = self::sanitizeHtml($content);
         Database::query(
-            'INSERT INTO support_ticket_replies (ticket_id, author_id, is_staff, content) VALUES (?, ?, ?, ?)',
-            [$ticketId, (int) $user['id'], $isStaff ? 1 : 0, $content]
+            'INSERT INTO support_ticket_replies (ticket_id, author_id, is_staff, content, attachments) VALUES (?, ?, ?, ?, ?)',
+            [$ticketId, (int) $user['id'], $isStaff ? 1 : 0, $safeContent, $attJson]
         );
         $status = $isStaff ? 'answered' : 'open';
         if ($isStaff && (string) $ticket['status'] === 'closed') {

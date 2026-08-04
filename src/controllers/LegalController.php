@@ -24,4 +24,16 @@ final class LegalController
             'user' => Auth::user(),
         ]);
     }
+
+    public static function apiTerms(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(['html' => LegalService::get('terms')]);
+    }
+
+    public static function apiPrivacy(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(['html' => LegalService::get('privacy')]);
+    }
 }

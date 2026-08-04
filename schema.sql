@@ -423,6 +423,7 @@ CREATE TABLE IF NOT EXISTS support_ticket_replies (
   author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   is_staff INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL,
+  attachments TEXT DEFAULT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_support_replies_ticket ON support_ticket_replies(ticket_id, id);

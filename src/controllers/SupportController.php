@@ -35,7 +35,13 @@ final class SupportController
         Csrf::verify();
         $subject = trim((string) ($_POST['subject'] ?? ''));
         $content = trim((string) ($_POST['content'] ?? ''));
-        $result = SupportService::create($user, $subject, $content);
+        $attachments = self::processAttachments();
+        if (!empty($attachments['errors'])) {
+            $_SESSION['old'] = ['subject' => $subject, 'content' => $content];
+            flash(implode(' ', $attachments['errors']));
+            redirect('/support');
+        }
+        $result = SupportService::create($user, $subject, $content, $attachments['files']);
         if (!$result['ok']) {
             $_SESSION['old'] = ['subject' => $subject, 'content' => $content];
             flash($result['error']);
@@ -76,13 +82,19 @@ final class SupportController
         $assignedTo = (int) ($_POST['assigned_to'] ?? 0);
         $subject = (string) ($_POST['subject'] ?? '');
         $content = (string) ($_POST['content'] ?? '');
+        $attachments = self::processAttachments();
+        if (!empty($attachments['errors'])) {
+            flash(implode(' ', $attachments['errors']));
+            redirect('/admin/support');
+        }
         $result = SupportService::createStaff(
             $userId > 0 ? $userId : null,
             $email,
             (int) $staff['id'],
             $subject,
             $content,
-            $assignedTo > 0 ? $assignedTo : null
+            $assignedTo > 0 ? $assignedTo : null,
+            $attachments['files']
         );
         if (!$result['ok']) {
             flash($result['error']);
@@ -120,7 +132,12 @@ final class SupportController
             exit('Not found');
         }
         $content = trim((string) ($_POST['content'] ?? ''));
-        $result = SupportService::reply((int) $ticket['id'], $user, $content);
+        $attachments = self::processAttachments();
+        if (!empty($attachments['errors'])) {
+            flash(implode(' ', $attachments['errors']));
+            redirect('/support/' . (int) $ticket['id']);
+        }
+        $result = SupportService::reply((int) $ticket['id'], $user, $content, $attachments['files']);
         if (!$result['ok']) {
             flash($result['error']);
         } else {
@@ -143,6 +160,38 @@ final class SupportController
         SupportService::setStatus((int) $ticket['id'], 'closed', $user);
         log_audit('support_ticket_close', 'ticket#' . $ticket['id']);
         redirect('/support/' . (int) $ticket['id']);
+    }
+
+    private static function processAttachments(): array
+    {
+        $files = [];
+        $errors = [];
+        if (empty($_FILES['attachments'])) {
+            return ['files' => [], 'errors' => []];
+        }
+        $count = count($_FILES['attachments']['name']);
+        if ($count > 5) {
+            return ['files' => [], 'errors' => ['Maximum 5 attachments allowed.']];
+        }
+        for ($i = 0; $i < $count; $i++) {
+            if ((int) $_FILES['attachments']['error'][$i] !== UPLOAD_ERR_OK) {
+                continue;
+            }
+            $file = [
+                'tmp_name' => $_FILES['attachments']['tmp_name'][$i],
+                'name' => $_FILES['attachments']['name'][$i],
+                'size' => $_FILES['attachments']['size'][$i],
+                'error' => $_FILES['attachments']['error'][$i],
+                'type' => $_FILES['attachments']['type'][$i],
+            ];
+            $stored = UploadService::storeTicketFile($file);
+            if (!$stored['ok']) {
+                $errors[] = $stored['error'];
+            } else {
+                $files[] = ['url' => $stored['url'], 'name' => $stored['name'], 'ext' => $stored['ext']];
+            }
+        }
+        return ['files' => $files, 'errors' => $errors];
     }
 
     /** POST /support/{id}/reopen — reopen a ticket (staff). */

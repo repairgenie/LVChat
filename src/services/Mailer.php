@@ -200,13 +200,15 @@ final class Mailer
         $ticketSubject = trim($subject) !== '' ? $subject : 'your support ticket';
         $mailSubject = "Re: $ticketSubject";
         $link = base_url() . '/support/' . $ticketId;
+        $plainReply = strip_tags($reply);
         $text = "Hi,\n\n$staffName has replied to your support ticket on $site.\n\n"
-            . "Reply:\n$reply\n\n"
+            . "Reply:\n$plainReply\n\n"
             . "View the ticket: $link\n";
 
+        $safeReply = LegalService::sanitize($reply);
         $body = '<p>Hi,</p>'
             . '<p><strong>' . h($staffName) . '</strong> has replied to your support ticket on <strong>' . h($site) . '</strong>.</p>'
-            . '<div style="border-left:3px solid #5865f2;background:#232428;padding:10px 14px;border-radius:6px;white-space:pre-wrap">' . h($reply) . '</div>'
+            . '<div style="border-left:3px solid #5865f2;background:#232428;padding:10px 14px;border-radius:6px">' . $safeReply . '</div>'
             . '<p><a href="' . h($link) . '" style="display:inline-block;background:#5865f2;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600">View the ticket</a></p>';
 
         return self::send($to, $mailSubject, $text, self::htmlWrap($mailSubject, $body));
