@@ -467,7 +467,7 @@ final class ChatController
     {
         $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => [], 'bg_messages' => []];
 
-        $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? OR guest_user_id = ?', [$user['id'], $user['id']]);
+        $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0', [$user['id'], $user['id']]);
         $out['notify_count'] = $notifyCount;
         // Live DM sidebar data — returned on every poll regardless of which page
         // the user is on, so a DM sent to someone sitting in a channel surfaces.

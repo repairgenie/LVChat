@@ -652,7 +652,7 @@ function member_html(array $m, bool $online): string {
   <?php endif; ?>
 
   <!-- Notifications panel -->
-  <div id="notif-panel" class="hidden fixed top-14 right-4 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 flex flex-col" style="max-height:70vh">
+  <div id="notif-panel" class="hidden fixed w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 flex flex-col" style="max-height:70vh" data-pos="auto">
     <div class="px-3 py-2 border-b border-discord-700 text-sm font-semibold flex items-center justify-between shrink-0">
       <span>Notifications</span>
       <button id="notif-clear" class="text-xs text-discord-400 hover:text-white cursor-pointer">Mark all read</button>

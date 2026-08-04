@@ -973,9 +973,33 @@
       });
     });
   }
+  function positionNotifPanel() {
+    if (!bell || !notifPanel) return;
+    const r = bell.getBoundingClientRect();
+    const pw = Math.min(384, window.innerWidth - 32);
+    let left = r.right - pw;
+    if (left < 8) left = 8;
+    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+    const top = r.bottom + 4;
+    notifPanel.style.top = top + 'px';
+    notifPanel.style.left = left + 'px';
+    notifPanel.style.width = pw + 'px';
+  }
   if (bell) bell.addEventListener('click', () => {
+    const opening = notifPanel.classList.contains('hidden');
     notifPanel.classList.toggle('hidden');
-    if (!notifPanel.classList.contains('hidden')) loadNotifications();
+    if (opening) {
+      positionNotifPanel();
+      loadNotifications();
+    }
+  });
+  window.addEventListener('resize', () => {
+    if (notifPanel && !notifPanel.classList.contains('hidden')) positionNotifPanel();
+  });
+  document.addEventListener('click', (e) => {
+    if (!notifPanel || notifPanel.classList.contains('hidden')) return;
+    if (notifPanel.contains(e.target) || (bell && bell.contains(e.target))) return;
+    notifPanel.classList.add('hidden');
   });
   const notifClear = document.getElementById('notif-clear');
   if (notifClear) notifClear.addEventListener('click', () => {
