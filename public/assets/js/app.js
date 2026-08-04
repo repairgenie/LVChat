@@ -1320,6 +1320,23 @@
       uploadFile.files = dt.files;
       uploadFile.dispatchEvent(new Event('change'));
     });
+    // Paste an image from the clipboard (screenshots, copied images).
+    input.addEventListener('paste', (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file' && items[i].type && items[i].type.indexOf('image/') === 0) {
+          const f = items[i].getAsFile();
+          if (!f) continue;
+          e.preventDefault();
+          const dt = new DataTransfer();
+          dt.items.add(f);
+          uploadFile.files = dt.files;
+          uploadFile.dispatchEvent(new Event('change'));
+          break;
+        }
+      }
+    });
   }
 
   // ── Image lightbox ─────────────────────────────────────────────────────────
