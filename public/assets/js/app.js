@@ -190,9 +190,10 @@
     const nameColor = isAdmin ? 'text-red-400' : (COLORS[m.level || 'normal'] || COLORS.normal);
     const contentColor = isAdmin ? 'text-red-400' : 'text-discord-200';
     if (m.kind === 'action') {
-      return `<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="${m.id}" data-kind="action" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}">
+      return `<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="${m.id}" data-kind="action" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
         <div class="w-10 shrink-0"></div>
         <div class="text-sm ${contentColor}"${roleStyle}><span class="italic">* <span class="font-medium ${nameColor}"${roleStyle}>${esc(m.username)}</span>${guestTag} ${linkify(m.content)}</span></div>
+        <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5" title="More">⋮</button>
       </div>`;
     }
     const sym = SYMBOL[m.level || 'normal'] || '';
@@ -200,13 +201,14 @@
       ? `<a class="reply-line block text-xs text-discord-400 italic hover:text-discord-300 mt-0.5 break-all" href="#msg-${parseInt(m.reply_to_id, 10)}" data-reply-scroll="${parseInt(m.reply_to_id, 10)}">↪ <span class="font-semibold">${esc(m.reply_to_username || '')}</span>: ${esc(m.reply_to_excerpt || '')}</a>`
       : '';
     if (grouped) {
-      return `<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}">
+      return `<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
         <div class="w-10 shrink-0"></div>
         <div class="min-w-0 flex-1">
           ${replyLine}
           <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${msgContentHtml(m)}</div>
           ${msgReactionsHtml(m)}
         </div>
+        <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5" title="More">⋮</button>
       </div>`;
     }
     let actions = '';
@@ -215,7 +217,7 @@
       actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
         + '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
-    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}">
+    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
       <div class="w-10 h-10 shrink-0">${avatarHtml(m, 'w-10 h-10 rounded-full')}</div>
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 h-[22px]">
@@ -228,6 +230,7 @@
         ${msgReactionsHtml(m)}
       </div>
       <div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">${actions}</div>
+      <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-1" title="More">⋮</button>
     </div>`;
   }
 
@@ -640,6 +643,7 @@
     const unreadCls = d.unread ? ' font-semibold' + (isAdmin ? '' : ' text-white') : '';
     return `<a href="/app?dm=${encodeURIComponent(d.username)}"
          data-ctx-user="${esc(d.username)}"
+         data-guest="${d.guest ? '1' : '0'}"
          class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'} ${online ? '' : 'italic opacity-70'}">
       <span class="w-2 h-2 rounded-full ${dot}"></span>
       <span class="truncate ${nameCls}${unreadCls}">${esc(d.username)}${guestTag}</span>
@@ -1360,6 +1364,54 @@
     } catch (e) {}
   })();
 
+  // ── Right panel toggle (desktop collapse + mobile drawer) ─────────────────
+  (function () {
+    const btn = document.getElementById('right-panel-toggle');
+    const mobBtn = document.getElementById('right-panel-btn-m');
+    const backdrop = document.getElementById('right-panel-backdrop');
+    const isMobile = () => window.innerWidth < 768;
+    function closeRight() {
+      document.body.classList.remove('right-open');
+      if (backdrop) backdrop.classList.add('hidden');
+    }
+    function openRight() {
+      document.body.classList.add('right-open');
+      if (backdrop) backdrop.classList.remove('hidden');
+    }
+    if (btn) btn.addEventListener('click', () => {
+      if (isMobile()) {
+        if (document.body.classList.contains('right-open')) closeRight();
+        else openRight();
+      } else {
+        const collapsed = document.body.classList.toggle('right-collapsed');
+        try { localStorage.setItem('lvc.rightPanel', collapsed ? '0' : '1'); } catch (e) {}
+      }
+    });
+    if (mobBtn) mobBtn.addEventListener('click', () => {
+      if (document.body.classList.contains('right-open')) closeRight();
+      else openRight();
+    });
+    if (backdrop) backdrop.addEventListener('click', closeRight);
+    try {
+      if (!isMobile() && localStorage.getItem('lvc.rightPanel') === '0') {
+        document.body.classList.add('right-collapsed');
+      }
+    } catch (e) {}
+  })();
+
+  // ── Mobile context menu buttons on messages ────────────────────────────────
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.msg-ctx-btn');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const msg = btn.closest('.msg[data-id]');
+    if (msg) {
+      const rect = btn.getBoundingClientRect();
+      msgMenu(rect.left, rect.bottom + 4, msg);
+    }
+  });
+
   // ── Share / part / create ──────────────────────────────────────────────────
   const shareBtn = document.getElementById('share-btn');
   if (shareBtn) shareBtn.addEventListener('click', () => {
@@ -1499,6 +1551,7 @@
     const nick = el.dataset.ctxUser || el.dataset.username || el.dataset.nick;
     if (!nick) return;
     const isSelf = nick.toLowerCase() === MY_NICK;
+    const isGuest = el.dataset.guest === '1';
     const level = el.dataset.level || '';
     const items = [
       { label: 'Message ' + nick, onClick: () => { window.location = '/app?dm=' + encodeURIComponent(nick); } },
@@ -1529,7 +1582,9 @@
     }
     if (!isSelf) {
       items.push({ div: true });
-      items.push({ label: 'Add friend', onClick: () => post('/api/friend/request', { username: nick }, () => showReply('Friend request sent.')) });
+      if (!isGuest) {
+        items.push({ label: 'Add friend', onClick: () => post('/api/friend/request', { username: nick }, () => showReply('Friend request sent.')) });
+      }
       items.push({ label: 'Block ' + nick, danger: true, onClick: () => post('/api/friend/block', { username: nick }, () => showReply(nick + ' has been blocked.')) });
     }
     ctxShow(x, y, items);
@@ -1538,6 +1593,7 @@
   function msgMenu(x, y, el) {
     const id = el.dataset.id;
     const author = el.dataset.author;
+    const isGuestMsg = el.dataset.guest === '1';
     const contentEl = el.querySelector('.msg-content');
     const content = contentEl ? contentEl.textContent : '';
     const contentHtml = contentEl ? contentEl.innerHTML : '';
@@ -1566,6 +1622,11 @@
     if (author && author.toLowerCase() !== MY_NICK) {
       items.push({ label: 'Message ' + author, onClick: () => { window.location = '/app?dm=' + encodeURIComponent(author); } });
       items.push({ label: 'Copy username', onClick: () => copyText(author) });
+      if (!isGuestMsg) {
+        items.push({ div: true });
+        items.push({ label: 'Add friend', onClick: () => post('/api/friend/request', { username: author }, () => showReply('Friend request sent.')) });
+      }
+      items.push({ label: 'Block ' + author, danger: true, onClick: () => post('/api/friend/block', { username: author }, () => showReply(author + ' has been blocked.')) });
     }
     if (!items.length) return;
     ctxShow(x, y, items);
@@ -1936,7 +1997,7 @@
   // handlers (lightbox, sidebar, context menu, install modal, search results)
   // so that only the most relevant open panel is dismissed per keypress:
   //   1. search-results dropdown  →  2. header dropdown  →  3. lightbox
-  //   4. sidebar backdrop  →  5. context menu  →  6. install modal
+  //   4. right panel  →  5. sidebar backdrop  →  6. context menu  →  7. install modal
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (searchResults && !searchResults.classList.contains('hidden')) {
@@ -1946,6 +2007,10 @@
       closeHdr();
     } else if (lightbox && !lightbox.classList.contains('hidden')) {
       closeLightbox();
+    } else if (document.body.classList.contains('right-open')) {
+      document.body.classList.remove('right-open');
+      const rpb = document.getElementById('right-panel-backdrop');
+      if (rpb) rpb.classList.add('hidden');
     } else if (document.body.classList.contains('sidebar-open')) {
       closeSidebar();
     } else if (ctxMenu && !ctxMenu.classList.contains('hidden')) {

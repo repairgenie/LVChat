@@ -26,6 +26,12 @@ final class ChatController
                 redirect('/c/' . rawurlencode($channel['slug']));
             }
         }
+        if (!$channel && !$dm && !isset($_GET['channel'])) {
+            $channel = ChannelService::findBySlug('general');
+            if ($channel && !AccessService::member($channel['id'], $user)) {
+                ChannelService::join($channel, $user);
+            }
+        }
         // Messaging yourself is allowed (an IRC hallmark) — no self-DM guard.
 
         // Password-protected join: /app?join=<slug> opens the chat with a modal

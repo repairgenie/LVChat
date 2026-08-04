@@ -82,10 +82,11 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
         $rc = (!$isAdmin && !empty($m['role_color'])) ? ' style="color:' . h($m['role_color']) . '"' : '';
         $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
         $nameColor = $isAdmin ? 'text-red-400' : 'text-discord-100';
-        return '<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="' . (int) $m['id'] . '" data-kind="action" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '">
-            <div class="w-10 shrink-0"></div>
-            <div class="text-sm ' . ($isAdmin ? 'text-red-400' : 'text-discord-200') . '"' . $rc . '><span class="italic">* <span class="font-medium ' . $nameColor . '"' . $rc . '>' . h($m['username']) . '</span>' . $guestTag . ' ' . chat_markup($m['content']) . '</span></div>
-        </div>';
+        return '<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="' . (int) $m['id'] . '" data-kind="action" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">'
+            . '<div class="w-10 shrink-0"></div>'
+            . '<div class="text-sm ' . ($isAdmin ? 'text-red-400' : 'text-discord-200') . '"' . $rc . '><span class="italic">* <span class="font-medium ' . $nameColor . '"' . $rc . '>' . h($m['username']) . '</span>' . $guestTag . ' ' . chat_markup($m['content']) . '</span></div>'
+            . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5 ml-auto" title="More">⋮</button>'
+            . '</div>';
     }
 
     $group = false;
@@ -114,14 +115,15 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
     }
 
     if ($group) {
-        return '<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="message" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '">
-            <div class="w-10 shrink-0"></div>
-            <div class="min-w-0 flex-1">
-                ' . $replyLine . '
-                <div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>
-                ' . reactions_html($m, $viewer) . '
-            </div>
-        </div>';
+        return '<div class="msg group px-4 py-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="message" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">'
+            . '<div class="w-10 shrink-0"></div>'
+            . '<div class="min-w-0 flex-1">'
+            . $replyLine
+            . '<div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>'
+            . reactions_html($m, $viewer)
+            . '</div>'
+            . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5" title="More">⋮</button>'
+            . '</div>';
     }
 
     $actions = '';
@@ -132,20 +134,21 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
             . '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
 
-    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '">
-        <div class="w-10 h-10 shrink-0">' . avatar_img($m, 'w-10 h-10 rounded-full') . '</div>
-        <div class="min-w-0 flex-1">
-            <div class="flex items-baseline gap-2 h-[22px]">
-                <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . (!empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '') . '</span>
-                <span class="time text-[11px] text-discord-400 hidden group-hover:inline" data-ts="' . h($m['created_at']) . '">' . h(date('H:i', strtotime($m['created_at'] . ' UTC'))) . '</span>
-                ' . (!empty($m['edited_at']) ? '<span class="text-[10px] text-discord-400">(edited)</span>' : '') . '
-            </div>
-            ' . $replyLine . '
-            <div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>
-            ' . reactions_html($m, $viewer) . '
-        </div>
-        <div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">' . $actions . '</div>
-    </div>';
+    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">'
+        . '<div class="w-10 h-10 shrink-0">' . avatar_img($m, 'w-10 h-10 rounded-full') . '</div>'
+        . '<div class="min-w-0 flex-1">'
+        . '<div class="flex items-baseline gap-2 h-[22px]">'
+        . '<span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . (!empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '') . '</span>'
+        . '<span class="time text-[11px] text-discord-400 hidden group-hover:inline" data-ts="' . h($m['created_at']) . '">' . h(date('H:i', strtotime($m['created_at'] . ' UTC'))) . '</span>'
+        . (!empty($m['edited_at']) ? '<span class="text-[10px] text-discord-400">(edited)</span>' : '')
+        . '</div>'
+        . $replyLine
+        . '<div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>'
+        . reactions_html($m, $viewer)
+        . '</div>'
+        . '<div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">' . $actions . '</div>'
+        . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-1" title="More">⋮</button>'
+        . '</div>';
 }
 
 function channel_link(array $c, string $channelSlug, array $user): string {
@@ -288,6 +291,7 @@ function member_html(array $m, bool $online): string {
           <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = $d['away'] === null && !empty($d['last_seen']) && (time() - strtotime($d['last_seen'] . ' UTC')) <= 90; $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
           <a href="/app?dm=<?= h(rawurlencode($d['username'])) ?>"
              data-ctx-user="<?= h($d['username']) ?>"
+             data-guest="<?= !empty($d['guest']) ? '1' : '0' ?>"
              class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm <?= $dmName === $d['username'] ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white' ?> <?= $dOnline ? '' : 'italic opacity-70' ?>">
             <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : ($dOnline ? 'bg-green-500' : 'bg-discord-500') ?>"></span>
             <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?> <?= $unreadCls ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
@@ -358,6 +362,7 @@ function member_html(array $m, bool $online): string {
         <button type="button" data-embed class="btn-ghost text-xs hidden md:flex" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
         <button id="part-btn" class="btn-ghost text-xs text-red-400 hidden md:flex" title="Leave channel">✕ Leave</button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php elseif ($dm): ?>
@@ -365,6 +370,7 @@ function member_html(array $m, bool $online): string {
       <span class="text-xs text-discord-400">Private message</span>
       <div class="relative ml-auto flex items-center gap-2">
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php else: ?>
@@ -374,6 +380,7 @@ function member_html(array $m, bool $online): string {
         <a href="/browse" class="btn-primary text-xs hidden md:flex">Browse channels</a>
         <button id="create-channel-2" class="btn-ghost text-xs hidden md:flex">＋ New channel</button>
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex">⬇ How to install</button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php endif; ?>
@@ -486,8 +493,11 @@ function member_html(array $m, bool $online): string {
     </div>
   </section>
 
-  <!-- ── Right: member list ── -->
-  <aside class="hidden md:flex w-60 bg-discord-800 flex-col shrink-0 min-h-0">
+  <!-- ── Mobile right panel backdrop ── -->
+  <div id="right-panel-backdrop" class="hidden fixed inset-0 z-[55] bg-black/60 md:hidden"></div>
+
+  <!-- ── Right: friends + member list ── -->
+  <aside id="right-panel" class="right-panel hidden md:flex w-60 bg-discord-800 flex-col shrink-0 min-h-0">
     <?php if ((int) ($user['guest'] ?? 0) !== 1): ?>
     <?php
     $onlineFriends = array_values(array_filter($friends, fn($f) => !empty($f['is_online'])));

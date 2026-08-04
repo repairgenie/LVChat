@@ -94,6 +94,26 @@ body.chat-app { position: fixed; inset: 0; overflow: hidden; }
   body.sidebar-open .sidebar { transform: translateX(0); box-shadow: 0 0 28px rgba(0,0,0,.55); }
 }
 
+/* Right panel (friends + members): off-canvas drawer on mobile, collapsible on desktop. */
+.right-panel { transition: transform .2s ease; }
+@media (min-width: 768px) {
+  body.right-collapsed .right-panel { display: none; }
+}
+@media (max-width: 767.98px) {
+  .right-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    width: 280px;
+    max-width: 85vw;
+    transform: translateX(100%);
+    display: flex;
+  }
+  body.right-open .right-panel { transform: translateX(0); box-shadow: 0 0 28px rgba(0,0,0,.55); }
+}
+
 /* A handful of hardcoded `text-white` usages sit on plain panels (not colored
    chips/avatars) and need dark text in light mode. */
 html.light .text-white { color: var(--c-d-100); }

@@ -13,6 +13,8 @@
     <?php endif; ?>
     <!-- Theme toggle -->
     <button id="header-theme-toggle" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">🌙 Dark mode</button>
+    <!-- Mobile: show friends & members panel -->
+    <button id="right-panel-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200 md:hidden">👥 Friends &amp; Members</button>
     <?php if ($channel): ?>
     <div class="h-px bg-discord-700 my-1"></div>
     <button id="share-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">🔗 Share link</button>
