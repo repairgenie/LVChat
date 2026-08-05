@@ -2260,24 +2260,37 @@
     });
   }
 
+  function browseAvatar(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+    const hue = Math.abs(h) % 360;
+    const letter = (name[0] || '#').toUpperCase();
+    return '<div class="w-10 h-10 rounded-lg shrink-0 flex items-center justify-center text-base font-bold text-white shadow-inner" style="background:linear-gradient(135deg,hsl(' + hue + ',55%,45%),hsl(' + ((hue + 40) % 360) + ',50%,35%))">' + esc(letter) + '</div>';
+  }
+
   function browseRow(c) {
-    const vis = c.visibility !== 'public' ? '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-discord-700 text-discord-400" title="Restricted">🔒</span>' : '';
-    const topicText = (c.topic || c.description || '').slice(0, 100);
-    const topic = topicText ? esc(topicText) : '<span class="text-discord-500 italic">No topic</span>';
+    const vis = c.visibility !== 'public' ? '<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-discord-700/80 text-discord-400 border border-discord-600/50" title="Restricted">🔒</span>' : '';
+    const topicText = (c.topic || c.description || '').slice(0, 120);
+    const topic = topicText ? esc(topicText) : '<span class="text-discord-500 italic">No topic set</span>';
+    const online = c.online != null ? c.online : c.members;
     const action = c.joined
-      ? '<button class="browse-open px-4 py-1.5 rounded text-sm font-medium bg-discord-700 hover:bg-discord-600 text-discord-200 transition-colors" data-slug="' + esc(c.slug) + '">Open</button>'
-      : '<button class="browse-join px-4 py-1.5 rounded text-sm font-medium bg-blurple hover:bg-blurple/90 text-white transition-colors" data-name="' + esc(c.name) + '" data-slug="' + esc(c.slug) + '">Join</button>';
-    return '<div class="browse-item group flex items-center gap-4 p-4 rounded-lg bg-discord-750/50 hover:bg-discord-700/70 border border-discord-700 hover:border-discord-600 transition-all cursor-pointer" data-name="' + esc(c.name.toLowerCase()) + '" data-topic="' + esc((c.topic || c.description || '').toLowerCase()) + '" data-members="' + c.members + '" data-joined="' + (c.joined ? '1' : '0') + '">' +
+      ? '<button class="browse-open px-5 py-2 rounded-lg text-sm font-semibold bg-discord-700 hover:bg-discord-600 text-white transition-all border border-discord-600 hover:border-discord-500" data-slug="' + esc(c.slug) + '">Open</button>'
+      : '<button class="browse-join px-5 py-2 rounded-lg text-sm font-semibold bg-blurple hover:bg-blurple-dark text-white transition-all shadow-md shadow-blurple/20 hover:shadow-blurple/30" data-name="' + esc(c.name) + '" data-slug="' + esc(c.slug) + '">Join</button>';
+    return '<div class="browse-item browse-row-premium group flex items-center gap-4 p-4 rounded-xl bg-discord-800/80 border border-discord-700/80 cursor-pointer" data-name="' + esc(c.name.toLowerCase()) + '" data-topic="' + esc((c.topic || c.description || '').toLowerCase()) + '" data-members="' + c.members + '" data-joined="' + (c.joined ? '1' : '0') + '">' +
+      browseAvatar(c.name) +
       '<div class="flex-1 min-w-0">' +
-        '<div class="flex items-center gap-2 mb-1">' +
-          '<span class="font-semibold text-white">' + esc(c.name) + '</span>' + vis +
+        '<div class="flex items-center gap-1.5 mb-0.5">' +
+          '<span class="font-bold text-[15px] text-white group-hover:text-blurple transition-colors">' + esc(c.name) + '</span>' + vis +
         '</div>' +
-        '<div class="text-sm text-discord-300 truncate">' + topic + '</div>' +
+        '<div class="text-[13px] text-discord-300 line-clamp-2 leading-relaxed">' + topic + '</div>' +
       '</div>' +
       '<div class="flex items-center gap-4 shrink-0">' +
-        '<div class="flex items-center gap-1.5 text-xs text-discord-400">' +
-          '<span class="w-1.5 h-1.5 rounded-full bg-discord-500"></span>' +
-          '<span>' + c.members + ' member' + (c.members === 1 ? '' : 's') + '</span>' +
+        '<div class="text-right">' +
+          '<div class="flex items-center justify-end gap-1.5 text-xs">' +
+            '<span class="w-1.5 h-1.5 rounded-full bg-green-500 pulse-dot"></span>' +
+            '<span class="text-discord-200 font-semibold">' + online + '</span>' +
+          '</div>' +
+          '<div class="text-[10px] text-discord-500 mt-0.5">' + c.members + ' member' + (c.members === 1 ? '' : 's') + '</div>' +
         '</div>' +
         action +
       '</div>' +

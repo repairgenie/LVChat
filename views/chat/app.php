@@ -653,34 +653,35 @@ function member_html(array $m, bool $online): string {
 
   <!-- Channel browser modal -->
   <div id="browse-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
-    <div class="absolute inset-0 bg-black/70" data-browse-close></div>
-    <div class="relative bg-discord-800 rounded-lg shadow-2xl w-[min(96vw,900px)] flex flex-col" style="max-height:85vh">
-      <div class="px-6 py-5 border-b border-discord-700 flex items-center justify-between shrink-0">
+    <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-browse-close></div>
+    <div class="relative bg-discord-800 rounded-xl browse-glow browse-modal-enter w-[min(96vw,920px)] flex flex-col overflow-hidden" style="max-height:88vh">
+      <div class="browse-gradient-accent shrink-0"></div>
+      <div class="px-6 pt-5 pb-4 flex items-start justify-between shrink-0">
         <div>
-          <h2 class="text-xl font-bold text-white">Channel Browser</h2>
-          <p class="text-sm text-discord-400 mt-1">Discover public channels on <?= h($site) ?></p>
+          <h2 class="text-2xl font-extrabold text-white tracking-tight">Channel Browser</h2>
+          <p class="text-sm text-discord-400 mt-1">Discover and join public channels on <?= h($site) ?></p>
         </div>
-        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center rounded hover:bg-discord-700">&times;</button>
+        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-lg leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-discord-700/80 transition-colors mt-0.5" title="Close">✕</button>
       </div>
-      <div class="px-6 py-4 border-b border-discord-700 bg-discord-750/50 shrink-0">
-        <div class="flex flex-wrap gap-4 items-center">
-          <div class="flex items-center gap-3 px-4 py-2 bg-discord-800 rounded-lg">
-            <div class="flex items-center gap-2">
-              <span class="w-2.5 h-2.5 rounded-full bg-green-500 shadow-lg shadow-green-500/50"></span>
-              <span class="text-sm font-semibold text-white" id="browse-online">0</span>
-              <span class="text-xs text-discord-400">online</span>
+      <div class="px-6 pb-4 shrink-0">
+        <div class="flex flex-wrap gap-3 items-stretch">
+          <div class="browse-stat-card browse-stat-green rounded-lg px-4 py-3 flex items-center gap-3 min-w-[130px]">
+            <span class="w-2.5 h-2.5 rounded-full bg-green-500 pulse-dot shadow-lg shadow-green-500/50 shrink-0"></span>
+            <div>
+              <div class="text-xl font-bold text-white leading-tight" id="browse-online">0</div>
+              <div class="text-[11px] text-discord-400 font-medium uppercase tracking-wide">Online</div>
             </div>
           </div>
-          <div class="flex items-center gap-3 px-4 py-2 bg-discord-800 rounded-lg">
-            <div class="flex items-center gap-2">
-              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50"></span>
-              <span class="text-sm font-semibold text-white" id="browse-peak">0</span>
-              <span class="text-xs text-discord-400">peak</span>
+          <div class="browse-stat-card browse-stat-amber rounded-lg px-4 py-3 flex items-center gap-3 min-w-[130px]">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50 shrink-0"></span>
+            <div>
+              <div class="text-xl font-bold text-white leading-tight" id="browse-peak">0</div>
+              <div class="text-[11px] text-discord-400 font-medium uppercase tracking-wide">Peak</div>
             </div>
           </div>
-          <div class="ml-auto flex gap-3">
-            <input id="browse-search" class="input w-64 !py-2 text-sm" placeholder="Search channels…" autocomplete="off">
-            <select id="browse-filter" class="input w-40 !py-2 text-sm">
+          <div class="ml-auto flex gap-2 items-center">
+            <input id="browse-search" class="input w-56 !py-2 !rounded-lg text-sm" placeholder="Search channels…" autocomplete="off">
+            <select id="browse-filter" class="input w-36 !py-2 !rounded-lg text-sm">
               <option value="all">All channels</option>
               <option value="open">Not joined</option>
               <option value="joined">Joined</option>
@@ -688,21 +689,26 @@ function member_html(array $m, bool $online): string {
           </div>
         </div>
       </div>
+      <div class="h-px bg-discord-700/60 shrink-0"></div>
       <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-6 py-5 space-y-6">
         <div id="browse-my-section" class="hidden">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="text-xs font-bold uppercase tracking-wider text-blurple">My Channels</span>
+          <div class="flex items-center gap-3 mb-3">
+            <div class="h-px flex-1 bg-blurple/30"></div>
+            <span class="text-xs font-bold uppercase tracking-widest text-blurple">My Channels</span>
+            <div class="h-px flex-1 bg-blurple/30"></div>
           </div>
           <div id="browse-my-list" class="space-y-2"></div>
         </div>
         <div>
           <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-bold uppercase tracking-wider text-discord-400">All Public Channels</span>
-            <span id="browse-count" class="text-xs text-discord-500"></span>
+            <span class="text-xs font-bold uppercase tracking-widest text-discord-400">All Public Channels</span>
+            <span id="browse-count" class="text-xs text-discord-500 font-medium"></span>
           </div>
           <div id="browse-list" class="space-y-2"></div>
-          <div id="browse-empty" class="hidden py-12 text-center">
-            <div class="text-discord-500 text-sm">No channels found</div>
+          <div id="browse-empty" class="hidden py-16 text-center">
+            <div class="text-4xl mb-3 opacity-40">🔍</div>
+            <div class="text-discord-400 text-sm font-medium">No channels found</div>
+            <div class="text-discord-500 text-xs mt-1">Try a different search or filter</div>
           </div>
         </div>
       </div>
