@@ -419,6 +419,26 @@ final class AdminController
         ]);
     }
 
+    public static function openclaw(): void
+    {
+        $admin = self::require();
+        $bots = OpenClawBotService::all();
+        $channels = Database::all('SELECT id, name FROM channels ORDER BY name COLLATE NOCASE');
+        $botChannels = [];
+        $botPmUsers = [];
+        foreach ($bots as $bot) {
+            $botChannels[(int) $bot['id']] = OpenClawBotService::channelsForBot((int) $bot['id']);
+            $botPmUsers[(int) $bot['id']] = OpenClawBotService::pmUsersForBot((int) $bot['id']);
+        }
+        render_view('admin/openclaw', [
+            'admin' => $admin,
+            'bots' => $bots,
+            'channels' => $channels,
+            'botChannels' => $botChannels,
+            'botPmUsers' => $botPmUsers,
+        ]);
+    }
+
     public static function action(): void
     {
         $admin = self::require();
@@ -953,6 +973,68 @@ final class AdminController
                 LegalService::save($which, LegalService::boilerplate($which));
                 log_audit('legal_reset', $which);
                 $message = ucfirst($which) . ' reset to the US/Nevada boilerplate.';
+                break;
+            case 'openclaw_create':
+                $r = OpenClawBotService::create(
+                    (string) ($_POST['name'] ?? ''),
+                    (string) ($_POST['gateway_url'] ?? ''),
+                    (string) ($_POST['api_key'] ?? ''),
+                    (string) ($_POST['system_prompt'] ?? ''),
+                    (string) ($_POST['avatar'] ?? ''),
+                    $admin
+                );
+                if (!$r['ok']) {
+                    $ok = false;
+                    $message = $r['error'];
+                } else {
+                    $message = 'OpenClaw bot created.';
+                }
+                break;
+            case 'openclaw_delete':
+                $r = OpenClawBotService::delete((int) ($_POST['id'] ?? 0), $admin);
+                if ($r !== true) {
+                    $ok = false;
+                    $message = (string) $r;
+                } else {
+                    $message = 'OpenClaw bot deleted.';
+                }
+                break;
+            case 'openclaw_toggle':
+                OpenClawBotService::toggle((int) ($_POST['id'] ?? 0));
+                $message = 'OpenClaw bot toggled.';
+                break;
+            case 'openclaw_assign_channel':
+                OpenClawBotService::assignChannel(
+                    (int) ($_POST['bot_id'] ?? 0),
+                    (int) ($_POST['channel_id'] ?? 0),
+                    (string) ($_POST['respond_mode'] ?? 'mentions')
+                );
+                $message = 'Bot assigned to channel.';
+                break;
+            case 'openclaw_remove_channel':
+                OpenClawBotService::removeChannel(
+                    (int) ($_POST['bot_id'] ?? 0),
+                    (int) ($_POST['channel_id'] ?? 0)
+                );
+                $message = 'Bot removed from channel.';
+                break;
+            case 'openclaw_pm_grant':
+                $username = trim((string) ($_POST['username'] ?? ''));
+                $targetUser = Database::row('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [$username]);
+                if (!$targetUser) {
+                    $ok = false;
+                    $message = 'User not found.';
+                } else {
+                    OpenClawBotService::grantPmAccess((int) ($_POST['bot_id'] ?? 0), (int) $targetUser['id']);
+                    $message = 'PM access granted.';
+                }
+                break;
+            case 'openclaw_pm_revoke':
+                OpenClawBotService::revokePmAccess(
+                    (int) ($_POST['bot_id'] ?? 0),
+                    (int) ($_POST['user_id'] ?? 0)
+                );
+                $message = 'PM access revoked.';
                 break;
             default:
                 $ok = false;

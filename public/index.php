@@ -114,11 +114,14 @@ $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
 $router->get('/admin/logs/export', [AdminController::class, 'logDayExport']);
 $router->get('/admin/settings', [AdminController::class, 'settings']);
 $router->get('/admin/invites', [AdminController::class, 'invites']);
+$router->get('/admin/openclaw', [AdminController::class, 'openclaw']);
 $router->post('/admin/action', [AdminController::class, 'action']);
 
 // Incoming webhooks (public, token-authenticated) + admin management
 $router->post('/api/webhooks/{token}', [WebhookController::class, 'post']);
 $router->get('/admin/webhooks', [WebhookController::class, 'admin']);
 $router->post('/admin/webhooks/action', [WebhookController::class, 'action']);
+
+$router->post('/api/openclaw/callback/{botId}/{secret}', [OpenClawController::class, 'callback']);
 
 $router->dispatch();

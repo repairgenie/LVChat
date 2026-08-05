@@ -160,7 +160,87 @@
       if (caption) html += `<div class="mt-1">${linkify(caption)}</div>`;
       return html;
     }
+    if (m.kind === 'ai_response' || m.bot === 1) {
+      return renderAiContent(m.content);
+    }
     return linkify(m.content);
+  }
+
+  function initAiStyles() {
+    if (document.getElementById('ai-chat-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'ai-chat-styles';
+    style.textContent = `
+      .msg[data-kind="ai_response"] .msg-content,
+      .msg[data-bot="1"] .msg-content { background: linear-gradient(135deg, rgba(88,101,242,0.04), rgba(88,101,242,0.01)); border-radius: 8px; padding: 4px 8px; margin: -2px -8px; }
+      .msg[data-kind="ai_response"] .msg-content h1,
+      .msg[data-kind="ai_response"] .msg-content h2,
+      .msg[data-kind="ai_response"] .msg-content h3 { font-weight: 700; margin: 0.5em 0 0.25em; color: #e2e8f0; }
+      .msg[data-kind="ai_response"] .msg-content h1 { font-size: 1.25em; }
+      .msg[data-kind="ai_response"] .msg-content h2 { font-size: 1.1em; }
+      .msg[data-kind="ai_response"] .msg-content h3 { font-size: 1em; }
+      .msg[data-kind="ai_response"] .msg-content p { margin: 0.35em 0; }
+      .msg[data-kind="ai_response"] .msg-content table { border-collapse: collapse; margin: 0.5em 0; width: 100%; font-size: 13px; }
+      .msg[data-kind="ai_response"] .msg-content th,
+      .msg[data-kind="ai_response"] .msg-content td { border: 1px solid #383a40; padding: 4px 8px; text-align: left; }
+      .msg[data-kind="ai_response"] .msg-content th { background: rgba(30,31,34,0.7); font-weight: 600; color: #b5bac1; }
+      .msg[data-kind="ai_response"] .msg-content pre { background: #1e1f22; border: 1px solid #383a40; border-radius: 8px; padding: 12px; margin: 0.5em 0; overflow-x: auto; font-size: 13px; }
+      .msg[data-kind="ai_response"] .msg-content code { font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 0.9em; }
+      .msg[data-kind="ai_response"] .msg-content :not(pre) > code { background: #2b2d31; padding: 1px 5px; border-radius: 4px; }
+      .msg[data-kind="ai_response"] .msg-content blockquote { border-left: 3px solid #5865f2; padding-left: 10px; margin: 0.4em 0; color: #949ba4; }
+      .msg[data-kind="ai_response"] .msg-content ul,
+      .msg[data-kind="ai_response"] .msg-content ol { padding-left: 1.5em; margin: 0.3em 0; }
+      .msg[data-kind="ai_response"] .msg-content img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
+      .msg[data-kind="ai_response"] .msg-content a { color: #38bdf8; text-decoration: underline; }
+      .msg[data-kind="ai_response"] .msg-content hr { border: none; border-top: 1px solid #383a40; margin: 0.75em 0; }
+      .ai-thinking summary::-webkit-details-marker { display: none; }
+      .ai-tool-card summary::-webkit-details-marker { display: none; }
+      .username .bot-badge { display: inline-block; font-size: 9px; padding: 0 4px; border-radius: 3px; background: #5865f2; color: white; font-weight: 700; text-transform: uppercase; vertical-align: middle; margin-left: 4px; letter-spacing: 0.5px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function renderAiContent(text) {
+    if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+      return linkify(text);
+    }
+    let raw = String(text || '');
+    const thinkingBlocks = [];
+    raw = raw.replace(/:::thinking\n([\s\S]*?):::/g, (_, content) => {
+      const idx = thinkingBlocks.length;
+      thinkingBlocks.push(content.trim());
+      return `\x01THINK${idx}\x02`;
+    });
+    const toolBlocks = [];
+    raw = raw.replace(/:::tool\n([\s\S]*?):::/g, (_, content) => {
+      const idx = toolBlocks.length;
+      toolBlocks.push(content.trim());
+      return `\x01TOOL${idx}\x02`;
+    });
+    let html = '';
+    try {
+      html = marked.parse(raw, { breaks: true, gfm: true });
+    } catch (e) {
+      html = linkify(raw);
+    }
+    html = DOMPurify.sanitize(html, {
+      ADD_TAGS: ['details', 'summary'],
+      ADD_ATTR: ['target', 'rel', 'class', 'data-copy'],
+      ALLOW_DATA_ATTR: false,
+    });
+    thinkingBlocks.forEach((content, i) => {
+      const safe = esc(content);
+      const block = `<details class="ai-thinking my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40"><summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">Thinking...</summary><div class="px-3 py-2 text-sm text-discord-400 italic whitespace-pre-wrap">${safe}</div></details>`;
+      html = html.replace(`\x01THINK${i}\x02`, block);
+    });
+    toolBlocks.forEach((content, i) => {
+      const lines = content.split('\n');
+      const name = esc(lines.shift() || 'Tool');
+      const output = esc(lines.join('\n'));
+      const block = `<details class="ai-tool-card my-1.5 rounded-lg border border-discord-700 bg-discord-900/60"><summary class="px-3 py-1.5 text-xs font-mono text-sky-400 cursor-pointer select-none hover:text-sky-300">🔧 ${name}</summary><pre class="px-3 py-2 text-xs font-mono text-discord-300 whitespace-pre-wrap overflow-x-auto">${output}</pre></details>`;
+      html = html.replace(`\x01TOOL${i}\x02`, block);
+    });
+    return html;
   }
 
   function avatarHtml(m, cls) {
@@ -221,7 +301,7 @@
       <div class="w-10 h-10 shrink-0">${avatarHtml(m, 'w-10 h-10 rounded-full')}</div>
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 h-[22px]">
-          <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ${nameColor}"${roleStyle} data-nick="${esc(m.username)}">${sym}${esc(m.username)}${guestTag}</span>
+          <span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ${nameColor}"${roleStyle} data-nick="${esc(m.username)}">${sym}${esc(m.username)}${m.bot ? '<span class="bot-badge">BOT</span>' : ''}${guestTag}</span>
           <span class="time text-[11px] text-discord-400 hidden group-hover:inline">${timeStr(m.created_at)}</span>
           ${m.edited_at ? '<span class="text-[10px] text-discord-400">(edited)</span>' : ''}
         </div>
@@ -263,6 +343,10 @@
     maybeScroll();
     scrollBottomWhenImagesLoad(msgsEl.lastElementChild);
     bindMessageActions();
+    if ((m.kind === 'ai_response' || m.bot === 1) && typeof hljs !== 'undefined') {
+      const el = msgsEl.lastElementChild;
+      if (el) el.querySelectorAll('pre code').forEach((block) => { try { hljs.highlightElement(block); } catch (e) {} });
+    }
   }
 
   // ── Stick-to-bottom ─────────────────────────────────────────────────────────
@@ -2390,4 +2474,6 @@
     if (filterEl) filterEl.addEventListener('change', renderBrowse);
 
   }
+
+  initAiStyles();
 })();

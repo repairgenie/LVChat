@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '19';
+    private const SCHEMA_VERSION = '20';
 
     public static function init(): void
     {
@@ -195,6 +195,22 @@ final class Database
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('no_logging', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN no_logging INTEGER NOT NULL DEFAULT 0');
+        }
+
+        // OpenClaw AI bots (schema v20).
+        if (!in_array('openclaw_bots', $tables, true)) {
+            $pdo->exec('CREATE TABLE openclaw_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL UNIQUE COLLATE NOCASE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, gateway_url TEXT NOT NULL, api_key TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT \'\', system_prompt TEXT NOT NULL DEFAULT \'\', enabled INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
+            $pdo->exec('CREATE INDEX idx_openclaw_bots_user ON openclaw_bots(user_id)');
+        }
+        if (!in_array('openclaw_bot_channels', $tables, true)) {
+            $pdo->exec('CREATE TABLE openclaw_bot_channels (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id INTEGER NOT NULL REFERENCES openclaw_bots(id) ON DELETE CASCADE, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, respond_mode TEXT NOT NULL DEFAULT \'mentions\', UNIQUE (bot_id, channel_id))');
+            $pdo->exec('CREATE INDEX idx_openclaw_bc_bot ON openclaw_bot_channels(bot_id)');
+            $pdo->exec('CREATE INDEX idx_openclaw_bc_channel ON openclaw_bot_channels(channel_id)');
+        }
+        if (!in_array('openclaw_bot_pm_access', $tables, true)) {
+            $pdo->exec('CREATE TABLE openclaw_bot_pm_access (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id INTEGER NOT NULL REFERENCES openclaw_bots(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, UNIQUE (bot_id, user_id))');
+            $pdo->exec('CREATE INDEX idx_openclaw_pm_bot ON openclaw_bot_pm_access(bot_id)');
+            $pdo->exec('CREATE INDEX idx_openclaw_pm_user ON openclaw_bot_pm_access(user_id)');
         }
 
         // Friends system (schema v17).

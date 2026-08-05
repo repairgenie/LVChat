@@ -485,3 +485,37 @@ CREATE TABLE IF NOT EXISTS friendships (
 );
 CREATE INDEX IF NOT EXISTS idx_friendships_user ON friendships(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id, status);
+
+CREATE TABLE IF NOT EXISTS openclaw_bots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  gateway_url TEXT NOT NULL,
+  api_key TEXT NOT NULL,
+  avatar TEXT NOT NULL DEFAULT '',
+  system_prompt TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_openclaw_bots_user ON openclaw_bots(user_id);
+
+CREATE TABLE IF NOT EXISTS openclaw_bot_channels (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bot_id INTEGER NOT NULL REFERENCES openclaw_bots(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  respond_mode TEXT NOT NULL DEFAULT 'mentions',
+  UNIQUE (bot_id, channel_id)
+);
+CREATE INDEX IF NOT EXISTS idx_openclaw_bc_bot ON openclaw_bot_channels(bot_id);
+CREATE INDEX IF NOT EXISTS idx_openclaw_bc_channel ON openclaw_bot_channels(channel_id);
+
+CREATE TABLE IF NOT EXISTS openclaw_bot_pm_access (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bot_id INTEGER NOT NULL REFERENCES openclaw_bots(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE (bot_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_openclaw_pm_bot ON openclaw_bot_pm_access(bot_id);
+CREATE INDEX IF NOT EXISTS idx_openclaw_pm_user ON openclaw_bot_pm_access(user_id);

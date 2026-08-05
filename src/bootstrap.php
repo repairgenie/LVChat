@@ -33,6 +33,7 @@ require ROOT . '/src/services/UploadService.php';
 require ROOT . '/src/services/GifService.php';
 require ROOT . '/src/services/SoundService.php';
 require ROOT . '/src/services/WebhookService.php';
+require ROOT . '/src/services/OpenClawBotService.php';
 require ROOT . '/src/services/Mailer.php';
 require ROOT . '/src/services/InviteService.php';
 require ROOT . '/src/services/ModerationService.php';
@@ -61,6 +62,7 @@ require ROOT . '/src/controllers/SupportController.php';
 require ROOT . '/src/controllers/LegalController.php';
 require ROOT . '/src/controllers/PwaController.php';
 require ROOT . '/src/controllers/FriendController.php';
+require ROOT . '/src/controllers/OpenClawController.php';
 
 Database::init();
 

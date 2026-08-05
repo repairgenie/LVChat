@@ -27,6 +27,7 @@ function admin_nav(string $active, array $user): void {
     'sounds' => ['/admin/sounds', 'Sounds', $isAdmin],
     'logs' => ['/admin/logs', 'Chat logs', $isAdmin],
     'webhooks' => ['/admin/webhooks', 'Webhooks', $isAdmin],
+    'openclaw' => ['/admin/openclaw', 'OpenClaw', $isAdmin],
     'invites' => ['/admin/invites', 'Invites', $isAdmin],
     'legal' => ['/admin/legal', 'Terms & Privacy', $isAdmin],
     'settings' => ['/admin/settings', 'Settings', $isAdmin],

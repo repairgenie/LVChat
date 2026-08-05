@@ -429,7 +429,44 @@ function chat_content_html(array $m): string
         }
         return $html;
     }
+    if (($m['kind'] ?? '') === 'ai_response' || (int) ($m['bot'] ?? 0) === 1) {
+        return chat_markup_ai((string) $m['content']);
+    }
     return chat_markup_rich((string) $m['content']);
+}
+
+function chat_markup_ai(string $text): string
+{
+    $text = (string) $text;
+    $thinkingBlocks = [];
+    $text = preg_replace_callback('/:::thinking\n([\s\S]*?):::/', function ($m) use (&$thinkingBlocks) {
+        $i = count($thinkingBlocks);
+        $thinkingBlocks[] = h(trim($m[1]));
+        return "\x01THINK$i\x02";
+    }, $text);
+    $toolBlocks = [];
+    $text = preg_replace_callback('/:::tool\n([\s\S]*?):::/', function ($m) use (&$toolBlocks) {
+        $i = count($toolBlocks);
+        $toolBlocks[] = trim($m[1]);
+        return "\x01TOOL$i\x02";
+    }, $text);
+    $html = chat_markup_rich($text);
+    foreach ($thinkingBlocks as $i => $content) {
+        $block = '<details class="ai-thinking my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40">'
+            . '<summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">Thinking...</summary>'
+            . '<div class="px-3 py-2 text-sm text-discord-400 italic whitespace-pre-wrap">' . $content . '</div></details>';
+        $html = str_replace("\x01THINK$i\x02", $block, $html);
+    }
+    foreach ($toolBlocks as $i => $content) {
+        $lines = explode("\n", $content);
+        $name = h(array_shift($lines) ?: 'Tool');
+        $output = h(implode("\n", $lines));
+        $block = '<details class="ai-tool-card my-1.5 rounded-lg border border-discord-700 bg-discord-900/60">'
+            . '<summary class="px-3 py-1.5 text-xs font-mono text-sky-400 cursor-pointer select-none hover:text-sky-300">🔧 ' . $name . '</summary>'
+            . '<pre class="px-3 py-2 text-xs font-mono text-discord-300 whitespace-pre-wrap overflow-x-auto">' . $output . '</pre></details>';
+        $html = str_replace("\x01TOOL$i\x02", $block, $html);
+    }
+    return $html;
 }
 
 /** Public URL of a user's stored avatar, or null. */

@@ -235,6 +235,7 @@ final class ChatController
             $pmId = MessageService::insertPm($user, $t, $content, $gifKind ? 'gif' : 'message');
             MessageService::notifyDm($t, $user, $pmId);
             MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
+            OpenClawBotService::onPrivateMessage($user, $t, $content, $pmId);
             $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
             self::finish([
                 'ok' => true,
@@ -296,6 +297,7 @@ final class ChatController
         }
         $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
         $msg['channel'] = $channel['slug'];
+        OpenClawBotService::onChannelMessage((int) $channel['id'], $user, $content, (int) $msg['id']);
         self::finish(['ok' => true, 'message' => $msg], $back);
     }
 

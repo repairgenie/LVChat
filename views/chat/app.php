@@ -136,11 +136,11 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
             . '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
     }
 
-    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">'
+    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '" data-bot="' . (!empty($m['bot']) ? '1' : '0') . '">'
         . '<div class="w-10 h-10 shrink-0">' . avatar_img($m, 'w-10 h-10 rounded-full') . '</div>'
         . '<div class="min-w-0 flex-1">'
         . '<div class="flex items-baseline gap-2 h-[22px]">'
-        . '<span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . (!empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '') . '</span>'
+        . '<span class="username font-medium text-[15px] leading-5 hover:underline cursor-pointer ' . $color . '"' . $nameStyle . ' data-nick="' . h($m['username']) . '">' . $levelSym . h($m['username']) . (!empty($m['bot']) ? '<span class="bot-badge">BOT</span>' : '') . (!empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '') . '</span>'
         . '<span class="time text-[11px] text-discord-400 hidden group-hover:inline" data-ts="' . h($m['created_at']) . '">' . h(date('H:i', strtotime($m['created_at'] . ' UTC'))) . '</span>'
         . (!empty($m['edited_at']) ? '<span class="text-[10px] text-discord-400">(edited)</span>' : '')
         . '</div>'
@@ -851,6 +851,10 @@ function member_html(array $m, bool $online): string {
   </div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
+  <script src="/assets/vendor/ai/marked.min.js"></script>
+  <script src="/assets/vendor/ai/purify.min.js"></script>
+  <script src="/assets/vendor/ai/highlight.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark-dimmed.min.css">
   <script src="/assets/js/app.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/app.js') ?>"></script>
   <script>
   // JS-health watchdog: explains why the chat scripts aren't running, if they aren't.
