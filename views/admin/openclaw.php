@@ -1,9 +1,17 @@
 <?php $title = 'OpenClaw Bots'; $active = 'openclaw'; ?>
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-bold text-white">OpenClaw Bots</h1>
-  <p class="text-sm text-discord-400">Manage AI bots powered by OpenClaw Gateway. Assign bots to channels and grant PM access.</p>
+  <p class="text-sm text-discord-400">Manage AI bots that connect to LVChat via the OpenClaw API. Assign bots to channels and grant PM access.</p>
 </div>
 <?php require ROOT . '/views/admin/_nav.php'; ?>
+
+<?php if (!empty($_SESSION['openclaw_api_key'])): ?>
+<div class="card p-5 mb-5 border border-green-500/40">
+  <div class="text-sm font-semibold text-green-400 mb-2">Bot created — API key shown once</div>
+  <input class="input font-mono text-xs" readonly value="<?= h($_SESSION['openclaw_api_key']) ?>" onfocus="this.select()">
+  <p class="text-xs text-discord-400 mt-2">Copy this key now. It is used as a Bearer token for all <code>/api/openclaw/*</code> endpoints. The raw key is not stored — if you lose it, delete and recreate the bot.</p>
+</div>
+<?php unset($_SESSION['openclaw_api_key']); endif; ?>
 
 <div class="card p-5 mb-5">
   <h2 class="font-semibold text-white mb-3">Create a bot</h2>
@@ -13,14 +21,6 @@
     <div>
       <label class="label">Bot name</label>
       <input class="input" name="name" placeholder="Molty" required minlength="2" maxlength="32">
-    </div>
-    <div>
-      <label class="label">Gateway URL</label>
-      <input class="input" name="gateway_url" placeholder="https://gateway.example.com" required>
-    </div>
-    <div>
-      <label class="label">API Key</label>
-      <input class="input" name="api_key" type="password" required>
     </div>
     <div>
       <label class="label">Avatar URL (https)</label>
@@ -145,7 +145,7 @@
 
   <div class="mt-3 pt-3 border-t border-discord-700">
     <div class="text-xs text-discord-500">
-      Gateway: <code class="text-discord-400"><?= h($bot['gateway_url']) ?></code>
+      Last seen: <?= $bot['last_seen'] ? relative_time($bot['last_seen']) : 'never' ?>
       &middot; Created <?= relative_time($bot['created_at']) ?>
     </div>
   </div>

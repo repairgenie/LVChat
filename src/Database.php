@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '20';
+    private const SCHEMA_VERSION = '21';
 
     public static function init(): void
     {
@@ -199,8 +199,19 @@ final class Database
 
         // OpenClaw AI bots (schema v20).
         if (!in_array('openclaw_bots', $tables, true)) {
-            $pdo->exec('CREATE TABLE openclaw_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL UNIQUE COLLATE NOCASE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, gateway_url TEXT NOT NULL, api_key TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT \'\', system_prompt TEXT NOT NULL DEFAULT \'\', enabled INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
+            $pdo->exec('CREATE TABLE openclaw_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL UNIQUE COLLATE NOCASE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, api_key_hash TEXT NOT NULL UNIQUE, avatar TEXT NOT NULL DEFAULT \'\', system_prompt TEXT NOT NULL DEFAULT \'\', enabled INTEGER NOT NULL DEFAULT 1, last_seen TEXT, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
             $pdo->exec('CREATE INDEX idx_openclaw_bots_user ON openclaw_bots(user_id)');
+        } else {
+            $ocCols = array_column($pdo->query('PRAGMA table_info(openclaw_bots)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (in_array('gateway_url', $ocCols, true)) {
+                $pdo->exec('ALTER TABLE openclaw_bots RENAME COLUMN gateway_url TO _deprecated_gateway_url');
+            }
+            if (in_array('api_key', $ocCols, true) && !in_array('api_key_hash', $ocCols, true)) {
+                $pdo->exec('ALTER TABLE openclaw_bots ADD COLUMN api_key_hash TEXT');
+            }
+            if (!in_array('last_seen', $ocCols, true)) {
+                $pdo->exec('ALTER TABLE openclaw_bots ADD COLUMN last_seen TEXT');
+            }
         }
         if (!in_array('openclaw_bot_channels', $tables, true)) {
             $pdo->exec('CREATE TABLE openclaw_bot_channels (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id INTEGER NOT NULL REFERENCES openclaw_bots(id) ON DELETE CASCADE, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, respond_mode TEXT NOT NULL DEFAULT \'mentions\', UNIQUE (bot_id, channel_id))');

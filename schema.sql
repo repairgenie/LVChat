@@ -491,11 +491,11 @@ CREATE TABLE IF NOT EXISTS openclaw_bots (
   name TEXT NOT NULL,
   username TEXT NOT NULL UNIQUE COLLATE NOCASE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  gateway_url TEXT NOT NULL,
-  api_key TEXT NOT NULL,
+  api_key_hash TEXT NOT NULL UNIQUE,
   avatar TEXT NOT NULL DEFAULT '',
   system_prompt TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
+  last_seen TEXT,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

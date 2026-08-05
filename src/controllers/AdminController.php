@@ -977,8 +977,6 @@ final class AdminController
             case 'openclaw_create':
                 $r = OpenClawBotService::create(
                     (string) ($_POST['name'] ?? ''),
-                    (string) ($_POST['gateway_url'] ?? ''),
-                    (string) ($_POST['api_key'] ?? ''),
                     (string) ($_POST['system_prompt'] ?? ''),
                     (string) ($_POST['avatar'] ?? ''),
                     $admin
@@ -987,6 +985,7 @@ final class AdminController
                     $ok = false;
                     $message = $r['error'];
                 } else {
+                    $_SESSION['openclaw_api_key'] = $r['api_key'];
                     $message = 'OpenClaw bot created.';
                 }
                 break;

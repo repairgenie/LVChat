@@ -122,6 +122,10 @@ $router->post('/api/webhooks/{token}', [WebhookController::class, 'post']);
 $router->get('/admin/webhooks', [WebhookController::class, 'admin']);
 $router->post('/admin/webhooks/action', [WebhookController::class, 'action']);
 
-$router->post('/api/openclaw/callback/{botId}/{secret}', [OpenClawController::class, 'callback']);
+$router->get('/api/openclaw/channels', [OpenClawController::class, 'channels']);
+$router->get('/api/openclaw/messages', [OpenClawController::class, 'messages']);
+$router->get('/api/openclaw/pms', [OpenClawController::class, 'pms']);
+$router->post('/api/openclaw/send', [OpenClawController::class, 'send']);
+$router->post('/api/openclaw/pm', [OpenClawController::class, 'pm']);
 
 $router->dispatch();
