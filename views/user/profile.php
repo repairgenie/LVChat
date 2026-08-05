@@ -167,12 +167,91 @@
       </form>
       <div id="profile-msg" class="mt-3 text-sm text-green-400 hidden">Saved.</div>
     </div>
+
+    <div class="card p-6">
+      <h2 class="font-semibold text-white mb-1">Two-factor authentication</h2>
+      <p class="text-xs text-discord-400 mb-4">Require a 6-digit code from an authenticator app (Aegis, Google Authenticator, 1Password, …) every time you sign in.</p>
+      <?php if (TotpService::enabled($user)): ?>
+      <div class="flex items-center gap-2 mb-4">
+        <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-green-500/20 text-green-400">Enabled</span>
+        <span class="text-xs text-discord-400">since <?= h(date('M j, Y', strtotime($user['totp_enabled_at'] . ' UTC'))) ?></span>
+      </div>
+      <?php if (TotpService::requiredFor($user)): ?>
+      <p class="text-xs text-amber-300">MFA is required for your account class and cannot be disabled.</p>
+      <?php else: ?>
+      <form id="mfa-disable-form" class="flex flex-wrap gap-3 items-end">
+        <?= Csrf::field() ?>
+        <div class="flex-1 min-w-40">
+          <label class="label">Confirm password to disable</label>
+          <input class="input" type="password" name="password" required autocomplete="current-password">
+        </div>
+        <button class="btn-ghost text-red-400">Disable MFA</button>
+      </form>
+      <?php endif; ?>
+      <?php else: ?>
+      <div id="mfa-enroll">
+        <button type="button" id="mfa-begin" class="btn-primary">Enable two-factor authentication</button>
+      </div>
+      <div id="mfa-setup" class="hidden">
+        <div class="flex flex-col sm:flex-row gap-5 items-start">
+          <div id="mfa-qr" class="bg-white rounded-lg p-3 shrink-0"></div>
+          <div class="flex-1 min-w-0">
+            <p class="text-xs text-discord-400 mb-2">Scan the QR code with your authenticator app, or enter this key manually:</p>
+            <div id="mfa-secret" class="font-mono text-sm text-discord-200 bg-discord-850 border border-discord-700 rounded px-3 py-2 select-all break-all mb-4"></div>
+            <form id="mfa-enable-form" class="flex flex-wrap gap-2 items-end">
+              <?= Csrf::field() ?>
+              <div class="flex-1 min-w-32">
+                <label class="label">6-digit code</label>
+                <input class="input font-mono tracking-[0.3em]" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" required autocomplete="one-time-code" placeholder="000000">
+              </div>
+              <button class="btn-primary">Verify &amp; enable</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      <?php endif; ?>
+    </div>
     <?php endif; ?>
   </div>
 </div>
+<?php if ($isSelf && !(int) ($user['guest'] ?? 0) && !TotpService::enabled($user)): ?>
+<script src="/assets/js/qrcode.min.js"></script>
+<?php endif; ?>
 <script>
 (() => {
   const csrf = document.querySelector('input[name=csrf]')?.value || '';
+  const mfaBegin = document.getElementById('mfa-begin');
+  if (mfaBegin) mfaBegin.addEventListener('click', () => {
+    const fd = new FormData();
+    fd.append('csrf', csrf);
+    fetch('/api/mfa/begin', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+      .then(r => r.json()).then(j => {
+        if (j.error) { alert(j.error); return; }
+        document.getElementById('mfa-enroll').classList.add('hidden');
+        document.getElementById('mfa-setup').classList.remove('hidden');
+        document.getElementById('mfa-secret').textContent = j.secret;
+        const qrBox = document.getElementById('mfa-qr');
+        if (typeof qrcode !== 'undefined') {
+          const qr = qrcode(0, 'M');
+          qr.addData(j.uri);
+          qr.make();
+          qrBox.innerHTML = qr.createImgTag(4, 0);
+        } else {
+          qrBox.classList.add('hidden');
+        }
+      });
+  });
+  const mfaEnable = document.getElementById('mfa-enable-form');
+  if (mfaEnable) mfaEnable.addEventListener('submit', e => {
+    e.preventDefault();
+    post('/api/mfa/enable', new FormData(mfaEnable), () => location.reload());
+  });
+  const mfaDisable = document.getElementById('mfa-disable-form');
+  if (mfaDisable) mfaDisable.addEventListener('submit', e => {
+    e.preventDefault();
+    if (!confirm('Disable two-factor authentication?')) return;
+    post('/api/mfa/disable', new FormData(mfaDisable), () => location.reload());
+  });
   const msg = document.getElementById('profile-msg');
   function post(url, fd, ok) {
     fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })

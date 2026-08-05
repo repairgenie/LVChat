@@ -24,6 +24,7 @@
         <?php if ($user['banned']): ?><span class="px-2 py-0.5 rounded text-[11px] bg-red-500/20 text-red-400">banned</span><?php endif; ?>
         <span class="px-2 py-0.5 rounded text-[11px] bg-discord-700 text-discord-300"><?= h($user['role']) ?></span>
         <?php if ($user['age_verified_at']): ?><span class="px-2 py-0.5 rounded text-[11px] bg-blurple/20 text-blurple">18+ certified</span><?php endif; ?>
+        <?php if (!empty($user['totp_enabled_at'])): ?><span class="px-2 py-0.5 rounded text-[11px] bg-green-500/20 text-green-400">MFA enabled</span><?php endif; ?>
       </div>
       <?php if ($user['status_reason']): ?>
       <div class="mt-3 text-xs text-discord-300 bg-discord-850 border border-discord-700 rounded px-3 py-2"><?= h($user['status_reason']) ?></div>
@@ -72,6 +73,15 @@
         <input type="hidden" name="id" value="<?= (int) $user['id'] ?>">
         <input type="hidden" name="action" value="user_unban">
         <button class="btn-ghost w-full justify-center text-xs">Unban (IRC)</button>
+      </form>
+      <?php endif; ?>
+      <?php if (!empty($user['totp_enabled_at'])): ?>
+      <form method="post" action="/admin/action" onsubmit="return confirm('Reset MFA for this user? Their active sessions will end and they will need to set MFA up again.');">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="back" value="/admin/users/<?= (int) $user['id'] ?>">
+        <input type="hidden" name="id" value="<?= (int) $user['id'] ?>">
+        <input type="hidden" name="action" value="user_mfa_reset">
+        <button class="btn-ghost w-full justify-center text-xs text-amber-300">Reset MFA</button>
       </form>
       <?php endif; ?>
     </div>

@@ -394,7 +394,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -498,6 +498,14 @@ final class AdminController
                 ModerationService::note($id, $admin, 'reset_password', 'Password reset by an administrator');
                 log_audit('user_reset', 'user#' . $id);
                 $message = "Password reset to: $pw (user must use it to log in)";
+                break;
+            case 'user_mfa_reset':
+                $id = (int) ($_POST['id'] ?? 0);
+                TotpService::disable($id);
+                Database::query('DELETE FROM sessions WHERE user_id = ?', [$id]);
+                ModerationService::note($id, $admin, 'mfa_reset', 'MFA reset by an administrator');
+                log_audit('user_mfa_reset', 'user#' . $id);
+                $message = 'MFA reset. The user will be asked to set it up again at next login.';
                 break;
             case 'user_delete':
                 $id = (int) ($_POST['id'] ?? 0);
@@ -898,6 +906,9 @@ final class AdminController
                 }
                 config_set('smtp_from_email', trim((string) ($_POST['smtp_from_email'] ?? '')));
                 config_set('smtp_from_name', trim((string) ($_POST['smtp_from_name'] ?? '')));
+                config_set('mfa_require_admin', ($_POST['mfa_require_admin'] ?? '0') === '1' ? '1' : '0');
+                config_set('mfa_require_staff', ($_POST['mfa_require_staff'] ?? '0') === '1' ? '1' : '0');
+                config_set('mfa_require_user', ($_POST['mfa_require_user'] ?? '0') === '1' ? '1' : '0');
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 break;

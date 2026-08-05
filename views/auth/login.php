@@ -28,6 +28,12 @@
       <button class="btn-primary w-full justify-center py-2.5">Log in</button>
     </form>
 
+    <p class="mt-4 text-sm text-discord-400 text-center">
+      <a class="text-blurple hover:underline" href="/forgot-password">Forgot password?</a>
+      <span class="text-discord-600 mx-1">·</span>
+      <a class="text-blurple hover:underline" href="/magic-link">Log in with magic link</a>
+    </p>
+
     <p class="mt-6 text-sm text-discord-400 text-center">
       Need an account?
       <?php if (config_get('registration_enabled', '1') === '1'): ?>

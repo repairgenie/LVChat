@@ -63,6 +63,37 @@ check('gate blocks over the limit', login_attempt_count() >= login_attempt_max()
 login_attempt_clear();
 check('clear resets attempts', login_attempt_count() === 0);
 
+// --- TOTP / MFA ---
+echo "== totp / mfa ==\n";
+check('base32 encode', TotpService::base32Encode('abc') === 'MFRGG');
+check('base32 roundtrip', TotpService::base32Decode('MFRGG') === 'abc');
+$secret = TotpService::generateSecret();
+check('secret is 32 base32 chars', preg_match('/^[A-Z2-7]{32}$/', $secret) === 1);
+check('secret decodes to 20 bytes', strlen(TotpService::base32Decode($secret)) === 20);
+// RFC 6238 Appendix B vectors (SHA-1, 6-digit).
+$rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+check('rfc vector t=59', TotpService::code($rfcSecret, 59) === '287082', TotpService::code($rfcSecret, 59));
+check('rfc vector t=1111111109', TotpService::code($rfcSecret, 1111111109) === '081804', TotpService::code($rfcSecret, 1111111109));
+check('rfc vector t=1234567890', TotpService::code($rfcSecret, 1234567890) === '005924', TotpService::code($rfcSecret, 1234567890));
+check('verify accepts current code', TotpService::verify($secret, TotpService::code($secret)) === true);
+check('verify rejects garbage', TotpService::verify($secret, 'abcdef') === false);
+$stale = TotpService::code($secret, time() - 3600);
+check('verify rejects stale code', TotpService::verify($secret, $stale) === false);
+check('otpauth uri carries secret+issuer', str_contains(TotpService::otpauthUri($secret, 'alice', 'LVChat'), 'otpauth://totp/') && str_contains(TotpService::otpauthUri($secret, 'alice', 'LVChat'), 'secret=' . $secret));
+check('mfa disabled by default', TotpService::enabled($bob) === false);
+TotpService::enable((int) $bob['id'], $secret);
+check('mfa enabled after enroll', TotpService::enabled(Database::row('SELECT * FROM users WHERE id = ?', [(int) $bob['id']])) === true);
+check('requiredFor off by default', TotpService::requiredFor(Database::row('SELECT * FROM users WHERE id = ?', [(int) $bob['id']])) === false);
+Database::query('UPDATE users SET role = "staff" WHERE id = ?', [(int) $alice['id']]);
+config_set('mfa_require_staff', '1');
+check('requiredFor true when class requires mfa', TotpService::requiredFor(Database::row('SELECT * FROM users WHERE id = ?', [(int) $alice['id']])) === true);
+config_set('mfa_require_staff', '0');
+Database::query('UPDATE users SET role = "admin" WHERE id = ?', [(int) $alice['id']]);
+check('requiredFor false after unset', TotpService::requiredFor(Database::row('SELECT * FROM users WHERE id = ?', [(int) $alice['id']])) === false);
+check('guests never require mfa', TotpService::requiredFor(['guest' => 1, 'role' => 'user']) === false);
+TotpService::disable((int) $bob['id']);
+check('mfa disable clears', TotpService::enabled(Database::row('SELECT * FROM users WHERE id = ?', [(int) $bob['id']])) === false);
+
 // --- Channel creation + join ---
 echo "== channels ==\n";
 $ch = ChannelService::create($alice, '#test');
@@ -922,6 +953,59 @@ check('Mailer unreachable host returns graceful error', $conn['ok'] === false &&
 config_set('smtp_from_email', '');
 check('Mailer refuses to send without a from address', Mailer::send('x@example.com', 't', 'b')['ok'] === false);
 config_set('smtp_enabled', '0');
+
+// ── Auth tokens: password reset + magic links ───────────────────────────────
+echo "== auth tokens ==\n";
+$resetTok = AuthTokenService::create((int) $bob['id'], AuthTokenService::TYPE_RESET, AuthTokenService::RESET_TTL_MINUTES);
+check('reset token created (64 hex chars)', strlen($resetTok) === 64 && ctype_xdigit($resetTok));
+$vRow = AuthTokenService::validate($resetTok, AuthTokenService::TYPE_RESET);
+check('reset token validates with user row', $vRow !== null && (int) $vRow['id'] === (int) $bob['id'] && !empty($vRow['token_id']), json_encode($vRow));
+check('reset token rejected for magic type', AuthTokenService::validate($resetTok, AuthTokenService::TYPE_MAGIC) === null);
+check('reset link has /reset-password/ path', str_contains(AuthTokenService::resetLink($resetTok), '/reset-password/'));
+check('magic link has /magic/ path', str_contains(AuthTokenService::magicLink($resetTok), '/magic/'));
+check('garbage token rejected', AuthTokenService::validate('not-a-token!!', AuthTokenService::TYPE_RESET) === null);
+check('unknown hex token rejected', AuthTokenService::validate(bin2hex(random_bytes(32)), AuthTokenService::TYPE_RESET) === null);
+
+// Claimed tokens cannot be replayed.
+$tokId = (int) $vRow['token_id'];
+AuthTokenService::claim($tokId);
+check('claimed token no longer validates', AuthTokenService::validate($resetTok, AuthTokenService::TYPE_RESET) === null);
+check('claim is idempotent (no error on re-claim)', (static function () use ($tokId): bool { AuthTokenService::claim($tokId); return true; })());
+
+// Expired tokens are rejected.
+$expTok = AuthTokenService::create((int) $bob['id'], AuthTokenService::TYPE_RESET, AuthTokenService::RESET_TTL_MINUTES);
+Database::query('UPDATE auth_tokens SET expires_at = datetime("now", "-1 minute") WHERE token = ?', [$expTok]);
+check('expired token rejected', AuthTokenService::validate($expTok, AuthTokenService::TYPE_RESET) === null);
+
+// invalidateAllForUser kills outstanding unused tokens of that type only.
+$mTok = AuthTokenService::create((int) $bob['id'], AuthTokenService::TYPE_MAGIC, AuthTokenService::MAGIC_TTL_MINUTES);
+check('magic token validates', AuthTokenService::validate($mTok, AuthTokenService::TYPE_MAGIC) !== null);
+AuthTokenService::invalidateAllForUser((int) $bob['id'], AuthTokenService::TYPE_MAGIC);
+check('invalidateAllForUser kills unused magic tokens', AuthTokenService::validate($mTok, AuthTokenService::TYPE_MAGIC) === null);
+
+// Full reset flow against the DB: hash updates + sessions die.
+$rReset = Auth::register('resetme', 'resetme@example.com', 'oldpassword1', true);
+check('register resetme', $rReset['ok'] === true, json_encode($rReset));
+$resetme = Auth::attempt('resetme', 'oldpassword1');
+$rrTok = AuthTokenService::create((int) $resetme['id'], AuthTokenService::TYPE_RESET, AuthTokenService::RESET_TTL_MINUTES);
+$rrRow = AuthTokenService::validate($rrTok, AuthTokenService::TYPE_RESET);
+Auth::login($resetme);
+check('resetme has a live session', (int) Database::scalar('SELECT COUNT(*) FROM sessions WHERE user_id = ?', [(int) $resetme['id']]) >= 1);
+Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash('newpassword1', PASSWORD_ARGON2ID), (int) $resetme['id']]);
+AuthTokenService::claim((int) $rrRow['token_id']);
+AuthTokenService::invalidateAllForUser((int) $resetme['id'], AuthTokenService::TYPE_RESET);
+Auth::killSessions((int) $resetme['id'], true);
+check('old password no longer works after reset', Auth::attempt('resetme', 'oldpassword1') === null);
+check('new password works after reset', Auth::attempt('resetme', 'newpassword1') !== null);
+check('reset token consumed (no replay)', AuthTokenService::validate($rrTok, AuthTokenService::TYPE_RESET) === null);
+check('sessions killed after reset', (int) Database::scalar('SELECT COUNT(*) FROM sessions WHERE user_id = ?', [(int) $resetme['id']]) === 0);
+unset($_SESSION['token']);
+
+// Password-reset + magic-link emails fail gracefully without SMTP.
+$mailR = Mailer::sendPasswordReset('bob@example.com', 'bob', AuthTokenService::resetLink(bin2hex(random_bytes(32))));
+check('reset email graceful without SMTP', $mailR['ok'] === false && $mailR['error'] !== null, json_encode($mailR));
+$mailM = Mailer::sendMagicLink('bob@example.com', 'bob', AuthTokenService::magicLink(bin2hex(random_bytes(32))));
+check('magic email graceful without SMTP', $mailM['ok'] === false && $mailM['error'] !== null, json_encode($mailM));
 
 // ── Sound alerts (channel + DM audio) ────────────────────────────────────────
 echo "== sound alerts ==\n";

@@ -9,6 +9,7 @@ services from Anope.
 ## Features
 
 - **Accounts** — register/login (argon2id), session auth, CSRF everywhere
+- **Two-factor authentication (TOTP)** — dependency-free RFC 6238 MFA: users enroll an authenticator app from their profile (QR code or manual key) and must enter a 6-digit code at every login; admins can **require** MFA per account class (admins/staff/registered) under **Admin → Settings**, walk not-yet-enrolled users through forced setup at login, and reset a user's MFA from **Admin → Users** if they lose their device
 - **Admin account tools** — admins create accounts manually (auto-generated password shown once, optional welcome email), or **invite** people by email with a sign-up link that works even when open registration is closed; pending invites can be re-sent or revoked, and any account can be permanently **deleted** (owned channels pass on; the log archive keeps history). **Admin → Invites**, **Admin → Users**.
 - **Email (SMTP)** — a dependency-free SMTP client configured under **Admin → Settings** (host, port, STARTTLS/SSL, auth, from address) with a one-click **Send test email**; used for invite and welcome emails
 - **Channels** — create, register/deregister (temp channels vanish when empty, founder passes on), public/private/secret, invite-only, keyed, moderated, member limits, topics, ban lists, AKICK, access lists

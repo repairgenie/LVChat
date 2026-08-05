@@ -312,6 +312,9 @@ CommandRegistry::register('invite', [
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
+        if ((int) $target['id'] === (int) $user['id']) {
+            return ['replies' => ['You cannot invite yourself.']];
+        }
         Database::query(
             'INSERT OR IGNORE INTO invites (channel_id, user_id, invited_by) VALUES (?, ?, ?)',
             [$channel['id'], $target['id'], $user['id']]

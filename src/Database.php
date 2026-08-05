@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '21';
+    private const SCHEMA_VERSION = '22';
 
     public static function init(): void
     {
@@ -72,6 +72,12 @@ final class Database
         }
         if (!in_array('age_verified_at', $userCols, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN age_verified_at TEXT');
+        }
+        if (!in_array('totp_secret', $userCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
+        }
+        if (!in_array('totp_enabled_at', $userCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN totp_enabled_at TEXT');
         }
         $guestCols = array_column($pdo->query('PRAGMA table_info(guests)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('age_verified_at', $guestCols, true)) {
@@ -143,6 +149,11 @@ final class Database
         if (!in_array('registration_invites', $tables, true)) {
             $pdo->exec('CREATE TABLE registration_invites (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL COLLATE NOCASE, token TEXT NOT NULL UNIQUE, invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL, message TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL, used_at TEXT, used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL)');
             $pdo->exec('CREATE INDEX idx_registration_invites_email ON registration_invites(email)');
+        }
+        // One-time auth tokens: password resets + magic-link logins (schema v22).
+        if (!in_array('auth_tokens', $tables, true)) {
+            $pdo->exec('CREATE TABLE auth_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token TEXT NOT NULL UNIQUE, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), expires_at TEXT NOT NULL, used_at TEXT)');
+            $pdo->exec('CREATE INDEX idx_auth_tokens_token ON auth_tokens(token)');
         }
 
         // Moderation / reporting / support (added in schema v13).
@@ -448,6 +459,9 @@ final class Database
             'poll_interval' => '2',
             'realtime' => 'poll',
             'peak_online' => '0',
+            'mfa_require_admin' => '0',
+            'mfa_require_staff' => '0',
+            'mfa_require_user' => '0',
         ];
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');
         foreach ($config as $k => $v) {

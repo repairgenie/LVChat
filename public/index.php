@@ -9,10 +9,21 @@ $router = new Router();
 // Auth
 $router->get('/login', [AuthController::class, 'loginForm']);
 $router->post('/login', [AuthController::class, 'login']);
+$router->get('/login/mfa', [AuthController::class, 'mfaForm']);
+$router->post('/login/mfa', [AuthController::class, 'mfaVerify']);
+$router->get('/login/mfa/setup', [AuthController::class, 'mfaSetupForm']);
+$router->post('/login/mfa/setup', [AuthController::class, 'mfaSetupVerify']);
 $router->get('/register', [AuthController::class, 'registerForm']);
 $router->post('/register', [AuthController::class, 'register']);
 $router->post('/logout', [AuthController::class, 'logout']);
 $router->post('/guest', [AuthController::class, 'guestLogin']);
+$router->get('/forgot-password', [AuthController::class, 'forgotPasswordForm']);
+$router->post('/forgot-password', [AuthController::class, 'forgotPassword']);
+$router->get('/reset-password/{token}', [AuthController::class, 'resetPasswordForm']);
+$router->post('/reset-password/{token}', [AuthController::class, 'resetPassword']);
+$router->get('/magic-link', [AuthController::class, 'magicLoginForm']);
+$router->post('/magic-link', [AuthController::class, 'magicLoginRequest']);
+$router->get('/magic/{token}', [AuthController::class, 'magicLogin']);
 
 // Main app + shareable channel links
 $router->get('/', [BrowseController::class, 'index']);
@@ -56,6 +67,9 @@ $router->post('/api/password', [UserController::class, 'changePassword']);
 $router->post('/api/profile', [UserController::class, 'updateProfile']);
 $router->post('/api/avatar', [UserController::class, 'uploadAvatar']);
 $router->post('/api/avatar/remove', [UserController::class, 'removeAvatar']);
+$router->post('/api/mfa/begin', [UserController::class, 'mfaBegin']);
+$router->post('/api/mfa/enable', [UserController::class, 'mfaEnable']);
+$router->post('/api/mfa/disable', [UserController::class, 'mfaDisable']);
 
 // Friends
 $router->get('/api/friends', [FriendController::class, 'list']);

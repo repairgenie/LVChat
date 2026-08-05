@@ -214,6 +214,43 @@ final class Mailer
         return self::send($to, $mailSubject, $text, self::htmlWrap($mailSubject, $body));
     }
 
+    /** Send a password-reset email with a one-time link. */
+    public static function sendPasswordReset(string $to, string $username, string $resetUrl): array
+    {
+        $site = (string) (config_get('site_name', 'LVChat') ?: 'LVChat');
+        $subject = "Reset your $site password";
+        $text = "Hello $username,\n\nWe received a request to reset the password for your $site account.\n\n"
+            . "Click this link to choose a new password:\n$resetUrl\n\n"
+            . 'The link expires in ' . AuthTokenService::RESET_TTL_MINUTES . ' minutes and can only be used once. '
+            . "If you did not request a password reset, you can ignore this email — your password will not change.\n";
+
+        $body = '<p>Hello ' . h($username) . ',</p>'
+            . '<p>We received a request to reset the password for your <strong>' . h($site) . '</strong> account.</p>'
+            . '<p><a href="' . h($resetUrl) . '" style="display:inline-block;background:#5865f2;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600">Reset your password</a></p>'
+            . '<p style="font-size:13px;color:#a1a5ab">Or open this link: <a href="' . h($resetUrl) . '">' . h($resetUrl) . '</a></p>'
+            . '<p style="font-size:13px;color:#a1a5ab">The link expires in ' . AuthTokenService::RESET_TTL_MINUTES . ' minutes and can only be used once. If you did not request a password reset, you can ignore this email &mdash; your password will not change.</p>';
+
+        return self::send($to, $subject, $text, self::htmlWrap($subject, $body));
+    }
+
+    /** Send a magic-link login email with a one-time link. */
+    public static function sendMagicLink(string $to, string $username, string $magicUrl): array
+    {
+        $site = (string) (config_get('site_name', 'LVChat') ?: 'LVChat');
+        $subject = "Log in to $site";
+        $text = "Hello $username,\n\nClick this link to log in to your $site account:\n$magicUrl\n\n"
+            . 'The link expires in ' . AuthTokenService::MAGIC_TTL_MINUTES . ' minutes and can only be used once. '
+            . "If you did not request this link, you can ignore this email.\n";
+
+        $body = '<p>Hello ' . h($username) . ',</p>'
+            . '<p>Click the button below to log in to your <strong>' . h($site) . '</strong> account.</p>'
+            . '<p><a href="' . h($magicUrl) . '" style="display:inline-block;background:#5865f2;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600">Log in to ' . h($site) . '</a></p>'
+            . '<p style="font-size:13px;color:#a1a5ab">Or open this link: <a href="' . h($magicUrl) . '">' . h($magicUrl) . '</a></p>'
+            . '<p style="font-size:13px;color:#a1a5ab">The link expires in ' . AuthTokenService::MAGIC_TTL_MINUTES . ' minutes and can only be used once. If you did not request this link, you can ignore this email.</p>';
+
+        return self::send($to, $subject, $text, self::htmlWrap($subject, $body));
+    }
+
     /** Whether SMTP is enabled and pointed at a host (used to hide/emphasise UI). */
     public static function configured(): bool
     {

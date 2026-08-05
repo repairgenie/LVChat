@@ -425,9 +425,9 @@ final class ChannelService
              FROM invites i
              JOIN channels c ON c.id = i.channel_id
              LEFT JOIN users u ON u.id = i.invited_by
-             WHERE i.user_id = ?
+             WHERE i.user_id = ? AND (i.invited_by IS NULL OR i.invited_by != ?)
              ORDER BY i.created_at DESC',
-            [$userId]
+            [$userId, $userId]
         );
     }
 }

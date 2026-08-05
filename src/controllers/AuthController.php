@@ -47,7 +47,111 @@ final class AuthController
             flash('This account is suspended.' . ($reason !== '' ? ' Reason: ' . $reason : ''));
             redirect('/login');
         }
+        // MFA gate: enrolled users must pass the TOTP challenge; users whose
+        // account class requires MFA must enroll before the session opens.
+        if (TotpService::enabled($user)) {
+            self::beginMfa($user, $next);
+            redirect('/login/mfa');
+        }
+        if (TotpService::requiredFor($user)) {
+            self::beginMfa($user, $next);
+            $_SESSION['mfa_setup_secret'] = TotpService::generateSecret();
+            redirect('/login/mfa/setup');
+        }
         login_attempt_clear();
+        Auth::login($user);
+        redirect($next);
+    }
+
+    /** Park a password-verified user in a pre-auth MFA state (no session token yet). */
+    private static function beginMfa(array $user, string $next): void
+    {
+        session_regenerate_id(true);
+        $_SESSION['mfa_pending_uid'] = (int) $user['id'];
+        $_SESSION['mfa_pending_next'] = $next;
+    }
+
+    public static function mfaForm(): void
+    {
+        if (Auth::user()) {
+            redirect('/app?channel=general');
+        }
+        if (empty($_SESSION['mfa_pending_uid'])) {
+            redirect('/login');
+        }
+        render_view('auth/mfa', ['error' => flash()]);
+    }
+
+    public static function mfaVerify(): void
+    {
+        Csrf::verify();
+        $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
+        $next = (string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general');
+        if (!$uid) {
+            redirect('/login');
+        }
+        if (login_attempt_count() >= login_attempt_max()) {
+            flash('Too many failed attempts. Please wait a few minutes and try again.');
+            redirect('/login');
+        }
+        $user = Database::row('SELECT * FROM users WHERE id = ?', [$uid]);
+        $code = trim((string) ($_POST['code'] ?? ''));
+        if (!$user || !TotpService::enabled($user) || !TotpService::verify((string) $user['totp_secret'], $code)) {
+            login_attempt_record();
+            flash('Invalid authentication code. Try again.');
+            redirect('/login/mfa');
+        }
+        unset($_SESSION['mfa_pending_uid'], $_SESSION['mfa_pending_next']);
+        login_attempt_clear();
+        Auth::login($user);
+        redirect($next);
+    }
+
+    public static function mfaSetupForm(): void
+    {
+        if (Auth::user()) {
+            redirect('/app?channel=general');
+        }
+        $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
+        $secret = (string) ($_SESSION['mfa_setup_secret'] ?? '');
+        if (!$uid || $secret === '') {
+            redirect('/login');
+        }
+        $user = Database::row('SELECT * FROM users WHERE id = ?', [$uid]);
+        if (!$user) {
+            redirect('/login');
+        }
+        render_view('auth/mfa-setup', [
+            'error' => flash(),
+            'secret' => TotpService::formatSecret($secret),
+            'uri' => TotpService::otpauthUri($secret, (string) $user['username'], (string) config_get('site_name', 'LVChat')),
+        ]);
+    }
+
+    public static function mfaSetupVerify(): void
+    {
+        Csrf::verify();
+        $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
+        $next = (string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general');
+        $secret = (string) ($_SESSION['mfa_setup_secret'] ?? '');
+        if (!$uid || $secret === '') {
+            redirect('/login');
+        }
+        if (login_attempt_count() >= login_attempt_max()) {
+            flash('Too many failed attempts. Please wait a few minutes and try again.');
+            redirect('/login');
+        }
+        $user = Database::row('SELECT * FROM users WHERE id = ?', [$uid]);
+        $code = trim((string) ($_POST['code'] ?? ''));
+        if (!$user || !TotpService::verify($secret, $code)) {
+            login_attempt_record();
+            flash('Invalid code. Check your authenticator app and try again.');
+            redirect('/login/mfa/setup');
+        }
+        TotpService::enable($uid, $secret);
+        unset($_SESSION['mfa_pending_uid'], $_SESSION['mfa_pending_next'], $_SESSION['mfa_setup_secret']);
+        login_attempt_clear();
+        log_audit('mfa_enroll', $user['username']);
         Auth::login($user);
         redirect($next);
     }
@@ -117,6 +221,11 @@ final class AuthController
             InviteService::claim((int) $invite['id'], (int) $result['id']);
         }
         $user = Auth::attempt($username, $password);
+        if (TotpService::requiredFor($user)) {
+            self::beginMfa($user, $next);
+            $_SESSION['mfa_setup_secret'] = TotpService::generateSecret();
+            redirect('/login/mfa/setup');
+        }
         Auth::login($user);
         if (($user['status'] ?? 'active') === 'pending') {
             flash('Your account is pending admin approval. You can browse channels, but you cannot chat until an admin approves it.');
@@ -130,6 +239,164 @@ final class AuthController
         Csrf::verify();
         Auth::logout();
         redirect('/login');
+    }
+
+    public static function forgotPasswordForm(): void
+    {
+        if (Auth::user()) {
+            redirect('/app?channel=general');
+        }
+        render_view('auth/forgot-password', [
+            'error' => flash(),
+        ]);
+    }
+
+    public static function forgotPassword(): void
+    {
+        Csrf::verify();
+        $email = trim((string) ($_POST['email'] ?? ''));
+
+        if (login_attempt_count() >= login_attempt_max()) {
+            flash('Too many attempts. Please wait a few minutes and try again.');
+            redirect('/forgot-password');
+        }
+        login_attempt_record();
+
+        // Only registered (non-guest) accounts have a usable email. The same
+        // message is shown whether or not the address exists, so the form
+        // cannot be used to enumerate accounts.
+        $user = Database::row(
+            'SELECT * FROM users WHERE email = ? COLLATE NOCASE AND guest = 0',
+            [$email]
+        );
+        if ($user) {
+            AuthTokenService::invalidateAllForUser((int) $user['id'], AuthTokenService::TYPE_RESET);
+            $token = AuthTokenService::create((int) $user['id'], AuthTokenService::TYPE_RESET, AuthTokenService::RESET_TTL_MINUTES);
+            Mailer::sendPasswordReset($user['email'], $user['username'], AuthTokenService::resetLink($token));
+        }
+        flash('If an account exists with that email, we\'ve sent a password reset link.');
+        redirect('/forgot-password');
+    }
+
+    public static function resetPasswordForm(array $params): void
+    {
+        if (Auth::user()) {
+            redirect('/app?channel=general');
+        }
+        $token = (string) ($params['token'] ?? '');
+        $row = AuthTokenService::validate($token, AuthTokenService::TYPE_RESET);
+        if (!$row) {
+            flash('This password reset link is invalid or has expired. Please request a new one.');
+            redirect('/forgot-password');
+        }
+        render_view('auth/reset-password', [
+            'token' => $token,
+            'error' => flash(),
+        ]);
+    }
+
+    public static function resetPassword(array $params): void
+    {
+        Csrf::verify();
+        $token = (string) ($params['token'] ?? '');
+        $row = AuthTokenService::validate($token, AuthTokenService::TYPE_RESET);
+        if (!$row) {
+            flash('This password reset link is invalid or has expired. Please request a new one.');
+            redirect('/forgot-password');
+        }
+
+        $password = (string) ($_POST['password'] ?? '');
+        $confirm = (string) ($_POST['password_confirm'] ?? '');
+        if (strlen($password) < 8) {
+            flash('Password must be at least 8 characters.');
+            redirect('/reset-password/' . rawurlencode($token));
+        }
+        if ($password !== $confirm) {
+            flash('Passwords do not match.');
+            redirect('/reset-password/' . rawurlencode($token));
+        }
+
+        $userId = (int) $row['id'];
+        Database::query(
+            'UPDATE users SET password_hash = ? WHERE id = ?',
+            [password_hash($password, PASSWORD_ARGON2ID), $userId]
+        );
+        AuthTokenService::claim((int) $row['token_id']);
+        AuthTokenService::invalidateAllForUser($userId, AuthTokenService::TYPE_RESET);
+        AuthTokenService::invalidateAllForUser($userId, AuthTokenService::TYPE_MAGIC);
+        // A password reset is a credential change: every existing session must
+        // re-authenticate with the new password.
+        Auth::killSessions($userId, false);
+        log_audit('password_reset', 'user#' . $userId);
+        flash('Your password has been reset. Log in with your new password.');
+        redirect('/login');
+    }
+
+    public static function magicLoginForm(): void
+    {
+        if (Auth::user()) {
+            redirect('/app?channel=general');
+        }
+        render_view('auth/magic-link', [
+            'error' => flash(),
+        ]);
+    }
+
+    public static function magicLoginRequest(): void
+    {
+        Csrf::verify();
+        $email = trim((string) ($_POST['email'] ?? ''));
+
+        if (login_attempt_count() >= login_attempt_max()) {
+            flash('Too many attempts. Please wait a few minutes and try again.');
+            redirect('/magic-link');
+        }
+        login_attempt_record();
+
+        // Same anti-enumeration rule as the password reset form.
+        $user = Database::row(
+            'SELECT * FROM users WHERE email = ? COLLATE NOCASE AND guest = 0',
+            [$email]
+        );
+        if ($user) {
+            AuthTokenService::invalidateAllForUser((int) $user['id'], AuthTokenService::TYPE_MAGIC);
+            $token = AuthTokenService::create((int) $user['id'], AuthTokenService::TYPE_MAGIC, AuthTokenService::MAGIC_TTL_MINUTES);
+            Mailer::sendMagicLink($user['email'], $user['username'], AuthTokenService::magicLink($token));
+        }
+        flash('If an account exists with that email, we\'ve sent a login link.');
+        redirect('/magic-link');
+    }
+
+    public static function magicLogin(array $params): void
+    {
+        if (Auth::user()) {
+            redirect('/app?channel=general');
+        }
+        $token = (string) ($params['token'] ?? '');
+        $row = AuthTokenService::validate($token, AuthTokenService::TYPE_MAGIC);
+        if (!$row) {
+            flash('This login link is invalid or has expired. Please request a new one.');
+            redirect('/magic-link');
+        }
+        // Magic links authenticate as the user, so apply the same
+        // ban/suspension gates as a password login.
+        $ban = Auth::globalBanFor($row);
+        if ($ban || (int) $row['banned'] === 1) {
+            $reason = $ban['reason'] ?? $row['ban_reason'] ?? '';
+            flash('This account is banned.' . ($reason ? ' Reason: ' . $reason : ''));
+            redirect('/login');
+        }
+        if (($row['status'] ?? 'active') === 'suspended') {
+            $reason = trim((string) ($row['status_reason'] ?? ''));
+            flash('This account is suspended.' . ($reason !== '' ? ' Reason: ' . $reason : ''));
+            redirect('/login');
+        }
+        AuthTokenService::claim((int) $row['token_id']);
+        AuthTokenService::invalidateAllForUser((int) $row['id'], AuthTokenService::TYPE_MAGIC);
+        login_attempt_clear();
+        Auth::login($row);
+        log_audit('magic_login', 'user#' . (int) $row['id']);
+        redirect('/app?channel=general');
     }
 
     public static function guestLogin(): void

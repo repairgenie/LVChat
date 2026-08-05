@@ -34,6 +34,31 @@
     </div>
     <input type="checkbox" name="registration_requires_approval" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['registration_requires_approval'] ?? '0') === '1' ? 'checked' : '' ?>>
   </div>
+  <div class="pt-4 border-t border-discord-700">
+    <div class="text-sm font-medium text-white mb-1">Require two-factor authentication</div>
+    <p class="text-xs text-discord-400 mb-3">Accounts in a checked class must enroll MFA (authenticator app) before they can use the site. Users not yet enrolled are walked through setup right after signing in with their password. Admins can reset a user's MFA from their profile page if they lose their authenticator.</p>
+    <div class="flex items-center justify-between card p-4">
+      <div>
+        <div class="text-sm font-medium text-white">Admins</div>
+        <div class="text-xs text-discord-400">IRC operators</div>
+      </div>
+      <input type="checkbox" name="mfa_require_admin" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['mfa_require_admin'] ?? '0') === '1' ? 'checked' : '' ?>>
+    </div>
+    <div class="flex items-center justify-between card p-4 mt-2">
+      <div>
+        <div class="text-sm font-medium text-white">Staff</div>
+        <div class="text-xs text-discord-400">Support staff</div>
+      </div>
+      <input type="checkbox" name="mfa_require_staff" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['mfa_require_staff'] ?? '0') === '1' ? 'checked' : '' ?>>
+    </div>
+    <div class="flex items-center justify-between card p-4 mt-2">
+      <div>
+        <div class="text-sm font-medium text-white">Registered users</div>
+        <div class="text-xs text-discord-400">All regular accounts</div>
+      </div>
+      <input type="checkbox" name="mfa_require_user" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['mfa_require_user'] ?? '0') === '1' ? 'checked' : '' ?>>
+    </div>
+  </div>
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Spam filters</div>

@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS users (
   avatar TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   status_reason TEXT,
-  age_verified_at TEXT
+  age_verified_at TEXT,
+  totp_secret TEXT,
+  totp_enabled_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -141,6 +143,19 @@ CREATE TABLE IF NOT EXISTS registration_invites (
   used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_registration_invites_email ON registration_invites(email);
+
+-- One-time auth tokens: password resets and magic-link logins. A token is
+-- single-use (used_at set on claim) and short-lived (expires_at).
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
 
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

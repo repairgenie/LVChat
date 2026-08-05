@@ -123,6 +123,28 @@ function jsonDecode(string $body): array
     return is_array($j) ? $j : ['_raw' => $body];
 }
 
+/** Compute a live TOTP code for a base32 secret (mirrors the server's algorithm). */
+function mfaCode(string $secretB32): string
+{
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $map = array_flip(str_split($alphabet));
+    $bin = '';
+    $acc = 0;
+    $bits = 0;
+    foreach (str_split(strtoupper($secretB32)) as $ch) {
+        $acc = ($acc << 5) | $map[$ch];
+        $bits += 5;
+        if ($bits >= 8) {
+            $bin .= chr(($acc >> ($bits - 8)) & 0xFF);
+            $bits -= 8;
+        }
+    }
+    $hash = hash_hmac('sha1', pack('N2', 0, intdiv(time(), 30)), $bin, true);
+    $off = ord($hash[19]) & 0x0F;
+    $v = ((ord($hash[$off]) & 0x7F) << 24) | (ord($hash[$off + 1]) << 16) | (ord($hash[$off + 2]) << 8) | ord($hash[$off + 3]);
+    return str_pad((string) ($v % 1000000), 6, '0', STR_PAD_LEFT);
+}
+
 /** Direct read access to the scratch DB for id lookups + row assertions. */
 function dbq(string $sql, array $p = []): array
 {
@@ -167,6 +189,66 @@ check('logged-out share link -> /login?next=', $s === 302 && str_contains($h['lo
 [$s, , $b] = req('POST', '/api/send', ['channel' => 'general', 'content' => 'x'], $cjA);
 check('POST without CSRF rejected (419)', $s === 419, (string) $s);
 
+// ── TOTP / MFA ───────────────────────────────────────────────────────────────
+echo "== totp mfa ==\n";
+$t = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/mfa/begin', ['csrf' => $t], $cjA);
+$j = jsonDecode($b);
+check('mfa begin returns secret + uri', $s === 200 && !empty($j['secret']) && str_contains($j['uri'] ?? '', 'otpauth://totp/'), $b);
+$mfaBare = str_replace(' ', '', (string) ($j['secret'] ?? ''));
+[$s, , $b] = req('POST', '/api/mfa/enable', ['csrf' => $t, 'code' => '000000'], $cjA);
+check('mfa enable rejects bad code', $s === 403, "$s $b");
+[$s, , $b] = req('POST', '/api/mfa/enable', ['csrf' => $t, 'code' => mfaCode($mfaBare)], $cjA);
+check('mfa enable with valid code', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+check('totp stored in db', !empty(dbq('SELECT totp_secret FROM users WHERE username = "alice"')[0]['totp_secret'] ?? null));
+[$s] = req('POST', '/api/mfa/enable', ['csrf' => $t, 'code' => mfaCode($mfaBare)], $cjA);
+check('second enable rejected', $s === 400, (string) $s);
+[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => $t, 'password' => 'wrong'], $cjA);
+check('mfa disable rejects wrong password', $s === 403, "$s $b");
+[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => $t, 'password' => 'password123'], $cjA);
+check('mfa disable works for self', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+
+// Re-enable, then drive the login challenge flow from a fresh cookie jar.
+[$s, , $b] = req('POST', '/api/mfa/begin', ['csrf' => $t], $cjA);
+$mfaBare = str_replace(' ', '', (string) (jsonDecode($b)['secret'] ?? ''));
+req('POST', '/api/mfa/enable', ['csrf' => $t, 'code' => mfaCode($mfaBare)], $cjA);
+
+$cjL = '/tmp/opencode/httptest-mfa.txt';
+$page = req('GET', '/login', [], $cjL)[2];
+[$s, $h] = req('POST', '/login', ['csrf' => csrf($page), 'username' => 'alice', 'password' => 'password123', 'next' => '/app'], $cjL);
+check('login with mfa redirects to challenge', $s === 302 && str_contains($h['location'] ?? '', '/login/mfa'), "$s " . ($h['location'] ?? ''));
+[$s, , $b] = req('GET', '/login/mfa', [], $cjL);
+check('challenge page renders', $s === 200 && stripos($b, 'authentication code') !== false, (string) $s);
+[$s, $h] = req('POST', '/login/mfa', ['csrf' => csrf($b), 'code' => '000000'], $cjL);
+check('wrong mfa code bounces', $s === 302 && str_contains($h['location'] ?? '', '/login/mfa'), "$s " . ($h['location'] ?? ''));
+[$s, $h] = req('POST', '/login/mfa', ['csrf' => csrf(req('GET', '/login/mfa', [], $cjL)[2]), 'code' => mfaCode($mfaBare)], $cjL);
+check('correct mfa code logs in', $s === 302 && str_contains($h['location'] ?? '', '/app'), "$s " . ($h['location'] ?? ''));
+[$s] = req('GET', '/app', [], $cjL);
+check('mfa user can open /app', $s === 200, (string) $s);
+
+// Forced enrollment: require MFA for admins, wipe alice's enrollment, and check
+// that her next password login lands on the setup page and completes.
+dbq("INSERT OR REPLACE INTO server_config (key, value) VALUES ('mfa_require_admin', '1')");
+dbq("UPDATE users SET totp_secret = NULL, totp_enabled_at = NULL WHERE username = 'alice'");
+$cjF = '/tmp/opencode/httptest-mfa-f.txt';
+[$s, $h] = req('POST', '/login', ['csrf' => csrf(req('GET', '/login', [], $cjF)[2]), 'username' => 'alice', 'password' => 'password123', 'next' => '/app'], $cjF);
+check('required-class login goes to setup', $s === 302 && str_contains($h['location'] ?? '', '/login/mfa/setup'), "$s " . ($h['location'] ?? ''));
+$page = req('GET', '/login/mfa/setup', [], $cjF)[2];
+check('setup page shows qr uri + secret', stripos($page, 'otpauth://totp/') !== false, '');
+$forcedSecret = '';
+if (preg_match('/qr\.addData\((".*?")\)/', $page, $m)) {
+    $uri = json_decode((string) $m[1]);
+    parse_str((string) parse_url((string) $uri, PHP_URL_QUERY), $q);
+    $forcedSecret = (string) ($q['secret'] ?? '');
+}
+check('setup secret extracted from page', preg_match('/^[A-Z2-7]{32}$/', $forcedSecret) === 1, $forcedSecret);
+[$s, $h] = req('POST', '/login/mfa/setup', ['csrf' => csrf($page), 'code' => mfaCode($forcedSecret)], $cjF);
+check('setup verify completes login', $s === 302 && str_contains($h['location'] ?? '', '/app'), "$s " . ($h['location'] ?? ''));
+check('totp enabled after forced setup', !empty(dbq('SELECT totp_enabled_at FROM users WHERE username = "alice"')[0]['totp_enabled_at'] ?? null));
+[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => csrf(req('GET', '/app', [], $cjF)[2]), 'password' => 'password123'], $cjF);
+check('required-class cannot self-disable', $s === 403, "$s $b");
+dbq("UPDATE server_config SET value = '0' WHERE key = 'mfa_require_admin'");
+dbq("UPDATE users SET totp_secret = NULL, totp_enabled_at = NULL WHERE username = 'alice'");
 // ── Channel + messaging API ──────────────────────────────────────────────────
 echo "== channel + messaging ==\n";
 $t = csrf(req('GET', '/app', [], $cjA)[2]);

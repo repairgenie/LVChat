@@ -141,4 +141,63 @@ final class UserController
         }
         json_out(['ok' => true]);
     }
+
+    /** POST /api/mfa/begin — start MFA enrollment; the secret lives in the session until verified. */
+    public static function mfaBegin(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        if ((int) ($user['guest'] ?? 0) === 1) {
+            json_out(['error' => 'Registered users only.'], 403);
+        }
+        if (TotpService::enabled($user)) {
+            json_out(['error' => 'Two-factor authentication is already enabled.'], 400);
+        }
+        $secret = TotpService::generateSecret();
+        $_SESSION['mfa_selfsetup_secret'] = $secret;
+        json_out([
+            'ok' => true,
+            'secret' => TotpService::formatSecret($secret),
+            'uri' => TotpService::otpauthUri($secret, (string) $user['username'], (string) config_get('site_name', 'LVChat')),
+        ]);
+    }
+
+    /** POST /api/mfa/enable — confirm enrollment with a valid code from the authenticator. */
+    public static function mfaEnable(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $secret = (string) ($_SESSION['mfa_selfsetup_secret'] ?? '');
+        if ($secret === '') {
+            json_out(['error' => 'Start the MFA setup first.'], 400);
+        }
+        $code = trim((string) ($_POST['code'] ?? ''));
+        if (!TotpService::verify($secret, $code)) {
+            json_out(['error' => 'Invalid code. Check your authenticator app and try again.'], 403);
+        }
+        TotpService::enable((int) $user['id'], $secret);
+        unset($_SESSION['mfa_selfsetup_secret']);
+        log_audit('mfa_enable', $user['username']);
+        json_out(['ok' => true]);
+    }
+
+    /** POST /api/mfa/disable — requires the account password; blocked when the class requires MFA. */
+    public static function mfaDisable(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        if (!TotpService::enabled($user)) {
+            json_out(['error' => 'Two-factor authentication is not enabled.'], 400);
+        }
+        if (TotpService::requiredFor($user)) {
+            json_out(['error' => 'Two-factor authentication is required for your account class and cannot be disabled.'], 403);
+        }
+        $password = (string) ($_POST['password'] ?? '');
+        if (!password_verify($password, $user['password_hash'])) {
+            json_out(['error' => 'Password is incorrect.'], 403);
+        }
+        TotpService::disable((int) $user['id']);
+        log_audit('mfa_disable', $user['username']);
+        json_out(['ok' => true]);
+    }
 }
