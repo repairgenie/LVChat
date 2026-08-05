@@ -11,7 +11,7 @@ function channel_card(array $c, array $joinedMap): string {
         : '<a href="/c/' . h(rawurlencode($c['slug'])) . '" class="px-5 py-2 rounded-lg text-sm font-semibold bg-blurple hover:bg-blurple-dark text-white transition-all shadow-md shadow-blurple/20 hover:shadow-blurple/30">Join</a>';
     $hue = abs(crc32($c['name'])) % 360;
     $letter = strtoupper(mb_substr($c['name'], 0, 1));
-    $avatar = '<div class="w-10 h-10 rounded-lg shrink-0 flex items-center justify-center text-base font-bold text-white shadow-inner" style="background:linear-gradient(135deg,hsl(' . $hue . ',55%,45%),hsl(' . (($hue + 40) % 360) . ',50%,35%)' ) . '">' . $letter . '</div>';
+    $avatar = '<div class="w-10 h-10 rounded-lg shrink-0 flex items-center justify-center text-base font-bold text-white shadow-inner" style="background:linear-gradient(135deg,hsl(' . $hue . ',55%,45%),hsl(' . (($hue + 40) % 360) . ',50%,35%))">' . $letter . '</div>';
     return '<div class="browse-row-premium flex items-center gap-4 p-4 rounded-xl bg-discord-800/80 border border-discord-700/80"
         data-name="' . h(strtolower($c['name'])) . '"
         data-topic="' . h(strtolower(($c['topic'] ?: $c['description']) ?: '')) . '"

@@ -41,6 +41,7 @@ require ROOT . '/src/services/ModerationService.php';
 require ROOT . '/src/services/SupportService.php';
 require ROOT . '/src/services/LegalService.php';
 require ROOT . '/src/services/FriendService.php';
+require ROOT . '/src/services/Realtime.php';
 require ROOT . '/src/services/TotpService.php';
 require ROOT . '/src/services/AnalyticsService.php';
 require ROOT . '/src/services/CommandParser.php';

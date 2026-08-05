@@ -7,7 +7,13 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '22';
+    private const SCHEMA_VERSION = '23';
+
+    /** Drop the cached connection so the next access re-opens it (used after fork). */
+    public static function close(): void
+    {
+        self::$pdo = null;
+    }
 
     public static function init(): void
     {
@@ -28,6 +34,7 @@ final class Database
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA foreign_keys = ON');
         $pdo->exec('PRAGMA journal_mode = WAL');
+        $pdo->exec('PRAGMA busy_timeout = 5000');
         self::$pdo = $pdo;
 
         // Fast path: schema already applied at the current version — skip all DDL.
@@ -154,6 +161,15 @@ final class Database
         if (!in_array('auth_tokens', $tables, true)) {
             $pdo->exec('CREATE TABLE auth_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token TEXT NOT NULL UNIQUE, type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), expires_at TEXT NOT NULL, used_at TEXT)');
             $pdo->exec('CREATE INDEX idx_auth_tokens_token ON auth_tokens(token)');
+        }
+
+        // Realtime gateway support (schema v23): one-time WebSocket handshake
+        // tickets. Clients present a ticket when they connect to the gateway so
+        // the long-lived session token never has to reach JavaScript.
+        if (!in_array('ws_tickets', $tables, true)) {
+            $pdo->exec('CREATE TABLE ws_tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE, token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), expires_at TEXT NOT NULL)');
+            $pdo->exec('CREATE INDEX idx_ws_tickets_token ON ws_tickets(token)');
+            $pdo->exec('CREATE INDEX idx_ws_tickets_expires ON ws_tickets(expires_at)');
         }
 
         // Moderation / reporting / support (added in schema v13).
@@ -458,6 +474,10 @@ final class Database
             'presence_throttle' => '30',
             'poll_interval' => '2',
             'realtime' => 'poll',
+            'ws_url' => '',
+            'ws_port' => '8080',
+            'ws_push_url' => 'http://127.0.0.1:9001/push',
+            'ws_push_secret' => bin2hex(random_bytes(16)),
             'peak_online' => '0',
             'mfa_require_admin' => '0',
             'mfa_require_staff' => '0',

@@ -117,6 +117,10 @@ final class ChatController
             'friends' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getFriendsWithStatus((int) $user['id']) : [],
             'friendRequests' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getPendingIncoming((int) $user['id']) : [],
             'channelInvites' => (int) ($user['guest'] ?? 0) !== 1 ? ChannelService::pendingInvites((int) $user['id']) : [],
+            // WebSocket realtime: a one-time handshake ticket + the gateway URL
+            // are emitted so the client can open its socket on load.
+            'wsTicket' => Realtime::enabled() ? Realtime::mintTicket($user) : '',
+            'wsUrl' => Realtime::enabled() ? Realtime::clientUrl() : '',
         ], null);
     }
 
@@ -237,20 +241,24 @@ final class ChatController
             MessageService::notifyDm($t, $user, $pmId);
             MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
             $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
+            $pmMessage = [
+                'id' => (int) $row['id'],
+                'kind' => $row['kind'] ?? 'message',
+                'content' => $row['content'],
+                'created_at' => $row['created_at'],
+                'username' => $user['username'],
+                'sender_id' => (int) $user['id'],
+                'role' => $user['role'],
+                'guest' => MessageService::isGuest($user) ? 1 : 0,
+                'level' => 'normal',
+                'is_pm' => true,
+            ];
+            // Push the PM to both participants' open tabs + refresh the bell.
+            Realtime::dm($user, $t, $pmMessage);
+            Realtime::bell($t);
             self::finish([
                 'ok' => true,
-                'message' => [
-                    'id' => (int) $row['id'],
-                    'kind' => $row['kind'] ?? 'message',
-                    'content' => $row['content'],
-                    'created_at' => $row['created_at'],
-                    'username' => $user['username'],
-                    'sender_id' => (int) $user['id'],
-                    'role' => $user['role'],
-                    'guest' => MessageService::isGuest($user) ? 1 : 0,
-                    'level' => 'normal',
-                    'is_pm' => true,
-                ],
+                'message' => $pmMessage,
             ], $backPm);
         }
 
@@ -281,22 +289,25 @@ final class ChatController
             }
         }
         // Global word filter applies only when the channel has +C set.
-        $censor = CensorService::check($content, CensorService::isChannelFiltered($channel));
-        if ($censor) {
-            ModerationService::record($user, 'badword', $censor['action'], $censor['word'], $content, 'c', (int) $channel['id']);
-            if ($censor['action'] === 'censor') {
-                $content = $censor['censored'];
-            } else {
-                $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
-                Database::query('UPDATE messages SET deleted = 1 WHERE id = ?', [$msg['id']]);
-                $notice = 'Chanserv removed message from ' . $user['username'] . ' due to prohibited words';
-                MessageService::system((int) $channel['id'], 'system', $notice);
-                $msg['channel'] = $channel['slug'];
-                self::finish(['ok' => true, 'message' => $msg, 'blocked' => true, 'notice' => $notice], $back);
+            $censor = CensorService::check($content, CensorService::isChannelFiltered($channel));
+            if ($censor) {
+                ModerationService::record($user, 'badword', $censor['action'], $censor['word'], $content, 'c', (int) $channel['id']);
+                if ($censor['action'] === 'censor') {
+                    $content = $censor['censored'];
+                } else {
+                    $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
+                    Database::query('UPDATE messages SET deleted = 1 WHERE id = ?', [$msg['id']]);
+                    $notice = 'Chanserv removed message from ' . $user['username'] . ' due to prohibited words';
+                    $sysId = MessageService::system((int) $channel['id'], 'system', $notice);
+                    Realtime::message($channel['slug'], ['id' => $sysId, 'kind' => 'system', 'content' => $notice, 'channel' => $channel['slug'], 'sender_id' => null, 'username' => null, 'guest' => 0]);
+                    $msg['channel'] = $channel['slug'];
+                    self::finish(['ok' => true, 'message' => $msg, 'blocked' => true, 'notice' => $notice], $back);
+                }
             }
-        }
         $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
         $msg['channel'] = $channel['slug'];
+        // Fan the message out to everyone viewing this channel in realtime.
+        Realtime::message($channel['slug'], $msg);
         self::finish(['ok' => true, 'message' => $msg], $back);
     }
 
@@ -393,7 +404,7 @@ final class ChatController
             MessageService::notifyDm($t, $user, $pmId);
             MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
             $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
-            json_out(['ok' => true, 'message' => [
+            $pmMessage = [
                 'id' => (int) $row['id'],
                 'kind' => $row['kind'] ?? 'image',
                 'content' => $row['content'],
@@ -404,7 +415,10 @@ final class ChatController
                 'guest' => MessageService::isGuest($user) ? 1 : 0,
                 'level' => 'normal',
                 'is_pm' => true,
-            ]]);
+            ];
+            Realtime::dm($user, $t, $pmMessage);
+            Realtime::bell($t);
+            json_out(['ok' => true, 'message' => $pmMessage]);
         }
 
         $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
@@ -436,6 +450,7 @@ final class ChatController
         }
         $msg = MessageService::send((int) $channel['id'], $user, $content, 'image');
         $msg['channel'] = $channel['slug'];
+        Realtime::message($channel['slug'], $msg);
         json_out(['ok' => true, 'message' => $msg]);
     }
 
@@ -569,6 +584,13 @@ final class ChatController
         json_out(self::pollPayload($user, $since));
     }
 
+    /** GET /api/ws/ticket — mint a fresh one-time WS handshake ticket (reconnects). */
+    public static function wsTicket(): void
+    {
+        $user = self::requireUser();
+        json_out(['ok' => true, 'ticket' => Realtime::mintTicket($user), 'url' => Realtime::clientUrl()]);
+    }
+
     /**
      * GET /api/stream — Server-Sent Events realtime. Opt-in via the `realtime`
      * setting (poll is the shared-hosting default). Each iteration pushes the
@@ -593,6 +615,10 @@ final class ChatController
         $interval = max(1, (int) (config_get('poll_interval', '2') ?? 2));
         $start = time();
         $last = 0;
+        // Refresh presence inside the loop so a long-lived stream never goes stale:
+        // without this, SSE users vanish from the online list after presence_throttle.
+        $presenceThrottle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+        $lastPresence = $start;
 
         $send = function (string $data): void {
             echo "data: " . $data . "\n\n";
@@ -606,7 +632,29 @@ final class ChatController
             if (connection_aborted() || time() - $start > 3600) {
                 break;
             }
+            // Keep "last seen" fresh on a throttled cadence, mirroring Auth::user().
+            if (time() - $lastPresence >= $presenceThrottle) {
+                if ((int) ($user['guest'] ?? 0) === 1) {
+                    Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $user['id']]);
+                } else {
+                    Database::query('UPDATE users SET last_seen = datetime("now"), last_ip = ? WHERE id = ?', [client_ip(), $user['id']]);
+                }
+                $user['last_seen'] = now();
+                $lastPresence = time();
+            }
             $out = self::pollPayload($user, $since, false);
+            // Advance the server-side watermark once the batch is caught up, so the
+            // next tick fetches only what's new instead of re-sending the whole
+            // delta. When a batch hits the 100-row cap, hold `since` so nothing is
+            // dropped on a busy channel — the next tick keeps catching up.
+            $batch = $out['messages'] ?? [];
+            if (count($batch) < 100) {
+                foreach ($batch as $m) {
+                    if ((int) ($m['id'] ?? 0) > $since) {
+                        $since = (int) $m['id'];
+                    }
+                }
+            }
             $json = json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             if ($json !== false && $json !== $last) {
                 $send($json);
@@ -661,6 +709,7 @@ final class ChatController
         if (is_string($r)) {
             json_out(['error' => $r], 400);
         }
+        self::pushMsgUpdate($id, 'reaction', ['reactions' => $r['reactions']['rows'] ?? []]);
         json_out(['ok' => true, 'added' => $r['added'], 'reactions' => $r['reactions']]);
     }
 
@@ -754,6 +803,7 @@ final class ChatController
             json_out(['error' => $r], 403);
         }
         log_audit('message_delete', 'msg#' . $id);
+        self::pushMsgUpdate($id, 'delete');
         json_out(['ok' => true]);
     }
 
@@ -769,7 +819,21 @@ final class ChatController
             json_out(['error' => $r], 403);
         }
         log_audit('message_edit', 'msg#' . $id, $user['username']);
+        self::pushMsgUpdate($id, 'edit', ['content' => $content]);
         json_out(['ok' => true, 'content' => $content]);
+    }
+
+    /** Fan out a channel message edit/delete/reaction to the channel's viewers. */
+    private static function pushMsgUpdate(int $messageId, string $action, array $extra = []): void
+    {
+        $cid = Database::scalar('SELECT channel_id FROM messages WHERE id = ?', [$messageId]);
+        if (!$cid) {
+            return;
+        }
+        $slug = (string) (Database::scalar('SELECT slug FROM channels WHERE id = ?', [(int) $cid]) ?? '');
+        if ($slug !== '') {
+            Realtime::msgUpdate($slug, $action, $messageId, $extra);
+        }
     }
 
     /**

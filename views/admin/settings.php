@@ -109,11 +109,12 @@
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Realtime mode</div>
-      <div class="text-xs text-discord-400">SSE streams live updates but holds a PHP worker per client — best on a VPS/php-fpm. Polling is the shared-hosting default.</div>
+      <div class="text-xs text-discord-400">Polling is the shared-hosting default. SSE streams live updates but holds a PHP worker per client. WebSocket needs the realtime gateway daemon running.</div>
     </div>
     <select name="realtime" class="input w-36 !py-1.5">
       <option value="poll" <?= ($settings['realtime'] ?? 'poll') === 'poll' ? 'selected' : '' ?>>Polling</option>
       <option value="sse" <?= ($settings['realtime'] ?? 'poll') === 'sse' ? 'selected' : '' ?>>SSE</option>
+      <option value="ws" <?= ($settings['realtime'] ?? 'poll') === 'ws' ? 'selected' : '' ?>>WebSocket</option>
     </select>
   </div>
   <div>
@@ -140,7 +141,7 @@
     </select>
     <p class="text-xs text-discord-400 mt-1">Used for timestamps shown to users in chat, logs and the admin dashboard. Server storage remains UTC.</p>
   </div>
-  <div id="poll-settings" class="grid grid-cols-2 gap-4" <?= ($settings['realtime'] ?? 'poll') === 'sse' ? 'style="opacity:0.4;pointer-events:none"' : '' ?>>
+  <div id="poll-settings" class="grid grid-cols-2 gap-4" <?= (($settings['realtime'] ?? 'poll') === 'sse' || ($settings['realtime'] ?? 'poll') === 'ws') ? 'style="opacity:0.4;pointer-events:none"' : '' ?>>
     <div>
       <label class="label">Poll interval (seconds)</label>
       <input class="input" type="number" min="1" name="poll_interval" value="<?= (int) $settings['poll_interval'] ?>">
@@ -155,7 +156,7 @@
   <script>
   document.querySelector('select[name="realtime"]').addEventListener('change', function() {
     var ps = document.getElementById('poll-settings');
-    if (this.value === 'sse') { ps.style.opacity = '0.4'; ps.style.pointerEvents = 'none'; }
+    if (this.value === 'sse' || this.value === 'ws') { ps.style.opacity = '0.4'; ps.style.pointerEvents = 'none'; }
     else { ps.style.opacity = '1'; ps.style.pointerEvents = 'auto'; }
   });
   </script>

@@ -468,6 +468,27 @@
     bindMessageActions();
   }
 
+  // Apply a WebSocket "msg_update" event (edit/delete/reaction) to the message
+  // currently in view, mirroring what the acting user's own screen already did.
+  function applyMsgUpdate(u) {
+    if (!u || !u.message_id) return;
+    const el = msgsEl ? msgsEl.querySelector('.msg[data-id="' + u.message_id + '"]') : null;
+    if (!el) return;
+    if (u.action === 'delete') { el.remove(); return; }
+    if (u.action === 'edit' && typeof u.content === 'string') {
+      el.dataset.edited = '1';
+      const contentEl = el.querySelector('.msg-content');
+      if (contentEl) {
+        const kind = el.dataset.kind || 'message';
+        contentEl.innerHTML = msgContentHtml({ kind: kind, content: u.content, bot: parseInt(el.dataset.bot || '0', 10) || 0 });
+      }
+      return;
+    }
+    if (u.action === 'reaction' && u.reactions) {
+      renderReactions(el, { rows: u.reactions });
+    }
+  }
+
   function post(url, data, onOk, onFail) {
     const fd = new FormData();
     fd.append('csrf', CSRF);
@@ -696,6 +717,7 @@
     if (j.channel_presence) updateChannelPresence(j.channel_presence);
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
+    if (j.msg_update) applyMsgUpdate(j.msg_update);
   }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
@@ -2370,9 +2392,76 @@
     setTimeout(() => { poll(); schedulePoll(); }, jitter(base));
   }
 
-  // Realtime transport: SSE when the admin enabled it, else jittered polling.
-  // On any SSE error we fall back to polling so the chat never goes quiet.
-  if (body.dataset.rt === 'sse' && window.EventSource) {
+  // Realtime transport: WebSocket gateway when the admin enabled it, else SSE,
+  // else jittered polling. Each transport degrades to the next on failure so
+  // the chat never goes quiet. WebSocket runs a slow HTTP reconcile on top so
+  // the sidebar summaries (DM list, unread badges, presence counts, friends,
+  // bell) stay fresh without a per-event push for each of them.
+  const rtMode = body.dataset.rt || 'poll';
+  function startPolling() {
+    setTimeout(poll, Math.floor(Math.random() * pollMs));
+    schedulePoll();
+  }
+
+  if (rtMode === 'ws' && window.WebSocket && body.dataset.rtTicket) {
+    let ws = null;
+    let wsFails = 0;
+    let wsGone = false;
+    let reconcileTimer = null;
+    let wsBase = body.dataset.wsUrl || '';
+    let wsTicket = body.dataset.rtTicket;
+
+    function wsSend(obj) {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+    }
+    function wsSubscribe() {
+      if (CHANNEL) wsSend({ action: 'subscribe', channel: CHANNEL });
+      else if (DM) wsSend({ action: 'subscribe', dm: DM });
+    }
+    function refreshTicket(done) {
+      fetch('/api/ws/ticket')
+        .then((r) => r.json())
+        .then((j) => {
+          if (j && j.ticket) { wsTicket = j.ticket; wsBase = j.url || wsBase; }
+          done();
+        })
+        .catch(() => done());
+    }
+    function fallbackToPoll() {
+      if (reconcileTimer) { clearInterval(reconcileTimer); reconcileTimer = null; }
+      startPolling();
+    }
+    function openWs() {
+      if (wsGone) return;
+      const sep = wsBase.indexOf('?') >= 0 ? '&' : '?';
+      try { ws = new WebSocket(wsBase + sep + 'ticket=' + encodeURIComponent(wsTicket)); }
+      catch (e) { ws = null; }
+      if (!ws) { fallbackToPoll(); return; }
+      ws.onopen = () => { wsFails = 0; wsSubscribe(); };
+      ws.onmessage = (ev) => {
+        let j = null;
+        try { j = JSON.parse(ev.data); } catch (err) { return; }
+        if (j.pong) return;
+        handleRealtime(j);
+      };
+      ws.onerror = () => { try { ws.close(); } catch (e) {} };
+      ws.onclose = () => {
+        ws = null;
+        if (wsGone) return;
+        wsFails++;
+        if (wsFails >= 3) { fallbackToPoll(); return; }
+        // A ticket only lives 60s; mint a fresh one before reconnecting.
+        refreshTicket(() => setTimeout(openWs, pollMs * (wsFails + 1)));
+      };
+    }
+    openWs();
+    // Presence heartbeat keeps last_seen fresh server-side and the connection
+    // alive past idle timeouts.
+    setInterval(() => wsSend({ action: 'ping' }), 30000);
+    // Hybrid reconcile: WS carries messages instantly; this cheap HTTP call
+    // refreshes the sidebar summaries every 30s.
+    reconcileTimer = setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) poll(); }, 30000);
+  } else if (rtMode === 'sse' && window.EventSource) {
     let es = null;
     function openStream() {
       const q = new URLSearchParams({ since: lastId });
@@ -2391,8 +2480,7 @@
     }
     openStream();
   } else {
-    setTimeout(poll, Math.floor(Math.random() * pollMs));
-    schedulePoll();
+    startPolling();
   }
 
   // ── Channel browser modal ──────────────────────────────────────────────────

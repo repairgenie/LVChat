@@ -387,7 +387,7 @@ check('/clear action', ($res['action'] ?? '') === 'clear');
 $res = CommandParser::run('/share #test', $alice, $ch);
 check('/share copy link', ($res['copy'] ?? '') === canonical_channel_url('test'));
 $res = CommandParser::run('/channels', $alice, $ch);
-check('/channels redirect', ($res['redirect'] ?? '') === '/browse');
+check('/channels opens browser', ($res['action'] ?? '') === 'browse');
 $res = CommandParser::run('/part #test', $erin, $ch);
 check('/part', str_contains($res['replies'][0] ?? '', 'left'), $res['replies'][0] ?? '');
 ChannelService::join($ch, $erin);

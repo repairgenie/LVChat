@@ -130,6 +130,8 @@ final class WebhookService
 
         $msg = MessageService::send((int) $channel['id'], $bot, $body, 'message');
         Database::query('UPDATE webhooks SET last_used = datetime("now") WHERE id = ?', [(int) $hook['id']]);
+        $msg['channel'] = $channel['slug'];
+        Realtime::message($channel['slug'], $msg);
         return ['ok' => true, 'message' => ['id' => (int) $msg['id']]];
     }
 

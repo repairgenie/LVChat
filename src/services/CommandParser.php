@@ -85,7 +85,19 @@ final class CommandParser
     {
         foreach ($result['events'] ?? [] as $ev) {
             if (!empty($ev['channel_id'])) {
-                MessageService::system($ev['channel_id'], $ev['kind'], $ev['content']);
+                $id = MessageService::system($ev['channel_id'], $ev['kind'], $ev['content']);
+                $slug = (string) (Database::scalar('SELECT slug FROM channels WHERE id = ?', [(int) $ev['channel_id']]) ?? '');
+                if ($slug !== '') {
+                    Realtime::message($slug, [
+                        'id' => $id,
+                        'kind' => $ev['kind'],
+                        'content' => $ev['content'],
+                        'channel' => $slug,
+                        'sender_id' => null,
+                        'username' => null,
+                        'guest' => 0,
+                    ]);
+                }
             }
         }
     }

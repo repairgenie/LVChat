@@ -98,6 +98,7 @@ services from Anope.
 
 - PHP 8.1+ with `pdo_sqlite`
 - Node.js + npm **only if you edit views** — the compiled `public/assets/css/app.css` ships with the app, so the server never needs Node or internet access to Tailwind
+- Composer **only for the WebSocket realtime gateway** — `composer install --no-dev` pulls in Workerman, used by `bin/ws-server.php`. The core app (polling/SSE) runs without composer.
 
 ## Quick start
 
@@ -111,6 +112,49 @@ php -S 127.0.0.1:8000 -t public
 # production: point your web server's document root at public/, then run:
 bash bin/deploy.sh
 ```
+
+## Realtime gateway (WebSocket)
+
+The optional Level 3 realtime mode moves chat delivery from polling/SSE to a
+WebSocket gateway daemon (Workerman). Messages are fanned out the moment they
+are persisted — no 2s polling latency — and idle clients cost a fraction of
+the DB work of polling. See the [Scaling](#scaling) section for the capacity
+gain per tier.
+
+Enable it under **Admin → Settings → Realtime mode → WebSocket** (or
+`config_set('realtime', 'ws')`), then run the daemon:
+
+```bash
+composer install --no-dev              # once — installs Workerman into vendor/
+php bin/ws-server.php start -d         # start the gateway (stop|restart|status)
+```
+
+The daemon listens for chat clients on `ws_port` (default 8080) and exposes an
+internal push endpoint on `ws_push_url` (default `http://127.0.0.1:9001/push`)
+that php-fpm POSTs to after each write. Both are configurable under
+**Admin → Settings** or via the `WS_PORT` / `WS_PUSH_URL` environment
+variables. For production, run it under systemd — the unit is shown in the
+header of `bin/ws-server.php`:
+
+```ini
+[Unit]
+Description=LVChat realtime gateway
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/var/www/chat
+ExecStart=/usr/bin/php /var/www/chat/bin/ws-server.php start
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The client falls back **ws → SSE → poll** automatically if the gateway is down,
+so the chat never goes quiet. `bash bin/deploy.sh` health-checks the daemon
+when realtime mode is set to WebSocket.
 
 ## Upgrading / reinstalling (important)
 
@@ -194,6 +238,23 @@ open and searches Giphy as you type; clicking one posts it to the current channe
 
 ## Scaling
 
+Capacity by tier and realtime mode (concurrent users, rough order of magnitude):
+
+| Tier | Polling (2s) | Polling (3–5s) | SSE | WebSocket* |
+|---|---|---|---|---|
+| Shared hosting | 25–75 | 100–250 | worker-bound | — |
+| InterServer base VPS (1c/2GB) | 50–100 | 100–200 | 30–60 | 500–1,000 |
+| InterServer VPS (2c/6GB) | 100–200 | 200–400 | 80–150 | 1,500–3,000 |
+| VPS (4c/16GB) | 300–500 | 500–800 | 150–250 | 5,000–10,000 |
+| Dedicated 3700X (32GB) | 800–1,500 | 1,500–3,000+ | 300–500 | 20,000–50,000 |
+| Dedicated 3700X (64–128GB) | 1,500–3,000 | 3,000–5,000 | 500–900 | 20,000–50,000+ |
+
+\* WebSocket = the Level 3 realtime gateway (`bin/ws-server.php`, Workerman). It holds a
+persistent connection per client like SSE, but off PHP-FPM entirely, and fanned-out
+messages are delivered the moment they're persisted. WebSocket figures assume the
+gateway runs on the same box as php-fpm. Shared hosting cannot run a long-lived daemon,
+so no WebSocket row there.
+
 ### Shared hosting
 
 With PHP + SQLite + polling, the ceiling on shared hosting is the **PHP worker pool** and
@@ -211,6 +272,21 @@ count (Litespeed/higher tiers give more). Measure your own server with:
 ```bash
 php tests/load_check.php 10 10   # concurrent requests × rounds → req/s
 ```
+
+### InterServer base VPS (1 core, 2GB RAM)
+
+**50–200 concurrent users** — the entry tier above shared hosting:
+
+- **Polling (2s)**: 50–100 users
+- **Polling (3–5s)**: 100–200 users
+- **SSE mode**: 30–60 users (each holds a PHP worker)
+- **WebSocket**: 500–1,000 users
+- `pm.max_children` = 30–50
+
+The single core is the hard ceiling — you're CPU-bound long before RAM. 2GB leaves
+~1GB for OS + SQLite cache after ~40 PHP-FPM workers (~30–40MB each). Fine for a small
+community or beta; the 2-core/6GB tier is the better price jump at roughly double the
+capacity.
 
 ### VPS (4 vCPU Xeon Silver, 16GB RAM)
 
@@ -276,13 +352,18 @@ SSE streams live updates over one connection per client instead of repeated poll
 connection holds a PHP worker, so it suits php-fpm/VPS far better than shared hosting. The
 client automatically falls back to polling if the stream drops.
 
+A **Level 3 realtime gateway** (`bin/ws-server.php`, Workerman, `realtime = 'ws'`)
+moves realtime connections off PHP-FPM entirely, multiplying per-tier capacity
+5–20x (see the summary table above). Enable it in **Admin → Settings** and keep
+the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
+
 ## Testing
 
 ```bash
 bash bin/test.sh
 ```
 
-Runs **558 automated assertions** in two layers:
+Runs **558+ automated assertions** in three layers:
 
 - **`tests/smoke.php`** (379) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
@@ -296,6 +377,9 @@ Runs **558 automated assertions** in two layers:
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
   message reports, moderation/reports/support/legal admin pages, pending-approval and
   suspended login flows, share-link redirects, webhooks, and logout.
+- **`tests/ws_test.php`** (9) — WebSocket gateway integration: spawns the realtime
+  daemon against a scratch DB and verifies ticket auth, channel/DM subscriptions,
+  and message/msg-update fan-out (ports via `WS_PORT` / `WS_PUSH_PORT`).
 
 A headless-browser check (Chrome DevTools Protocol) is also used during development to
 confirm the chat page loads without JS errors, fills the viewport, polls for messages,
@@ -308,10 +392,13 @@ public/          front controller + .htaccess + JS + sounds + PWA (sw.js, manife
 src/             bootstrap, router, DB, auth, services (commands), controllers
 views/           layout, auth, chat app, browse, admin pages
 bin/deploy.sh    post-upload restore + sanity check
+bin/ws-server.php   Workerman realtime gateway (WebSocket + internal push endpoint)
 bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/test.sh      run the full automated test suite
 tests/smoke.php  319 command/service assertions
 tests/http_test.php  122 HTTP assertions
+tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
+composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)
 data/            SQLite database (beside public/, never web-served)
 ```

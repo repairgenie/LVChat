@@ -41,6 +41,7 @@ $router->post('/api/upload', [ChatController::class, 'upload']);
 $router->post('/api/command', [ChatController::class, 'command']);
 $router->get('/api/poll', [ChatController::class, 'poll']);
 $router->get('/api/stream', [ChatController::class, 'stream']);
+$router->get('/api/ws/ticket', [ChatController::class, 'wsTicket']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
 $router->get('/api/browse', [ChatController::class, 'browseData']);
 $router->post('/api/notifications/read', [ChatController::class, 'readNotifications']);

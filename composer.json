@@ -1,0 +1,14 @@
+{
+    "name": "lvchat/lvchat",
+    "description": "LVChat - Discord-style IRC web chat (PHP + SQLite) with a Workerman realtime gateway",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo_sqlite": "*",
+        "workerman/workerman": "^4.1"
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

@@ -1,4 +1,5 @@
 node_modules/
+vendor/
 data/*.db
 data/*.db-*
 public/uploads/

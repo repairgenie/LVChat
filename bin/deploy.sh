@@ -6,7 +6,9 @@
 # need bootstrapped:
 #   1. public/.htaccess      (dotfiles are often dropped by upload tools)
 #   2. SQLite database       (migrated outside the webroot, never overwritten)
-#   3. HTTP sanity check     (front controller + assets respond)
+#   3. Runtime check         (PHP extensions + shipped assets)
+#   4. HTTP sanity check     (front controller + assets respond)
+#   5. Realtime gateway      (optional: composer/vendor + daemon health)
 #
 # No Node, no npm, no build step is required. Usage:  bash bin/deploy.sh
 #
@@ -123,4 +125,30 @@ else
     echo ""
     echo "Deploy check FAILED — review the output above." >&2
     exit 1
+fi
+
+echo ""
+echo "== 5/5 Realtime gateway (optional) =="
+RT=$(php -r 'require "src/bootstrap.php"; echo config_get("realtime", "poll");' 2>/dev/null || echo poll)
+if [ "$RT" = "ws" ]; then
+    if [ ! -f vendor/autoload.php ]; then
+        if command -v composer >/dev/null 2>&1; then
+            echo "vendor/ missing — running composer install --no-dev (needed for the WebSocket gateway)."
+            composer install --no-dev --no-interaction
+        else
+            echo "WARN: realtime=ws is set but vendor/autoload.php is missing and composer is not installed."
+            echo "      The gateway won't run; clients fall back to polling. Install composer and re-run."
+        fi
+    else
+        echo "vendor/: present"
+    fi
+    HEALTH=$(php -r 'require "src/bootstrap.php"; $u = parse_url(Realtime::pushUrl()); echo $u["scheme"] . "://" . $u["host"] . (isset($u["port"]) ? ":" . $u["port"] : "") . "/health";' 2>/dev/null || echo 'http://127.0.0.1:9001/health')
+    if curl -s --max-time 2 "$HEALTH" >/dev/null 2>&1; then
+        echo "gateway: running ($HEALTH)"
+    else
+        echo "WARN: realtime=ws is set but the gateway isn't responding at $HEALTH."
+        echo "      Start it with:  php bin/ws-server.php start -d   (or the systemd unit in the README)"
+    fi
+else
+    echo "realtime mode: $RT (gateway not required)"
 fi

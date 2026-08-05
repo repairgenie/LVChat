@@ -534,3 +534,17 @@ CREATE TABLE IF NOT EXISTS openclaw_bot_pm_access (
 );
 CREATE INDEX IF NOT EXISTS idx_openclaw_pm_bot ON openclaw_bot_pm_access(bot_id);
 CREATE INDEX IF NOT EXISTS idx_openclaw_pm_user ON openclaw_bot_pm_access(user_id);
+
+-- One-time WebSocket handshake tickets, minted when the chat page loads. The
+-- client presents one to the realtime gateway to prove the PHP session; short
+-- TTL so the long-lived session token never has to reach JavaScript.
+CREATE TABLE IF NOT EXISTS ws_tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_token ON ws_tickets(token);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_expires ON ws_tickets(expires_at);

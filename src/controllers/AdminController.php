@@ -889,7 +889,7 @@ final class AdminController
                 config_set('max_channels_per_user', (string) max(1, (int) ($_POST['max_channels_per_user'] ?? 100)));
                 config_set('presence_throttle', (string) max(5, (int) ($_POST['presence_throttle'] ?? 30)));
                 config_set('poll_interval', (string) max(1, (int) ($_POST['poll_interval'] ?? 2)));
-                config_set('realtime', ($_POST['realtime'] ?? 'poll') === 'sse' ? 'sse' : 'poll');
+                config_set('realtime', in_array(($_POST['realtime'] ?? 'poll'), ['poll', 'sse', 'ws'], true) ? (string) $_POST['realtime'] : 'poll');
                 $tz = trim((string) ($_POST['timezone'] ?? 'UTC'));
                 if (!in_array($tz, DateTimeZone::listIdentifiers(), true)) {
                     $tz = 'UTC';

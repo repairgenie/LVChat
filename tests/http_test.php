@@ -545,7 +545,7 @@ check('logged-in embed redirects into the channel', $s === 302 && str_contains($
 
 // Browse page shows live + peak concurrency stats.
 [$s, , $b] = req('GET', '/browse', [], $cjA);
-check('browse page shows online + peak stats', $s === 200 && strpos($b, 'Online now') !== false && strpos($b, 'Peak users ever') !== false, $b);
+check('browse page shows online + peak stats', $s === 200 && strpos($b, '>Online<') !== false && strpos($b, '>Peak<') !== false, $b);
 
 // ── Day log (modal text + export) ────────────────────────────────────────────
 $today = gmdate('Y-m-d');
