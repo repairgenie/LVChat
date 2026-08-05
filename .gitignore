@@ -1,10 +1,6 @@
 node_modules/
 vendor/
-data/*.db
-data/*.db-*
-data/*.bak.*
-data/ws-server.pid
-data/ws-server.log
+data/
 public/uploads/
 public/assets/avatars/
 *.log
