@@ -98,7 +98,8 @@ services from Anope.
 
 - PHP 8.1+ with `pdo_sqlite`
 - Node.js + npm **only if you edit views** — the compiled `public/assets/css/app.css` ships with the app, so the server never needs Node or internet access to Tailwind
-- Composer **only for the WebSocket realtime gateway** — `composer install --no-dev` pulls in Workerman, used by `bin/ws-server.php`. The core app (polling/SSE) runs without composer.
+- Composer **only for the WebSocket realtime gateway** — `composer install --no-dev` pulls in Workerman, used by `bin/ws-server.php`. The core app (polling/SSE) runs without composer, and `bin/deploy.sh` installs composer + runs `composer install` for you when WebSocket mode is enabled.
+- The `pcntl` and `posix` PHP extensions **only for the WebSocket realtime gateway** — Workerman forks a master + worker process and needs them on Linux. The core app (polling/SSE) runs without them. On Debian/Ubuntu: `sudo apt install php-cli`, then verify with `php -m | grep -iE 'pcntl|posix'`.
 
 ## Quick start
 
@@ -125,16 +126,48 @@ Enable it under **Admin → Settings → Realtime mode → WebSocket** (or
 `config_set('realtime', 'ws')`), then run the daemon:
 
 ```bash
-composer install --no-dev              # once — installs Workerman into vendor/
-php bin/ws-server.php start -d         # start the gateway (stop|restart|status)
+# one-time server prerequisites:
+sudo apt install php-cli                      # pcntl + posix (required to fork workers)
+php -m | grep -iE 'pcntl|posix'               # both must be listed
+
+# start the gateway (stop|restart|status)
+php bin/ws-server.php start -d
 ```
+
+`composer install` is handled for you: `bin/deploy.sh` auto-installs composer
+(a system install when running as root, otherwise a local `data/composer.phar`
+that needs no root) and runs `composer install --no-dev` whenever `vendor/` is
+missing. It also warns if the `pcntl`/`posix` extensions are absent and
+auto-selects a free gateway port in the 8080–8089 range.
+
+If `pcntl`/`posix` are missing, the gateway refuses to start with a clear
+message — the chat keeps working with polling/SSE, only WebSocket mode needs
+the daemon.
 
 The daemon listens for chat clients on `ws_port` (default 8080) and exposes an
 internal push endpoint on `ws_push_url` (default `http://127.0.0.1:9001/push`)
 that php-fpm POSTs to after each write. Both are configurable under
-**Admin → Settings** or via the `WS_PORT` / `WS_PUSH_URL` environment
-variables. For production, run it under systemd — the unit is shown in the
-header of `bin/ws-server.php`:
+**Admin → Settings** or via the `WS_IP` / `WS_PORT` / `WS_PUSH_URL` environment
+variables. `bin/deploy.sh` automatically picks the **first free port in the
+8080–8089 range** when the configured one is already in use, and **Admin →
+Settings → Realtime mode → WebSocket** offers a manual fallback: a **Bind IP**
+field and a **typeable port dropdown** listing which ports in 8080–8089 are
+currently free. Restart the gateway after changing either.
+
+**Admin → Settings** also manages the daemon without SSH: a live **gateway
+status** (running/stopped, connection count, pid) with **Start / Stop /
+Restart** buttons, and a **Run deploy.sh** button that opens a modal streaming
+`bin/deploy.sh` output exactly like a terminal.
+
+> **Note on `proc_open`:** control panels (HestiaCP, Docker panels) sometimes
+> disable `proc_open` in PHP for security. The web UI degrades automatically —
+> it falls back to `popen`, then `exec`, and shows a clear message only if all
+> three are disabled. For best results (full streaming with separate stderr),
+> enable `proc_open` in your PHP-FPM config (`php.ini` / the domain's
+> `php-fpm.conf`) and restart PHP.
+
+For production, run
+it under systemd — the unit is shown in the header of `bin/ws-server.php`:
 
 ```ini
 [Unit]

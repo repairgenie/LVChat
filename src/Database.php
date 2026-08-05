@@ -474,6 +474,7 @@ final class Database
             'presence_throttle' => '30',
             'poll_interval' => '2',
             'realtime' => 'poll',
+            'ws_ip' => '0.0.0.0',
             'ws_url' => '',
             'ws_port' => '8080',
             'ws_push_url' => 'http://127.0.0.1:9001/push',

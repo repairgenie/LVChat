@@ -394,7 +394,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'ws_ip', 'ws_port', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -890,22 +890,32 @@ final class AdminController
                 config_set('presence_throttle', (string) max(5, (int) ($_POST['presence_throttle'] ?? 30)));
                 config_set('poll_interval', (string) max(1, (int) ($_POST['poll_interval'] ?? 2)));
                 config_set('realtime', in_array(($_POST['realtime'] ?? 'poll'), ['poll', 'sse', 'ws'], true) ? (string) $_POST['realtime'] : 'poll');
+                $wsIp = trim((string) ($_POST['ws_ip'] ?? '0.0.0.0'));
+                if ($wsIp !== '' && strtolower($wsIp) !== 'localhost' && !filter_var($wsIp, FILTER_VALIDATE_IP)) {
+                    $wsIp = '0.0.0.0';
+                }
+                config_set('ws_ip', $wsIp === '' ? '0.0.0.0' : $wsIp);
+                config_set('ws_port', (string) max(1, min(65535, (int) ($_POST['ws_port'] ?? 8080))));
                 $tz = trim((string) ($_POST['timezone'] ?? 'UTC'));
                 if (!in_array($tz, DateTimeZone::listIdentifiers(), true)) {
                     $tz = 'UTC';
                 }
                 config_set('timezone', $tz);
                 config_set('smtp_enabled', ($_POST['smtp_enabled'] ?? '0') === '1' ? '1' : '0');
-                config_set('smtp_host', trim((string) ($_POST['smtp_host'] ?? '')));
-                config_set('smtp_port', (string) max(1, (int) ($_POST['smtp_port'] ?? 587)));
-                config_set('smtp_encryption', in_array(($_POST['smtp_encryption'] ?? 'tls'), ['none', 'ssl', 'tls'], true) ? (string) $_POST['smtp_encryption'] : 'tls');
-                config_set('smtp_username', trim((string) ($_POST['smtp_username'] ?? '')));
+                // The SMTP fields are disabled (and therefore not submitted)
+                // whenever SMTP is off, so fall back to the stored values to
+                // avoid wiping the configuration on an unrelated save.
+                config_set('smtp_host', trim((string) ($_POST['smtp_host'] ?? config_get('smtp_host', ''))));
+                config_set('smtp_port', (string) max(1, (int) ($_POST['smtp_port'] ?? config_get('smtp_port', '587'))));
+                $smtpEnc = (string) ($_POST['smtp_encryption'] ?? config_get('smtp_encryption', 'tls'));
+                config_set('smtp_encryption', in_array($smtpEnc, ['none', 'ssl', 'tls'], true) ? $smtpEnc : 'tls');
+                config_set('smtp_username', trim((string) ($_POST['smtp_username'] ?? config_get('smtp_username', ''))));
                 $smtpPass = (string) ($_POST['smtp_password'] ?? '');
                 if ($smtpPass !== '') {
                     config_set('smtp_password', $smtpPass);
                 }
-                config_set('smtp_from_email', trim((string) ($_POST['smtp_from_email'] ?? '')));
-                config_set('smtp_from_name', trim((string) ($_POST['smtp_from_name'] ?? '')));
+                config_set('smtp_from_email', trim((string) ($_POST['smtp_from_email'] ?? config_get('smtp_from_email', ''))));
+                config_set('smtp_from_name', trim((string) ($_POST['smtp_from_name'] ?? config_get('smtp_from_name', ''))));
                 config_set('mfa_require_admin', ($_POST['mfa_require_admin'] ?? '0') === '1' ? '1' : '0');
                 config_set('mfa_require_staff', ($_POST['mfa_require_staff'] ?? '0') === '1' ? '1' : '0');
                 config_set('mfa_require_user', ($_POST['mfa_require_user'] ?? '0') === '1' ? '1' : '0');
@@ -1056,5 +1066,99 @@ final class AdminController
             flash($message);
         }
         redirect((string) ($_POST['back'] ?? '/admin'));
+    }
+
+    /** GET /admin/ws/status — is the realtime gateway up? (Admin → Settings UI.) */
+    public static function wsStatus(): void
+    {
+        Auth::requireAdmin();
+        json_out(array_merge(['ok' => true], Realtime::daemonStatus()));
+    }
+
+    /** POST /admin/ws/control — start/stop/restart the realtime gateway daemon. */
+    public static function wsControl(): void
+    {
+        Auth::requireAdmin();
+        Csrf::verify();
+        $action = (string) ($_POST['action'] ?? '');
+        if (!in_array($action, ['start', 'stop', 'restart'], true)) {
+            json_out(['error' => 'Unknown action.'], 400);
+        }
+        $cmd = escapeshellarg(self::cliPhp()) . ' ' . escapeshellarg(ROOT . '/bin/ws-server.php') . ' ' . $action;
+        if (in_array($action, ['start', 'restart'], true)) {
+            $cmd .= ' -d';
+        }
+        [$code, $output] = CommandRunner::run($cmd, 20);
+        log_audit('ws_daemon_' . $action, '', trim($output) !== '' ? trim($output) : null);
+        json_out([
+            'ok' => $code === 0,
+            'action' => $action,
+            'output' => $output,
+            'status' => Realtime::daemonStatus(),
+        ]);
+    }
+
+    /**
+     * The PHP CLI binary used to run scripts from a web request. Under
+     * php-fpm, PHP_BINARY points at the FPM daemon (e.g. php-fpm8.3), which
+     * prints its own usage instead of running a script — use the CLI binary
+     * next to it, or `php` resolved via PATH.
+     */
+    private static function cliPhp(): string
+    {
+        if (PHP_SAPI === 'cli') {
+            return PHP_BINARY;
+        }
+        $cli = PHP_BINDIR . '/php';
+        return is_executable($cli) ? $cli : 'php';
+    }
+
+    /** POST /admin/deploy — run bin/deploy.sh from the web UI. */
+    public static function deploy(): void
+    {
+        Auth::requireAdmin();
+        Csrf::verify();
+        $cmd = 'bash ' . escapeshellarg(ROOT . '/bin/deploy.sh');
+        [$code, $output] = CommandRunner::run($cmd, 180);
+        log_audit('deploy_script', '', trim($output) !== '' ? trim($output) : null);
+        json_out(['ok' => $code === 0, 'exit_code' => $code, 'output' => $output]);
+    }
+
+    /**
+     * POST /admin/deploy/stream — run bin/deploy.sh and stream its output to
+     * the browser line-by-line (like a terminal), so the admin sees progress
+     * live in the deploy modal. CSRF token accepted via POST field or query.
+     * Degrades to popen/exec when proc_open is disabled by the host.
+     */
+    public static function deployStream(): void
+    {
+        Auth::requireAdmin();
+        $sent = $_POST['csrf'] ?? ($_GET['csrf'] ?? '');
+        if (!is_string($sent) || !hash_equals(Csrf::token(), $sent)) {
+            http_response_code(419);
+            exit('CSRF token mismatch');
+        }
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no'); // nginx: disable proxy buffering for streaming
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        echo "bash bin/deploy.sh\n";
+        if (!CommandRunner::available()) {
+            echo "\n[Shell execution is disabled on this server (proc_open/popen/exec all off in php.ini).\n";
+            echo "Enable one of them, or run  bash bin/deploy.sh  over SSH.]\n";
+            flush();
+            log_audit('deploy_script', '', 'blocked: no shell functions available');
+            exit;
+        }
+        echo "(via " . CommandRunner::backend() . ")\n\n";
+        flush();
+
+        $cmd = 'bash ' . escapeshellarg(ROOT . '/bin/deploy.sh');
+        $code = CommandRunner::stream($cmd, 300);
+        log_audit('deploy_script', '', 'streamed, exit=' . $code);
+        exit;
     }
 }

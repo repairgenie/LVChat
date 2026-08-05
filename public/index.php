@@ -133,6 +133,10 @@ $router->get('/admin/settings', [AdminController::class, 'settings']);
 $router->get('/admin/invites', [AdminController::class, 'invites']);
 $router->get('/admin/openclaw', [AdminController::class, 'openclaw']);
 $router->post('/admin/action', [AdminController::class, 'action']);
+$router->get('/admin/ws/status', [AdminController::class, 'wsStatus']);
+$router->post('/admin/ws/control', [AdminController::class, 'wsControl']);
+$router->post('/admin/deploy', [AdminController::class, 'deploy']);
+$router->post('/admin/deploy/stream', [AdminController::class, 'deployStream']);
 
 // Incoming webhooks (public, token-authenticated) + admin management
 $router->post('/api/webhooks/{token}', [WebhookController::class, 'post']);

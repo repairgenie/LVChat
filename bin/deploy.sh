@@ -130,23 +130,92 @@ fi
 echo ""
 echo "== 5/5 Realtime gateway (optional) =="
 RT=$(php -r 'require "src/bootstrap.php"; echo config_get("realtime", "poll");' 2>/dev/null || echo poll)
+
+# Make composer available for the gateway: a system install if we're root,
+# otherwise a local composer.phar inside data/ (no root needed). Returns 0
+# when a working composer is available afterwards.
+ensure_composer() {
+    if command -v composer >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$(id -u)" = "0" ] && command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y composer >/dev/null 2>&1 && command -v composer >/dev/null 2>&1 && return 0
+    fi
+    if [ ! -f "$ROOT/data/composer.phar" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            curl -sS https://getcomposer.org/installer -o "$ROOT/data/composer-setup.php" 2>/dev/null \
+                && php "$ROOT/data/composer-setup.php" --install-dir="$ROOT/data" --filename=composer.phar >/dev/null 2>&1
+            rm -f "$ROOT/data/composer-setup.php"
+        else
+            php -r "copy('https://getcomposer.org/installer', '$ROOT/data/composer-setup.php');" 2>/dev/null \
+                && php "$ROOT/data/composer-setup.php" --install-dir="$ROOT/data" --filename=composer.phar >/dev/null 2>&1
+            rm -f "$ROOT/data/composer-setup.php"
+        fi
+    fi
+    [ -f "$ROOT/data/composer.phar" ]
+}
+
+# composer install against the system binary or the local phar.
+composer_install() {
+    if command -v composer >/dev/null 2>&1; then
+        composer install --no-dev --no-interaction
+    elif [ -f "$ROOT/data/composer.phar" ]; then
+        php "$ROOT/data/composer.phar" install --no-dev --no-interaction
+    else
+        return 1
+    fi
+}
+
+# A port is "free" when we can bind a listen socket to it on all interfaces.
+port_is_free() {
+    php -r '$s = @stream_socket_server("tcp://0.0.0.0:'"$1"'", $e, $str, STREAM_SERVER_BIND); if ($s) { fclose($s); exit(0); } exit(1);' 2>/dev/null
+}
+first_free_port() {
+    for p in $(seq 8080 8089); do
+        if port_is_free "$p"; then echo "$p"; return 0; fi
+    done
+    return 1
+}
+
 if [ "$RT" = "ws" ]; then
     if [ ! -f vendor/autoload.php ]; then
-        if command -v composer >/dev/null 2>&1; then
-            echo "vendor/ missing — running composer install --no-dev (needed for the WebSocket gateway)."
-            composer install --no-dev --no-interaction
+        echo "vendor/ missing — ensuring composer is available."
+        if ensure_composer; then
+            if composer_install; then
+                echo "vendor/: Workerman installed"
+            else
+                echo "WARN: composer install failed (no internet or no write permission in this directory)."
+                echo "      The gateway needs vendor/ to run. Clients fall back to polling until it succeeds."
+            fi
         else
-            echo "WARN: realtime=ws is set but vendor/autoload.php is missing and composer is not installed."
-            echo "      The gateway won't run; clients fall back to polling. Install composer and re-run."
+            echo "WARN: composer is not installed and could not be fetched (this needs internet access)."
+            echo "      Install it manually — e.g.  sudo apt install composer  — then re-run deploy.sh."
         fi
     else
         echo "vendor/: present"
+    fi
+    if ! php -r 'exit(function_exists("pcntl_fork") && function_exists("posix_kill") ? 0 : 1);' 2>/dev/null; then
+        echo "WARN: the pcntl/posix PHP extensions are missing — the gateway can't fork its workers."
+        echo "      Install them:  sudo apt install php-cli   (verify:  php -m | grep -iE 'pcntl|posix')"
     fi
     HEALTH=$(php -r 'require "src/bootstrap.php"; $u = parse_url(Realtime::pushUrl()); echo $u["scheme"] . "://" . $u["host"] . (isset($u["port"]) ? ":" . $u["port"] : "") . "/health";' 2>/dev/null || echo 'http://127.0.0.1:9001/health')
     if curl -s --max-time 2 "$HEALTH" >/dev/null 2>&1; then
         echo "gateway: running ($HEALTH)"
     else
-        echo "WARN: realtime=ws is set but the gateway isn't responding at $HEALTH."
+        # Gateway is down: make sure ws_port still points at a usable port.
+        CUR_PORT=$(php -r 'require "src/bootstrap.php"; echo (int) (config_get("ws_port", "8080") ?? 8080);' 2>/dev/null || echo 8080)
+        if port_is_free "$CUR_PORT"; then
+            echo "ws_port $CUR_PORT: free (gateway not running — start it with  php bin/ws-server.php start -d)"
+        else
+            NEW_PORT=$(first_free_port)
+            if [ -n "$NEW_PORT" ]; then
+                php -r 'require "src/bootstrap.php"; config_set("ws_port", "'"$NEW_PORT"'");'
+                echo "ws_port $CUR_PORT is in use — auto-selected first free port 8080-8089: $NEW_PORT"
+                echo "      Restart the gateway to apply:  php bin/ws-server.php restart   (or the systemd unit)"
+            else
+                echo "WARN: no free port in 8080-8089. Free one, or set ws_ip/ws_port manually under Admin → Settings → Realtime mode → WebSocket."
+            fi
+        fi
         echo "      Start it with:  php bin/ws-server.php start -d   (or the systemd unit in the README)"
     fi
 else

@@ -50,6 +50,7 @@ require __DIR__ . '/../src/bootstrap.php';
 Worker::$logFile = ROOT . '/data/ws-server.log';
 Worker::$pidFile = ROOT . '/data/ws-server.pid';
 
+$wsIp = (string) (getenv('WS_IP') ?: (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0'));
 $wsPort = (int) (getenv('WS_PORT') ?: (config_get('ws_port', '8080') ?? 8080));
 $pushUrl = (string) (getenv('WS_PUSH_URL') ?: (config_get('ws_push_url', 'http://127.0.0.1:9001/push') ?? 'http://127.0.0.1:9001/push'));
 $pushHost = '127.0.0.1';
@@ -81,7 +82,7 @@ $writePresence = function (array $actor, string $offset = 'now') use ($presenceT
     }
 };
 
-$ws = new Worker('websocket://0.0.0.0:' . $wsPort);
+$ws = new Worker('websocket://' . $wsIp . ':' . $wsPort);
 $ws->name = 'lvchat-ws';
 $ws->count = 1;
 
@@ -118,6 +119,7 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
         if ($req->path() !== $pushPath || $req->method() !== 'POST') {
             if ($req->path() === '/health') {
                 $conn->send(json_encode(['ok' => true, 'connections' => count($state)]));
+                $conn->close(); // status checks read until EOF — close promptly
                 return;
             }
             $conn->send('{"ok":false,"error":"not found"}');
@@ -270,5 +272,18 @@ $ws->onClose = function (TcpConnection $conn) use (&$state, $writePresence): voi
         unset($state[$conn->id]);
     }
 };
+
+// Workerman forks a master + worker processes on Linux, so the pcntl and posix
+// extensions are required. Give a clear message instead of a fatal error. The
+// core app is unaffected — clients simply fall back to polling/SSE.
+$cmd = strtolower((string) ($argv[1] ?? 'start'));
+if (in_array($cmd, ['start', 'restart', 'reload'], true)
+    && (!function_exists('pcntl_fork') || !function_exists('posix_kill'))) {
+    fwrite(STDERR, "LVChat realtime gateway cannot start: the PHP pcntl and posix extensions are missing.\n");
+    fwrite(STDERR, "On Debian/Ubuntu:  sudo apt install php-cli php-common\n");
+    fwrite(STDERR, "Then verify:        php -m | grep -iE 'pcntl|posix'\n");
+    fwrite(STDERR, "The chat app keeps working with polling/SSE — only WebSocket mode needs this daemon.\n");
+    exit(1);
+}
 
 Worker::runAll();

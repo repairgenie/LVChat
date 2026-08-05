@@ -1,4 +1,10 @@
-<?php $title = 'Settings'; $active = 'settings'; ?>
+<?php $title = 'Settings'; $active = 'settings';
+// SMTP fields are genuinely disabled when SMTP is off: they are neither
+// constraint-validated (a hidden port must not block saving) nor submitted,
+// so the stored config survives toggling SMTP off and back on.
+$smtpOn = ($settings['smtp_enabled'] ?? '0') === '1';
+$smtpDisabled = $smtpOn ? '' : ' disabled';
+?>
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-2xl font-bold text-white">Server settings</h1>
 </div>
@@ -117,6 +123,67 @@
       <option value="ws" <?= ($settings['realtime'] ?? 'poll') === 'ws' ? 'selected' : '' ?>>WebSocket</option>
     </select>
   </div>
+  <?php
+  // WebSocket gateway manual fallback (Admin → Settings → Realtime mode → WebSocket).
+  // deploy.sh normally auto-selects the first free port in the range; these fields
+  // let an admin override the bind address/port by hand when auto-detection isn't
+  // enough (e.g. a specific local IP or a custom port).
+  $wsIp = (string) ($settings['ws_ip'] ?? '0.0.0.0') ?: '0.0.0.0';
+  $wsPort = (int) ($settings['ws_port'] ?? 8080) ?: 8080;
+  $wsFree = [];
+  for ($p = 8080; $p <= 8089; $p++) {
+      $sock = @stream_socket_server("tcp://0.0.0.0:$p", $e, $s, STREAM_SERVER_BIND);
+      if ($sock) {
+          $wsFree[] = $p;
+          fclose($sock);
+      }
+  }
+  ?>
+  <div id="ws-settings" class="card p-4 <?= ($settings['realtime'] ?? 'poll') === 'ws' ? '' : 'hidden' ?>">
+    <div class="text-sm font-medium text-white mb-1">WebSocket gateway</div>
+    <p class="text-xs text-discord-400 mb-3">Manual override for the gateway bind address — a last resort. deploy.sh normally auto-selects the first free port (8080–8089).</p>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label">Bind IP</label>
+        <input class="input font-mono" name="ws_ip" value="<?= h($wsIp) ?>" placeholder="0.0.0.0" autocomplete="off" spellcheck="false">
+        <p class="text-xs text-discord-400 mt-1">0.0.0.0 = all interfaces. Set a specific local IP only if your host requires it.</p>
+      </div>
+      <div>
+        <label class="label">Port</label>
+        <input class="input font-mono" name="ws_port" list="ws-port-options" value="<?= (int) $wsPort ?>" inputmode="numeric" autocomplete="off">
+        <datalist id="ws-port-options">
+          <?php foreach (range(8080, 8089) as $p): ?>
+            <option value="<?= $p ?>"><?= $p === $wsPort ? 'current' : (in_array($p, $wsFree, true) ? 'free' : 'in use') ?></option>
+          <?php endforeach; ?>
+        </datalist>
+        <p class="text-xs text-discord-400 mt-1">Type any port, or pick from the list. Free in 8080–8089: <?= $wsFree ? implode(', ', $wsFree) : 'none' ?>.</p>
+      </div>
+    </div>
+    <div class="border-t border-discord-700 mt-3 pt-3">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-medium text-white">Gateway status</div>
+          <div id="ws-status" class="text-xs text-discord-400">Checking…</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="ws-btn-start" class="btn bg-green-600/80 hover:bg-green-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Start</button>
+          <button type="button" id="ws-btn-restart" class="btn bg-blurple hover:bg-blurple-dark text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Restart</button>
+          <button type="button" id="ws-btn-stop" class="btn bg-red-600/80 hover:bg-red-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Stop</button>
+        </div>
+      </div>
+      <pre id="ws-output" class="hidden mt-2 p-2 rounded bg-black/40 text-[11px] text-discord-300 leading-relaxed max-h-48 overflow-auto whitespace-pre-wrap font-mono"></pre>
+    </div>
+    <p class="text-xs text-discord-400 mt-2">Start/stop/restart control the daemon directly — no SSH needed. Status refreshes automatically.</p>
+  </div>
+  <div class="card p-4 mt-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-sm font-medium text-white">Deploy script</div>
+        <div class="text-xs text-discord-400">Runs <code class="font-mono">bin/deploy.sh</code> — restores .htaccess, migrates/backs up the database, health-checks the app, and (re)installs the gateway. Output streams live in a modal.</div>
+      </div>
+      <button type="button" id="deploy-run" class="btn bg-discord-600 hover:bg-discord-500 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Run deploy.sh</button>
+    </div>
+  </div>
   <div>
     <label class="label">Max channels per user</label>
     <input class="input" type="number" min="1" name="max_channels_per_user" value="<?= (int) $settings['max_channels_per_user'] ?>">
@@ -156,8 +223,11 @@
   <script>
   document.querySelector('select[name="realtime"]').addEventListener('change', function() {
     var ps = document.getElementById('poll-settings');
-    if (this.value === 'sse' || this.value === 'ws') { ps.style.opacity = '0.4'; ps.style.pointerEvents = 'none'; }
-    else { ps.style.opacity = '1'; ps.style.pointerEvents = 'auto'; }
+    var ws = document.getElementById('ws-settings');
+    var isStream = (this.value === 'sse' || this.value === 'ws');
+    ps.style.opacity = isStream ? '0.4' : '1';
+    ps.style.pointerEvents = isStream ? 'none' : 'auto';
+    if (ws) ws.classList.toggle('hidden', this.value !== 'ws');
   });
   </script>
 
@@ -169,19 +239,19 @@
       </div>
       <input type="checkbox" name="smtp_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['smtp_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
     </div>
-    <div id="smtp-fields" class="grid grid-cols-2 gap-4" <?= ($settings['smtp_enabled'] ?? '0') !== '1' ? 'style="opacity:0.4;pointer-events:none"' : '' ?>>
+    <div id="smtp-fields" class="grid grid-cols-2 gap-4" <?= $smtpOn ? '' : 'style="opacity:0.4;pointer-events:none"' ?>>
       <div>
         <label class="label">SMTP host</label>
-        <input class="input" name="smtp_host" value="<?= h($settings['smtp_host'] ?? '') ?>" placeholder="smtp.example.com">
+        <input class="input" name="smtp_host" value="<?= h($settings['smtp_host'] ?? '') ?>" placeholder="smtp.example.com"<?= $smtpDisabled ?>>
       </div>
       <div class="flex gap-3">
         <div>
           <label class="label">Port</label>
-          <input class="input" type="number" min="1" name="smtp_port" value="<?= (int) ($settings['smtp_port'] ?? 587) ?>">
+          <input class="input" type="number" min="1" name="smtp_port" value="<?= (int) ($settings['smtp_port'] !== '' ? $settings['smtp_port'] : 587) ?>"<?= $smtpDisabled ?>>
         </div>
         <div class="flex-1">
           <label class="label">Encryption</label>
-          <select name="smtp_encryption" class="input !py-1.5">
+          <select name="smtp_encryption" class="input !py-1.5"<?= $smtpDisabled ?>>
             <option value="tls" <?= ($settings['smtp_encryption'] ?? 'tls') === 'tls' ? 'selected' : '' ?>>STARTTLS</option>
             <option value="ssl" <?= ($settings['smtp_encryption'] ?? '') === 'ssl' ? 'selected' : '' ?>>SSL</option>
             <option value="none" <?= ($settings['smtp_encryption'] ?? '') === 'none' ? 'selected' : '' ?>>None</option>
@@ -190,20 +260,20 @@
       </div>
       <div>
         <label class="label">Username (optional)</label>
-        <input class="input" name="smtp_username" value="<?= h($settings['smtp_username'] ?? '') ?>" autocomplete="off">
+        <input class="input" name="smtp_username" value="<?= h($settings['smtp_username'] ?? '') ?>" autocomplete="off"<?= $smtpDisabled ?>>
       </div>
       <div>
         <label class="label">Password</label>
-        <input class="input" type="password" name="smtp_password" value="" placeholder="<?= !empty($settings['smtp_has_password']) ? '•••••••• (kept)' : '…' ?>" autocomplete="new-password">
+        <input class="input" type="password" name="smtp_password" value="" placeholder="<?= !empty($settings['smtp_has_password']) ? '•••••••• (kept)' : '…' ?>" autocomplete="new-password"<?= $smtpDisabled ?>>
         <p class="text-xs text-discord-400 mt-1">Leave blank to keep the stored password.</p>
       </div>
       <div>
         <label class="label">From email</label>
-        <input class="input" type="email" name="smtp_from_email" value="<?= h($settings['smtp_from_email'] ?? '') ?>" placeholder="noreply@example.com">
+        <input class="input" type="email" name="smtp_from_email" value="<?= h($settings['smtp_from_email'] ?? '') ?>" placeholder="noreply@example.com"<?= $smtpDisabled ?>>
       </div>
       <div>
         <label class="label">From name (optional)</label>
-        <input class="input" name="smtp_from_name" value="<?= h($settings['smtp_from_name'] ?? '') ?>" placeholder="LVChat">
+        <input class="input" name="smtp_from_name" value="<?= h($settings['smtp_from_name'] ?? '') ?>" placeholder="LVChat"<?= $smtpDisabled ?>>
       </div>
     </div>
   </div>
@@ -211,12 +281,168 @@
   <script>
   document.querySelector('input[name="smtp_enabled"]').addEventListener('change', function() {
     var f = document.getElementById('smtp-fields');
-    if (!this.checked) { f.style.opacity = '0.4'; f.style.pointerEvents = 'none'; }
-    else { f.style.opacity = '1'; f.style.pointerEvents = 'auto'; }
+    var controls = f.querySelectorAll('input, select');
+    if (!this.checked) {
+      f.style.opacity = '0.4';
+      f.style.pointerEvents = 'none';
+      for (var i = 0; i < controls.length; i++) controls[i].disabled = true;
+    } else {
+      f.style.opacity = '1';
+      f.style.pointerEvents = 'auto';
+      for (var i = 0; i < controls.length; i++) controls[i].disabled = false;
+    }
   });
+  </script>
+  <script>
+  (function () {
+    var csrf = document.body.dataset.csrf || '';
+    var statusEl = document.getElementById('ws-status');
+    var outEl = document.getElementById('ws-output');
+    var startBtn = document.getElementById('ws-btn-start');
+    var stopBtn = document.getElementById('ws-btn-stop');
+    var restartBtn = document.getElementById('ws-btn-restart');
+    var deployBtn = document.getElementById('deploy-run');
+    if (!statusEl) return;
+
+    function post(url, data, onOk) {
+      var fd = new FormData();
+      fd.append('csrf', csrf);
+      Object.keys(data || {}).forEach(function (k) { fd.append(k, data[k]); });
+      fetch(url, { method: 'POST', body: fd })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .catch(function () { return { error: 'Request failed' }; })
+        .then(onOk);
+    }
+
+    function renderStatus(j) {
+      if (!j || typeof j.running !== 'boolean') { statusEl.textContent = 'Unknown'; return; }
+      if (j.running) {
+        statusEl.innerHTML = '<span class="text-green-400 font-semibold">● Running</span> — '
+          + (j.connections || 0) + ' connection' + (j.connections === 1 ? '' : 's')
+          + (j.pid ? ' (pid ' + j.pid + ')' : '');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        restartBtn.disabled = false;
+      } else {
+        statusEl.innerHTML = '<span class="text-red-400 font-semibold">● Stopped</span>';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        restartBtn.disabled = true;
+      }
+    }
+
+    function refreshStatus() {
+      fetch('/admin/ws/status')
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .catch(function () { return {}; })
+        .then(renderStatus);
+    }
+
+    function showOutput(el, text) {
+      el.textContent = text || '(no output)';
+      el.classList.remove('hidden');
+    }
+
+    function wsControl(action, btn) {
+      if (btn) btn.disabled = true;
+      showOutput(outEl, 'Running: php bin/ws-server.php ' + action + (action === 'stop' ? '' : ' -d') + '\n…');
+      post('/admin/ws/control', { action: action }, function (j) {
+        if (j.error) { showOutput(outEl, 'Error: ' + j.error); }
+        else {
+          showOutput(outEl, j.output || (j.ok ? 'Done.' : 'Command failed.'));
+          if (j.status) renderStatus(j.status);
+        }
+        refreshStatus();
+        if (btn) btn.disabled = false;
+      });
+    }
+
+    if (startBtn) startBtn.addEventListener('click', function () { wsControl('start', this); });
+    if (stopBtn) stopBtn.addEventListener('click', function () { wsControl('stop', this); });
+    if (restartBtn) restartBtn.addEventListener('click', function () { wsControl('restart', this); });
+
+    // ── Deploy modal: streams bin/deploy.sh like a terminal ────────────────────
+    function openDeployModal() {
+      var modal = document.getElementById('deploy-modal');
+      var out = document.getElementById('deploy-modal-output');
+      if (!modal || !out) return null;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      out.textContent = '';
+      out.scrollTop = out.scrollHeight;
+      return out;
+    }
+    function closeDeployModal() {
+      var modal = document.getElementById('deploy-modal');
+      if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    }
+
+    if (deployBtn) deployBtn.addEventListener('click', function () {
+      if (deployBtn.disabled) return;
+      deployBtn.disabled = true;
+      var out = openDeployModal();
+      if (!out) { deployBtn.disabled = false; return; }
+      out.textContent += '$ bash bin/deploy.sh\n';
+      var fd = new FormData();
+      fd.append('csrf', csrf);
+      fetch('/admin/deploy/stream', { method: 'POST', body: fd })
+        .then(function (r) {
+          if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+          return r.body.getReader();
+        })
+        .then(function (reader) {
+          var decoder = new TextDecoder();
+          function pump() {
+            return reader.read().then(function (res) {
+              if (res.done) { deployBtn.disabled = false; refreshStatus(); return; }
+              out.textContent += decoder.decode(res.value, { stream: true });
+              out.scrollTop = out.scrollHeight;
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .catch(function (err) {
+          out.textContent += '\n[error: ' + (err && err.message ? err.message : 'request failed') + ']';
+          deployBtn.disabled = false;
+        });
+      refreshStatus();
+    });
+
+    // The modal markup lives after this script block, so bind the X button via
+    // event delegation rather than a direct element lookup.
+    document.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('#deploy-close')) closeDeployModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeDeployModal();
+    });
+    document.addEventListener('click', function (e) {
+      var modal = document.getElementById('deploy-modal');
+      if (modal && !modal.classList.contains('hidden') && e.target === modal) closeDeployModal();
+    });
+
+    refreshStatus();
+    // Keep the status live every 15s while the WebSocket panel is visible.
+    setInterval(function () {
+      var panel = document.getElementById('ws-settings');
+      if (panel && !panel.classList.contains('hidden')) refreshStatus();
+    }, 15000);
+  })();
   </script>
   <button name="action" value="settings_save" class="btn-primary">Save settings</button>
 </form>
+
+<!-- Deploy output modal: streams bin/deploy.sh like a terminal -->
+<div id="deploy-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/60 p-4">
+  <div class="w-full max-w-2xl rounded-xl bg-discord-800 border border-discord-700 shadow-2xl flex flex-col max-h-[80vh]">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-discord-700">
+      <div class="text-sm font-semibold text-white font-mono">bash bin/deploy.sh</div>
+      <button type="button" id="deploy-close" class="text-discord-400 hover:text-white text-xl leading-none px-1" title="Close">&times;</button>
+    </div>
+    <pre id="deploy-modal-output" class="flex-1 overflow-auto p-3 text-[12px] font-mono text-green-300 bg-black/50 leading-relaxed whitespace-pre-wrap min-h-[200px]"></pre>
+  </div>
+</div>
 
 <form method="post" action="/admin/action" class="card p-6 max-w-2xl space-y-3">
   <?= Csrf::field() ?>

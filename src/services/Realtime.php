@@ -90,6 +90,44 @@ final class Realtime
         return (string) (config_get('ws_push_url', 'http://127.0.0.1:9001/push') ?? 'http://127.0.0.1:9001/push');
     }
 
+    /**
+     * Is the gateway daemon currently up? Queries its local /health endpoint
+     * (localhost-only) and reads the Workerman pid file. Used by the admin UI.
+     */
+    public static function daemonStatus(): array
+    {
+        $running = false;
+        $connections = 0;
+        $url = self::pushUrl();
+        if ($url !== '') {
+            $parts = parse_url($url);
+            $host = $parts['host'] ?? '127.0.0.1';
+            $port = (int) ($parts['port'] ?? 9001);
+            $fp = @fsockopen((string) $host, $port, $errno, $errstr, 0.5);
+            if ($fp) {
+                // Bound the read so a keep-alive connection can't block us for
+                // default_socket_timeout (60s); the daemon closes /health anyway.
+                stream_set_timeout($fp, 1);
+                fwrite($fp, "GET /health HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n");
+                $resp = stream_get_contents($fp);
+                fclose($fp);
+                if (preg_match('/\{.*\}/s', (string) $resp, $m)) {
+                    $j = json_decode($m[0], true);
+                    if (is_array($j)) {
+                        $running = !empty($j['ok']);
+                        $connections = (int) ($j['connections'] ?? 0);
+                    }
+                }
+            }
+        }
+        $pid = 0;
+        $pidFile = ROOT . '/data/ws-server.pid';
+        if (is_file($pidFile)) {
+            $pid = (int) trim((string) file_get_contents($pidFile));
+        }
+        return ['running' => $running, 'connections' => $connections, 'pid' => $pid];
+    }
+
     /** Shared secret for the internal push endpoint (auto-provisioned on first use). */
     public static function pushSecret(): string
     {

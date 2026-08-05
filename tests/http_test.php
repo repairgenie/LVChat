@@ -348,6 +348,19 @@ foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/adm
 [$s] = req('GET', '/admin', [], $cjB);
 check('non-admin denied /admin', $s === 403, (string) $s);
 
+// Gateway daemon management endpoints (Admin → Settings → WebSocket).
+[$s, , $b] = req('GET', '/admin/ws/status', [], $cjA);
+check('ws status 200 + JSON shape', $s === 200 && str_contains($b, '"running"'), (string) $s . ' ' . substr($b, 0, 80));
+[$s] = req('GET', '/admin/ws/status', [], $cjB);
+check('non-admin denied ws status', $s === 403, (string) $s);
+$tWs = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/ws/control', ['csrf' => 'bogus', 'action' => 'stop'], $cjA);
+check('ws control requires valid csrf', $s === 419, (string) $s);
+[$s] = req('POST', '/admin/ws/control', ['csrf' => $tWs, 'action' => 'bogus'], $cjA);
+check('ws control rejects unknown action', $s === 400, (string) $s);
+[$s] = req('POST', '/admin/deploy/stream', ['csrf' => 'bogus'], $cjA);
+check('deploy stream requires valid csrf', $s === 419, (string) $s);
+
 $tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
 [$s, , $b] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_ban', 'id' => '', 'back' => '/admin/users'], $cjA);
 check('ban action with bad id handled', $s === 302, (string) $s);
