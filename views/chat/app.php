@@ -566,6 +566,33 @@ function member_html(array $m, bool $online): string {
     </div>
     <div class="border-t border-discord-700 shrink-0"></div>
     <?php endif; ?>
+    <?php if ((int) ($user['guest'] ?? 0) !== 1): ?>
+    <div class="h-12 px-4 border-b border-discord-700 flex items-center justify-between text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">
+      <button type="button" id="channel-invites-toggle" class="flex items-center gap-1 hover:text-white cursor-pointer">
+        <span id="channel-invites-arrow" class="text-[10px]">▸</span>
+        <span>Channel Invites — <span id="channel-invites-count"><?= count($channelInvites) ?></span></span>
+      </button>
+    </div>
+    <div id="channel-invites-section" class="hidden flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+      <?php if (!empty($channelInvites)): ?>
+      <div class="px-2 pt-2 pb-1">
+        <?php foreach ($channelInvites as $ci): ?>
+        <div class="channel-invite flex items-center gap-2 px-2 py-1.5 rounded hover:bg-discord-600/40 text-sm" data-channel="<?= h($ci['slug']) ?>">
+          <span class="truncate text-discord-200">#<?= h($ci['channel_name']) ?></span>
+          <span class="text-xs text-discord-500 truncate">by <?= h($ci['inviter'] ?? 'unknown') ?></span>
+          <div class="ml-auto flex gap-1">
+            <button type="button" class="channel-invite-accept text-[10px] px-1.5 py-0.5 rounded bg-green-600 hover:bg-green-500 text-white">Accept</button>
+            <button type="button" class="channel-invite-decline text-[10px] px-1.5 py-0.5 rounded bg-discord-700 hover:bg-discord-600 text-discord-300">Reject</button>
+          </div>
+        </div>
+        <?php endforeach; ?>
+      </div>
+      <?php else: ?>
+      <div class="p-4 text-xs text-discord-500">No pending invites.</div>
+      <?php endif; ?>
+    </div>
+    <div class="border-t border-discord-700 shrink-0"></div>
+    <?php endif; ?>
     <?php if ($channel): ?>
     <?php
     // Group by user type. Offline guests are skipped entirely (anonymous).

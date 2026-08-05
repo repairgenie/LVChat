@@ -695,6 +695,7 @@
     if (j.channel_unread) updateChannelUnread(j.channel_unread);
     if (j.channel_presence) updateChannelPresence(j.channel_presence);
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
+    if (j.channel_invites) updateChannelInvites(j.channel_invites);
   }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
@@ -986,6 +987,90 @@
   }
 
   bindFriendActions();
+
+  // ── Channel Invites sidebar ───────────────────────────────────────────────
+  const channelInvitesSection = document.getElementById('channel-invites-section');
+  const channelInvitesToggle = document.getElementById('channel-invites-toggle');
+  const channelInvitesArrow = document.getElementById('channel-invites-arrow');
+  const channelInvitesCount = document.getElementById('channel-invites-count');
+  let channelInvitesSig = '';
+  let channelInvitesOpen = localStorage.getItem('lvc.channelInvitesOpen') === '1';
+
+  if (channelInvitesToggle && channelInvitesSection) {
+    if (channelInvitesOpen) {
+      channelInvitesSection.classList.remove('hidden');
+      if (channelInvitesArrow) channelInvitesArrow.textContent = '▾';
+    }
+    channelInvitesToggle.addEventListener('click', () => {
+      channelInvitesOpen = !channelInvitesOpen;
+      localStorage.setItem('lvc.channelInvitesOpen', channelInvitesOpen ? '1' : '0');
+      if (channelInvitesOpen) {
+        channelInvitesSection.classList.remove('hidden');
+        if (channelInvitesArrow) channelInvitesArrow.textContent = '▾';
+      } else {
+        channelInvitesSection.classList.add('hidden');
+        if (channelInvitesArrow) channelInvitesArrow.textContent = '▸';
+      }
+    });
+  }
+
+  function updateChannelInvites(invites) {
+    if (!channelInvitesSection) return;
+    const sig = JSON.stringify(invites.map(i => [i.id, i.channel_id]));
+    if (sig === channelInvitesSig) return;
+    channelInvitesSig = sig;
+    if (channelInvitesCount) channelInvitesCount.textContent = String(invites.length);
+    const toggleHeader = channelInvitesToggle ? channelInvitesToggle.closest('.h-12') : null;
+    if (!invites.length) {
+      channelInvitesSection.innerHTML = '<div class="p-4 text-xs text-discord-500">No pending invites.</div>';
+      return;
+    }
+    let html = '<div class="px-2 pt-2 pb-1">';
+    invites.forEach(ci => {
+      html += '<div class="channel-invite flex items-center gap-2 px-2 py-1.5 rounded hover:bg-discord-600/40 text-sm" data-channel="' + esc(ci.slug) + '">';
+      html += '<span class="truncate text-discord-200">#' + esc(ci.channel_name) + '</span>';
+      html += '<span class="text-xs text-discord-500 truncate">by ' + esc(ci.inviter || 'unknown') + '</span>';
+      html += '<div class="ml-auto flex gap-1">';
+      html += '<button type="button" class="channel-invite-accept text-[10px] px-1.5 py-0.5 rounded bg-green-600 hover:bg-green-500 text-white">Accept</button>';
+      html += '<button type="button" class="channel-invite-decline text-[10px] px-1.5 py-0.5 rounded bg-discord-700 hover:bg-discord-600 text-discord-300">Reject</button>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+    channelInvitesSection.innerHTML = html;
+    bindChannelInviteActions();
+    if (!channelInvitesOpen && channelInvitesToggle) {
+      channelInvitesOpen = true;
+      localStorage.setItem('lvc.channelInvitesOpen', '1');
+      channelInvitesSection.classList.remove('hidden');
+      if (channelInvitesArrow) channelInvitesArrow.textContent = '▾';
+    }
+  }
+
+  function bindChannelInviteActions() {
+    document.querySelectorAll('.channel-invite-accept').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.channel-invite');
+        post('/api/channel/invite/accept', { channel: row.dataset.channel }, (j) => {
+          if (j.redirect) window.location = j.redirect;
+        });
+      });
+    });
+    document.querySelectorAll('.channel-invite-decline').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.channel-invite');
+        post('/api/channel/invite/decline', { channel: row.dataset.channel }, () => {
+          row.remove();
+          channelInvitesSig = '';
+        });
+      });
+    });
+  }
+
+  bindChannelInviteActions();
 
   // ── Bell / notifications ───────────────────────────────────────────────────
   const bell = document.getElementById('bell');
