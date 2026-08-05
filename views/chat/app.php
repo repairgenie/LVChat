@@ -404,13 +404,23 @@ function member_html(array $m, bool $online): string {
     <?php endif; ?>
 
     <?php if ($channel && !ChannelService::isRegistered($channel)): ?>
-    <div class="px-4 py-2 text-xs <?= (int) $channel['owner_id'] === (int) $user['id'] ? 'text-amber-300 bg-amber-500/10 border-b border-amber-500/30' : 'text-discord-400 bg-discord-850 border-b border-discord-700' ?>">
-      <?php if ((int) $channel['owner_id'] === (int) $user['id']): ?>
-      ⚠ This channel is <strong>not registered</strong> — it will disappear when the last person leaves. You are the founder: type <code class="bg-discord-800 px-1 rounded">/register <?= h($channel['name']) ?></code> to keep it.
-      <?php else: ?>
-      This is a temporary channel (not registered) — it will disappear when the last person leaves.
-      <?php endif; ?>
+    <div id="unregistered-banner" class="flex items-center gap-2 px-4 py-2 text-xs font-medium <?= (int) $channel['owner_id'] === (int) $user['id'] ? 'text-amber-950 bg-amber-300 border-b border-amber-400' : 'text-discord-950 bg-discord-300 border-b border-discord-400' ?>">
+      <span class="min-w-0 flex-1">
+        <?php if ((int) $channel['owner_id'] === (int) $user['id']): ?>
+        ⚠ This channel is <strong>not registered</strong> — it will disappear when the last person leaves. You are the founder: type <code class="bg-amber-950/15 px-1 rounded">/register <?= h($channel['name']) ?></code> to keep it.
+        <?php else: ?>
+        This is a temporary channel (not registered) — it will disappear when the last person leaves.
+        <?php endif; ?>
+      </span>
+      <button type="button" id="unregistered-dismiss" class="shrink-0 text-sm leading-none px-1.5 py-0.5 rounded opacity-70 hover:opacity-100 hover:bg-black/10" title="Dismiss">✕</button>
     </div>
+    <script>
+    (function () {
+      var b = document.getElementById('unregistered-banner');
+      var x = document.getElementById('unregistered-dismiss');
+      if (b && x) x.addEventListener('click', function () { b.style.display = 'none'; });
+    })();
+    </script>
     <?php endif; ?>
 
     <?php if ($channel): ?>
