@@ -191,7 +191,9 @@ if you ever need to recover admin access.)
 the picker explains that GIF search isn't configured. The picker shows trending GIFs on
 open and searches Giphy as you type; clicking one posts it to the current channel or DM.
 
-## Scaling on shared hosting
+## Scaling
+
+### Shared hosting
 
 With PHP + SQLite + polling, the ceiling on shared hosting is the **PHP worker pool** and
 **SQLite write serialization**, not the database size. Realistically that's ~25–75 concurrent
@@ -208,6 +210,64 @@ count (Litespeed/higher tiers give more). Measure your own server with:
 ```bash
 php tests/load_check.php 10 10   # concurrent requests × rounds → req/s
 ```
+
+### VPS (4 vCPU Xeon Silver, 16GB RAM)
+
+**300–800 concurrent users** depending on configuration:
+
+- **Polling (2s)**: 300–500 users
+- **Polling (3–5s)**: 500–800 users
+- **SSE mode**: 150–250 users (each holds a PHP worker)
+
+**Recommended tuning**:
+1. PHP-FPM `pm.max_children` = 150–200
+2. Enable OPcache
+3. Set `poll_interval` = 3–5s (Admin → Settings)
+4. Keep `presence_throttle` = 30s+
+5. Use Nginx over Apache
+
+SQLite with WAL mode handles this workload well. The bottleneck shifts from database to PHP worker pool at this scale. Beyond ~800 concurrent, consider PostgreSQL/MySQL or horizontal scaling.
+
+### Dedicated server (AMD Ryzen 3700X, 8c/16t)
+
+The 3700X's 8 physical cores and ~1.5–2x better single-thread performance over Xeon Silver
+provide a large jump. Likely NVMe storage — SQLite WAL loves fast I/O.
+
+| RAM | Polling (2s) | Polling (3–5s) | SSE | `pm.max_children` |
+|---|---|---|---|---|
+| **32GB (sweet spot)** | 800–1,500 | 1,500–3,000+ | 300–500 | 400–500 |
+| 64GB | 1,500–2,500 | 2,500–5,000 | 500–800 | 800–1,000 |
+| 128GB | 1,500–3,000 | 3,000–5,000 | 600–900 | 1,000–1,500 |
+
+**32GB is the sweet spot** for this CPU. Each PHP-FPM worker runs ~20–40MB for this app,
+so 400–500 workers = ~12–16GB working set with plenty left for OS + SQLite page cache.
+The 3700X hits its CPU ceiling around 3,000–5,000 concurrent regardless, so extra RAM
+mostly sits idle.
+
+**64GB** is worth it only if the price delta is small, you plan to run MySQL/PostgreSQL
+alongside, or you want room to upgrade the CPU later. At 64GB, **CPU becomes the
+bottleneck** — 16 threads can only process so many requests per second regardless of
+worker count.
+
+**128GB** offers diminishing returns. You're fully CPU-bound and the extra RAM sits idle.
+SQLite also becomes the bottleneck here with single-writer serialization under heavy
+write load. Past 64GB on this CPU, you're spending money for no gain.
+
+To go beyond ~5,000 concurrent, you need more cores (e.g., Ryzen 5950X 16c/32t, EPYC,
+or multiple servers) — not more RAM. At that scale, migrating off SQLite to
+PostgreSQL/MySQL is also warranted.
+
+**Recommended tuning (all RAM tiers)**:
+1. OPcache enabled, `memory_consumption` = 256MB
+2. `pm = dynamic` with `max_spare_servers` = 100–150
+3. Nginx + php-fpm (Unix socket)
+4. `poll_interval` = 3–5s for headroom
+
+At this tier, SQLite remains viable well past 2,000 concurrent. The write serialization
+bottleneck only shows up under heavy message-send storms, not reads. You'd need to be
+PostgreSQL/MySQL territory around ~5,000+ concurrent before SQLite becomes the ceiling.
+
+### General recommendations
 
 Beyond a few hundred concurrent users, move to a VPS (php-fpm with more workers) and/or
 switch realtime from polling to **SSE**: set **Realtime mode → SSE** under Admin → Settings.

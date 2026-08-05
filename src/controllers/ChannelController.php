@@ -192,4 +192,36 @@ final class ChannelController
         }
         json_out(['ok' => true, 'redirect' => '/app']);
     }
+
+    public static function acceptInvite(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $slug = trim((string) ($_POST['channel'] ?? ''));
+        $channel = ChannelService::findBySlug($slug);
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        $invite = Database::row('SELECT * FROM invites WHERE channel_id = ? AND user_id = ?', [(int) $channel['id'], (int) $user['id']]);
+        if (!$invite) {
+            json_out(['error' => 'Invite not found.'], 404);
+        }
+        ChannelService::join($channel, $user);
+        Database::query('DELETE FROM notifications WHERE kind = "invite" AND user_id = ? AND channel_id = ?', [(int) $user['id'], (int) $channel['id']]);
+        json_out(['ok' => true, 'redirect' => '/app?channel=' . rawurlencode($channel['slug'])]);
+    }
+
+    public static function declineInvite(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $slug = trim((string) ($_POST['channel'] ?? ''));
+        $channel = ChannelService::findBySlug($slug);
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        Database::query('DELETE FROM invites WHERE channel_id = ? AND user_id = ?', [(int) $channel['id'], (int) $user['id']]);
+        Database::query('DELETE FROM notifications WHERE kind = "invite" AND user_id = ? AND channel_id = ?', [(int) $user['id'], (int) $channel['id']]);
+        json_out(['ok' => true]);
+    }
 }

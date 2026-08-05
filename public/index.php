@@ -39,6 +39,8 @@ $router->post('/api/join', [ChannelController::class, 'join']);
 $router->post('/api/part', [ChannelController::class, 'part']);
 $router->post('/api/channel/notify', [ChannelController::class, 'notify']);
 $router->post('/api/channel/delete', [ChannelController::class, 'deleteChannel']);
+$router->post('/api/channel/invite/accept', [ChannelController::class, 'acceptInvite']);
+$router->post('/api/channel/invite/decline', [ChannelController::class, 'declineInvite']);
 $router->post('/api/message/delete', [ChatController::class, 'deleteMessage']);
 $router->post('/api/message/edit', [ChatController::class, 'editMessage']);
 $router->post('/api/message/reaction', [ChatController::class, 'reaction']);

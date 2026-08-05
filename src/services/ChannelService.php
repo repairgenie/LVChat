@@ -417,4 +417,17 @@ final class ChannelService
         $sql .= ' ORDER BY members DESC, c.name COLLATE NOCASE LIMIT 500';
         return Database::all($sql, $params);
     }
+
+    public static function pendingInvites(int $userId): array
+    {
+        return Database::all(
+            'SELECT i.*, c.name AS channel_name, c.slug, u.username AS inviter
+             FROM invites i
+             JOIN channels c ON c.id = i.channel_id
+             LEFT JOIN users u ON u.id = i.invited_by
+             WHERE i.user_id = ?
+             ORDER BY i.created_at DESC',
+            [$userId]
+        );
+    }
 }

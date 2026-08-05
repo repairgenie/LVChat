@@ -116,6 +116,7 @@ final class ChatController
             'bgLast' => $bgLast,
             'friends' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getFriendsWithStatus((int) $user['id']) : [],
             'friendRequests' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getPendingIncoming((int) $user['id']) : [],
+            'channelInvites' => (int) ($user['guest'] ?? 0) !== 1 ? ChannelService::pendingInvites((int) $user['id']) : [],
         ], null);
     }
 
@@ -487,6 +488,7 @@ final class ChatController
         if ((int) ($user['guest'] ?? 0) !== 1) {
             $out['friends'] = FriendService::getFriendsWithStatus((int) $user['id']);
             $out['friend_requests'] = FriendService::getPendingIncoming((int) $user['id']);
+            $out['channel_invites'] = ChannelService::pendingInvites((int) $user['id']);
         }
         // Background channel messages since the client's global watermark — the
         // fuel for channel audio alerts. Excludes the channel being viewed.
