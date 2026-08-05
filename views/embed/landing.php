@@ -4,7 +4,7 @@
     <?= logo_mark('mx-auto mb-4 w-14 h-14 rounded-2xl text-2xl') ?>
     <h1 class="text-xl font-bold text-white"><?= h($channel['name']) ?></h1>
     <?php if (!empty($channel['topic'])): ?>
-    <p class="text-sm text-discord-400 mt-1 mb-6"><?= h($channel['topic']) ?></p>
+    <p class="text-sm text-discord-400 mt-1 mb-6"><?= chat_markup_plain($channel['topic']) ?></p>
     <?php else: ?>
     <p class="text-sm text-discord-400 mt-1 mb-6">Join the conversation on <?= h($site) ?></p>
     <?php endif; ?>

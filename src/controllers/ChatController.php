@@ -67,6 +67,18 @@ final class ChatController
              SELECT id, nick, 'user', 1 FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
              ORDER BY username"
         );
+        // Name -> slug for every channel, so #channel references in messages can
+        // be rendered as clickable links by the client-side renderer.
+        $channelLinks = [];
+        foreach (Database::all('SELECT name, slug FROM channels') as $c) {
+            $channelLinks[(string) $c['name']] = (string) $c['slug'];
+        }
+        // Registered (non-guest) users for the @mention autocomplete pool.
+        $mentionUsers = Database::all(
+            "SELECT id, username FROM users WHERE guest = 0 AND status = 'active' AND id != ?
+             ORDER BY last_seen DESC, username COLLATE NOCASE LIMIT 2000",
+            [$user['id']]
+        );
         $motd = (string) config_get('motd', '');
 
         $messages = [];
@@ -106,6 +118,8 @@ final class ChatController
             'unreadDms' => $unreadDms,
             'notifications' => $notifications,
             'onlineUsers' => $onlineUsers,
+            'channelLinks' => $channelLinks,
+            'mentionUsers' => $mentionUsers,
             'motd' => $motd,
             'messages' => $messages,
             'members' => $members,

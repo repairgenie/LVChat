@@ -225,6 +225,8 @@ function member_html(array $m, bool $online): string {
       data-rt-ticket="<?= h($wsTicket ?? '') ?>"
       data-ws-url="<?= h($wsUrl ?? '') ?>"
       data-commands="<?= h(json_encode($commands)) ?>"
+      data-channels="<?= h(json_encode($channelLinks)) ?>"
+      data-users="<?= h(json_encode(array_map(fn ($u) => $u['username'], $mentionUsers))) ?>"
       data-sounds="<?= h(json_encode($sounds['sounds'])) ?>"
       data-sound-prefs="<?= h(json_encode(['dm_sound_id' => $sounds['dm_sound_id'], 'channel_sound_id' => $sounds['channel_sound_id']])) ?>"
       data-sound-overrides="<?= h(json_encode($sounds['overrides'])) ?>"
@@ -363,7 +365,7 @@ function member_html(array $m, bool $online): string {
       <button id="sidebar-toggle" class="btn-ghost !p-1.5 text-lg leading-none" title="Toggle channel list" aria-label="Toggle channel list">☰</button>
       <?php if ($channel): ?>
       <span class="font-bold text-white text-sm"><?= h($channel['name']) ?></span>
-      <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= h($channel['topic']) ?></span>
+      <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= $channel['topic'] !== '' ? chat_markup_plain($channel['topic']) : '' ?></span>
       <div class="relative ml-auto flex items-center gap-2">
         <input id="search-input" type="search" placeholder="Search chat…" autocomplete="off"
                class="input w-40 md:w-56 !py-1 !text-xs hidden md:block" title="Search messages in your channels and DMs">

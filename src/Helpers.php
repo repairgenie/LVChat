@@ -262,6 +262,54 @@ function render_view(string $name, array $vars = [], ?string $layout = 'layout')
     exit;
 }
 
+/**
+ * Map every channel name to its slug, cached once per request, so #channel
+ * references in messages can be rendered as clickable links.
+ * @return array<string,string>
+ */
+function channel_slug_map(): array
+{
+    static $map = null;
+    if ($map === null) {
+        $map = [];
+        foreach (Database::all('SELECT name, slug FROM channels') as $r) {
+            $map[(string) $r['name']] = (string) $r['slug'];
+        }
+    }
+    return $map;
+}
+
+/**
+ * Turn existing channel references ("#name" / "&name") into links. Input must
+ * already be HTML-escaped; & channels arrive as "&amp;name" so both forms are
+ * handled. Only channels that actually exist are linked.
+ */
+function chat_linkify_channels(string $escaped): string
+{
+    $map = channel_slug_map();
+    if ($map === []) {
+        return $escaped;
+    }
+    return preg_replace_callback(
+        '/(^|[\s(>])#([A-Za-z0-9_\-\[\]{}^`|\\\\]+)|(^|[\s(>])(&amp;)([A-Za-z0-9_\-\[\]{}^`|\\\\]+)/',
+        function ($m) use ($map) {
+            if (!empty($m[4])) {
+                $name = '&' . $m[5];
+                if (!isset($map[$name])) {
+                    return $m[0];
+                }
+                return $m[3] . '<a class="text-sky-400 hover:underline" href="/c/' . rawurlencode($map[$name]) . '">&amp;' . $m[5] . '</a>';
+            }
+            $name = '#' . $m[2];
+            if (!isset($map[$name])) {
+                return $m[0];
+            }
+            return $m[1] . '<a class="text-sky-400 hover:underline" href="/c/' . rawurlencode($map[$name]) . '">#' . $m[2] . '</a>';
+        },
+        $escaped
+    );
+}
+
 /** Very light client-side safe rendering of IRC-style formatting for chat lines. */
 function chat_markup(string $text): string
 {
@@ -269,6 +317,7 @@ function chat_markup(string $text): string
     $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
     $text = preg_replace('/`(.+?)`/', '<code class="bg-discord-750 px-1 rounded">$1</code>', $text);
     $text = preg_replace('/@([A-Za-z0-9_\-\[\]\\`^{}|]+)/', '<span class="mention text-blurple font-semibold">@$1</span>', $text);
+    $text = chat_linkify_channels($text);
     $text = preg_replace_callback(
         '#(https?://[^\s<]+)#i',
         fn ($m) => '<a class="text-sky-400 hover:underline" target="_blank" rel="noopener" href="' . h($m[1]) . '">' . h($m[1]) . '</a>',
@@ -292,6 +341,7 @@ function chat_markup_inline(string $text): string
     $text = preg_replace('/\*([^*\n]+)\*/', '<em>$1</em>', $text);
     $text = preg_replace('/~~([^~\n]+)~~/', '<s>$1</s>', $text);
     $text = preg_replace('/@([A-Za-z0-9_\-\[\]\\`^{}|]+)/', '<span class="mention text-blurple font-semibold">@$1</span>', $text);
+    $text = chat_linkify_channels($text);
     $text = preg_replace_callback(
         '#(https?://[^\s<]+)#i',
         fn ($m) => '<a class="text-sky-400 hover:underline" target="_blank" rel="noopener" href="' . h($m[1]) . '">' . h($m[1]) . '</a>',

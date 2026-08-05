@@ -12,6 +12,10 @@
   const CAN_OP = body.dataset.canOp === '1';
   const CAN_ADMIN = body.dataset.canAdmin === '1';
   const COMMANDS = JSON.parse(body.dataset.commands || '[]');
+  let CHANNEL_SLUGS = {};
+  try { CHANNEL_SLUGS = JSON.parse(body.dataset.channels || '{}'); } catch (e) { CHANNEL_SLUGS = {}; }
+  let ALL_USERS = [];
+  try { ALL_USERS = JSON.parse(body.dataset.users || '[]'); } catch (e) { ALL_USERS = []; }
   const LEVELS = { normal: 0, voice: 1, halfop: 2, op: 3, admin: 4, founder: 5 };
   const SYMBOL = { normal: '', voice: '+', halfop: '%', op: '@', admin: '&', founder: '~' };
   const COLORS = {
@@ -48,6 +52,16 @@
     text = text.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
     text = text.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
     text = text.replace(/@([A-Za-z0-9_\-\[\]\\`^{}|]+)/g, '<span class="mention text-blurple font-semibold">@$1</span>');
+    text = text.replace(/(^|[\s(>])#([A-Za-z0-9_\-\[\]{}^`|\\]+)/g, (m, pre, name) => {
+      const slug = CHANNEL_SLUGS['#' + name];
+      if (!slug) return m;
+      return pre + `<a class="text-sky-400 hover:underline" href="/c/${encodeURIComponent(slug)}">#${name}</a>`;
+    });
+    text = text.replace(/(^|[\s(>])&amp;([A-Za-z0-9_\-\[\]{}^`|\\]+)/g, (m, pre, name) => {
+      const slug = CHANNEL_SLUGS['&' + name];
+      if (!slug) return m;
+      return pre + `<a class="text-sky-400 hover:underline" href="/c/${encodeURIComponent(slug)}">&amp;${name}</a>`;
+    });
     text = text.replace(/(https?:\/\/[^\s<]+)/gi, '<a class="text-sky-400 hover:underline" target="_blank" rel="noopener" href="$1">$1</a>');
     return text;
   }
@@ -880,7 +894,9 @@
     });
   }
 
+  let channelMembers = [];
   function applyPresence(list) {
+    channelMembers = Array.isArray(list) ? list.slice() : [];
     const el = document.getElementById('member-list');
     if (!el) return;
     // Group by user type. Offline guests are skipped entirely (anonymous).
@@ -1325,12 +1341,15 @@
     }
   });
 
-  // ── Slash autocomplete ─────────────────────────────────────────────────────
+  // ── Slash + @mention autocomplete ─────────────────────────────────────────
   const ac = document.getElementById('autocomplete');
   let acIndex = 0;
+  let mentionAcIndex = 0;
+  let acMode = null; // 'slash' | 'mention' | null
   function showAutocomplete(filter) {
     const matches = COMMANDS.filter((c) => c.startsWith(filter) && c !== 'help');
     if (!matches.length) { hideAutocomplete(); return; }
+    acMode = 'slash';
     acIndex = 0;
     ac.innerHTML = matches.slice(0, 8).map((c, i) =>
       `<button type="button" data-ac="${i}" class="w-full text-left px-3 py-1.5 text-sm ${i === 0 ? 'bg-blurple/20 text-white' : 'text-discord-300'} hover:bg-blurple/20">/${c}</button>`).join('');
@@ -1341,9 +1360,50 @@
       hideAutocomplete();
     }));
   }
-  function hideAutocomplete() { ac.classList.add('hidden'); }
+  function showMentionAutocomplete(query) {
+    const q = query.toLowerCase();
+    const active = channelMembers.filter((m) => m.username && m.is_online
+      && m.username.toLowerCase() !== MY_NICK && (!q || m.username.toLowerCase().startsWith(q)));
+    const activeNames = new Set(active.map((m) => m.username.toLowerCase()));
+    const offline = ALL_USERS.filter((u) => u.toLowerCase() !== MY_NICK
+      && !activeNames.has(u.toLowerCase()) && (!q || u.toLowerCase().startsWith(q)));
+    const items = active.map((m) => ({ name: m.username, online: true }))
+      .concat(offline.map((u) => ({ name: u, online: false })));
+    if (!items.length) { hideAutocomplete(); return; }
+    acMode = 'mention';
+    mentionAcIndex = 0;
+    ac.innerHTML = items.slice(0, 8).map((it, i) =>
+      `<button type="button" data-ac="${i}" data-name="${esc(it.name)}" class="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${i === 0 ? 'bg-blurple/20 text-white' : 'text-discord-300'} hover:bg-blurple/20">
+        <span class="w-2 h-2 rounded-full shrink-0 ${it.online ? 'bg-green-500' : 'bg-discord-500'}"></span>
+        <span>@${esc(it.name)}</span>
+        <span class="ml-auto text-[10px] ${it.online ? 'text-green-400' : 'text-discord-500'}">${it.online ? 'online' : 'offline'}</span>
+      </button>`).join('');
+    ac.classList.remove('hidden');
+    ac.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      insertMention(b.dataset.name);
+    }));
+  }
+  function insertMention(name) {
+    const v = input.value;
+    const sel = input.selectionStart;
+    const before = v.slice(0, sel);
+    const m = before.match(/(?:^|\s)@([^\s]*)$/);
+    if (m) {
+      const atPos = sel - m[1].length - 1;
+      input.value = v.slice(0, atPos) + '@' + name + ' ' + v.slice(sel);
+      const pos = atPos + name.length + 2;
+      input.setSelectionRange(pos, pos);
+      autosizeInput();
+    }
+    hideAutocomplete();
+    input.focus();
+  }
+  function hideAutocomplete() { ac.classList.add('hidden'); acMode = null; }
   if (input) input.addEventListener('input', () => {
     const v = input.value;
+    const sel = input.selectionStart;
+    const m = v.slice(0, sel).match(/(?:^|\s)@([^\s]*)$/);
+    if (m) { showMentionAutocomplete(m[1]); return; }
     const slash = v.indexOf('/');
     if (slash === 0) showAutocomplete(v.slice(1).split(/\s/)[0].toLowerCase());
     else hideAutocomplete();
@@ -1357,12 +1417,15 @@
   });
   function moveAc(d) {
     const btns = ac.querySelectorAll('button');
-    acIndex = (acIndex + d + btns.length) % btns.length;
-    btns.forEach((b, i) => { b.classList.toggle('bg-blurple/20', i === acIndex); b.classList.toggle('text-white', i === acIndex); b.classList.toggle('text-discord-300', i !== acIndex); });
+    if (acMode === 'mention') mentionAcIndex = (mentionAcIndex + d + btns.length) % btns.length;
+    else acIndex = (acIndex + d + btns.length) % btns.length;
+    const idx = acMode === 'mention' ? mentionAcIndex : acIndex;
+    btns.forEach((b, i) => { b.classList.toggle('bg-blurple/20', i === idx); b.classList.toggle('text-white', i === idx); b.classList.toggle('text-discord-300', i !== idx); });
   }
   function pickAc() {
     const btns = ac.querySelectorAll('button');
-    if (btns[acIndex]) btns[acIndex].click();
+    const idx = acMode === 'mention' ? mentionAcIndex : acIndex;
+    if (btns[idx]) btns[idx].click();
   }
 
   // ── Channel mode bar (toggles above the chat) ──────────────────────────────

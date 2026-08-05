@@ -5,7 +5,7 @@ function channel_card(array $c, array $joinedMap): string {
     $joined = isset($joinedMap[$c['id']]);
     $vis = $c['visibility'] !== 'public' ? '<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-discord-700/80 text-discord-400 border border-discord-600/50" title="Restricted">🔒</span>' : '';
     $topicText = mb_strimwidth($c['topic'] ?: $c['description'] ?: '', 0, 120, '…');
-    $topic = $topicText ? h($topicText) : '<span class="text-discord-500 italic">No topic set</span>';
+    $topic = $topicText ? chat_markup_plain($topicText) : '<span class="text-discord-500 italic">No topic set</span>';
     $action = $joined
         ? '<a href="/app?channel=' . h(rawurlencode($c['slug'])) . '" class="px-5 py-2 rounded-lg text-sm font-semibold bg-discord-700 hover:bg-discord-600 text-white transition-all border border-discord-600 hover:border-discord-500">Open</a>'
         : '<a href="/c/' . h(rawurlencode($c['slug'])) . '" class="px-5 py-2 rounded-lg text-sm font-semibold bg-blurple hover:bg-blurple-dark text-white transition-all shadow-md shadow-blurple/20 hover:shadow-blurple/30">Join</a>';
