@@ -24,7 +24,8 @@ $imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
   .rt-content .tiptap pre code { background: none; border: none; padding: 0; }
   .att-img { max-width: 200px; max-height: 200px; border-radius: 6px; border: 1px solid var(--c-d-600); cursor: pointer; transition: opacity .15s; }
   .att-img:hover { opacity: .85; }
-  .lightbox { position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  .lightbox { position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; cursor: zoom-out; }
+  .lightbox.open { display: flex; }
   .lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
   .prose-ticket { line-height: 1.7; }
   .prose-ticket p { margin: 0.5em 0; }
@@ -143,14 +144,14 @@ $imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
   <?php endif; ?>
   <?php endif; ?>
 </div>
-<div id="lightbox" class="lightbox hidden" onclick="this.classList.add('hidden')"><img id="lightbox-img" src="" alt=""></div>
+<div id="lightbox" class="lightbox" onclick="this.classList.remove('open')"><img id="lightbox-img" src="" alt=""></div>
 <script src="/assets/vendor/tiptap/tiptap-bundle.js"></script>
 <script>
 function openLightbox(src) {
   document.getElementById('lightbox-img').src = src;
-  document.getElementById('lightbox').classList.remove('hidden');
+  document.getElementById('lightbox').classList.add('open');
 }
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') document.getElementById('lightbox').classList.add('hidden'); });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') document.getElementById('lightbox').classList.remove('open'); });
 (function () {
   var bundle = window.TiptapBundle;
   if (!bundle) {
