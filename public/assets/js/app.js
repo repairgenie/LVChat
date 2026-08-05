@@ -1010,6 +1010,29 @@
 
   bindFriendActions();
 
+  // ── Right sidebar collapsible sections (Friends / Members) ───────────────
+  function wireSidebarSection(toggleId, sectionId, arrowId, storageKey, defaultOpen) {
+    const toggle = document.getElementById(toggleId);
+    const section = document.getElementById(sectionId);
+    const arrow = document.getElementById(arrowId);
+    if (!toggle || !section) return;
+    const stored = localStorage.getItem(storageKey);
+    let open = stored === null ? defaultOpen : stored === '1';
+    if (!open) {
+      section.classList.add('hidden');
+      if (arrow) arrow.textContent = '▸';
+    }
+    toggle.addEventListener('click', () => {
+      open = !open;
+      localStorage.setItem(storageKey, open ? '1' : '0');
+      section.classList.toggle('hidden', !open);
+      if (arrow) arrow.textContent = open ? '▾' : '▸';
+    });
+  }
+
+  wireSidebarSection('friends-toggle', 'friends-section', 'friends-arrow', 'lvc.friendsOpen', true);
+  wireSidebarSection('members-toggle', 'member-list', 'members-arrow', 'lvc.membersOpen', true);
+
   // ── Channel Invites sidebar ───────────────────────────────────────────────
   const channelInvitesSection = document.getElementById('channel-invites-section');
   const channelInvitesToggle = document.getElementById('channel-invites-toggle');

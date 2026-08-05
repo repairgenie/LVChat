@@ -525,7 +525,10 @@ function member_html(array $m, bool $online): string {
     $offlineFriends = array_values(array_filter($friends, fn($f) => empty($f['is_online'])));
     ?>
     <div class="h-12 px-4 border-b border-discord-700 flex items-center justify-between text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">
-      <span>Friends — <span id="friend-count"><?= (int) count($friends) ?></span></span>
+      <button type="button" id="friends-toggle" class="flex items-center gap-1 hover:text-white cursor-pointer">
+        <span id="friends-arrow" class="text-[10px]">▾</span>
+        <span>Friends — <span id="friend-count"><?= (int) count($friends) ?></span></span>
+      </button>
       <?php if (!empty($friendRequests)): ?>
       <span id="friend-badge" class="min-w-5 h-5 px-1 rounded-full bg-blurple text-white text-[10px] flex items-center justify-center"><?= count($friendRequests) ?></span>
       <?php endif; ?>
@@ -626,7 +629,12 @@ function member_html(array $m, bool $online): string {
     }
     $memberCount = array_sum(array_map('count', $typeGroups));
     ?>
-    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members — <span id="member-count"><?= (int) $memberCount ?></span></div>
+    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">
+      <button type="button" id="members-toggle" class="flex items-center gap-1 hover:text-white cursor-pointer">
+        <span id="members-arrow" class="text-[10px]">▾</span>
+        <span>Members — <span id="member-count"><?= (int) $memberCount ?></span></span>
+      </button>
+    </div>
     <div id="member-list" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       <?php foreach ($typeGroups as $label => $list): if (!$list) continue; ?>
       <div class="px-2 <?= $label === 'Admins' ? 'pt-2' : 'pt-3' ?> pb-2">
@@ -636,7 +644,12 @@ function member_html(array $m, bool $online): string {
       <?php endforeach; ?>
     </div>
     <?php else: ?>
-    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">Members</div>
+    <div class="h-12 px-4 border-b border-discord-700 flex items-center text-xs font-bold uppercase tracking-wide text-discord-400 shrink-0">
+      <button type="button" id="members-toggle" class="flex items-center gap-1 hover:text-white cursor-pointer">
+        <span id="members-arrow" class="text-[10px]">▾</span>
+        <span>Members</span>
+      </button>
+    </div>
     <div id="member-list" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       <div class="p-4 text-xs text-discord-500">Select a channel to see its members.</div>
     </div>
