@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS channels (
   no_logging INTEGER NOT NULL DEFAULT 0,
   bg_image TEXT,
   bg_color TEXT,
+  bg_fit TEXT NOT NULL DEFAULT 'contain',
   successor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registered_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

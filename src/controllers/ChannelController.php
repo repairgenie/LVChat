@@ -240,7 +240,10 @@ final class ChannelController
         }
 
         $color = ThemeService::hex((string) ($_POST['bg_color'] ?? ''));
-        $fields = ['bg_color' => $color !== '' ? $color : null];
+        $fit = in_array($_POST['bg_fit'] ?? '', ThemeService::CHAT_BG_FITS, true)
+            ? (string) $_POST['bg_fit']
+            : 'contain';
+        $fields = ['bg_color' => $color !== '' ? $color : null, 'bg_fit' => $fit];
 
         $hasFile = isset($_FILES['file'])
             && !empty($_FILES['file']['tmp_name'])
@@ -261,6 +264,7 @@ final class ChannelController
         json_out([
             'ok' => true,
             'bg_color' => $fields['bg_color'] ?? null,
+            'bg_fit' => $fit,
             'bg_image' => $fields['bg_image'] ?? (isset($channel['bg_image']) ? (string) $channel['bg_image'] : null),
         ]);
     }
@@ -280,7 +284,7 @@ final class ChannelController
         if (!empty($channel['bg_image'])) {
             UploadService::remove((string) $channel['bg_image']);
         }
-        ChannelService::update((string) $channel['id'], ['bg_image' => null, 'bg_color' => null]);
+        ChannelService::update((string) $channel['id'], ['bg_image' => null, 'bg_color' => null, 'bg_fit' => 'contain']);
         log_audit('channel_bg_remove', $channel['name']);
         json_out(['ok' => true]);
     }

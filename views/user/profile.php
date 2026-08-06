@@ -98,7 +98,7 @@
     $uo = $ut['overrides'];
     $umode = $ut['mode'] !== '' ? $ut['mode'] : ($effectiveTheme['mode'] === 'light' ? 'light' : 'dark');
     $ufont = $uo['font'] ?? 'default';
-    $ufit = $uo['chat_bg_fit'] ?? 'cover';
+    $ufit = $uo['chat_bg_fit'] ?? 'contain';
     $ubgColor = $uo['chat_bg_color'] ?? '';
     $ubgImage = $uo['chat_bg_image'] ?? '';
     ?>
@@ -492,7 +492,7 @@
   $pUo = $pUt['overrides'];
   $pUmode = $pUt['mode'] !== '' ? $pUt['mode'] : ($effectiveTheme['mode'] === 'light' ? 'light' : 'dark');
   $pUfont = $pUo['font'] ?? 'default';
-  $pUfit = $pUo['chat_bg_fit'] ?? 'cover';
+  $pUfit = $pUo['chat_bg_fit'] ?? 'contain';
   $pUbgColor = $pUo['chat_bg_color'] ?? '';
   $pUbgImage = $pUo['chat_bg_image'] ?? '';
   ?>

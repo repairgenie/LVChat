@@ -172,6 +172,7 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         . ' data-owned="' . $owned . '"'
         . ' data-bg-color="' . h((string) ($c['bg_color'] ?? '')) . '"'
         . ' data-bg-image="' . h((string) ($c['bg_image'] ?? '')) . '"'
+        . ' data-bg-fit="' . h((string) ($c['bg_fit'] ?? 'contain')) . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
         . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis
         . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>'
@@ -225,6 +226,7 @@ function member_html(array $m, bool $online): string {
       data-theme-custom="<?= ThemeService::customizationEnabled() ? '1' : '0' ?>"
       data-chan-bg-color="<?= h($channel['bg_color'] ?? '') ?>"
       data-chan-bg-image="<?= h($channel['bg_image'] ?? '') ?>"
+      data-chan-bg-fit="<?= h($channel['bg_fit'] ?? 'contain') ?>"
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-rt="<?= config_get('realtime', 'poll') === 'sse' ? 'sse' : (config_get('realtime', 'poll') === 'ws' ? 'ws' : 'poll') ?>"
@@ -850,6 +852,14 @@ function member_html(array $m, bool $online): string {
           <label class="btn-ghost !py-1.5 text-xs cursor-pointer">Upload image<input type="file" id="chan-bg-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden"></label>
           <div id="chan-bg-current" class="hidden mt-2"></div>
           <p class="text-xs text-discord-400 mt-1">PNG/JPG/WebP/GIF up to 5&nbsp;MB. Best as a wide, muted image.</p>
+        </div>
+        <div>
+          <label class="label">Image fit</label>
+          <select id="chan-bg-fit" class="input !py-1.5">
+            <?php foreach (ThemeService::CHAT_BG_FITS as $f): ?>
+            <option value="<?= h($f) ?>" <?= ($channel['bg_fit'] ?? 'contain') === $f ? 'selected' : '' ?>><?= h(ucfirst($f)) ?></option>
+            <?php endforeach; ?>
+          </select>
         </div>
         <div class="flex gap-2">
           <button id="chan-bg-save" class="btn-primary flex-1 justify-center">Save background</button>

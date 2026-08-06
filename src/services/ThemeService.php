@@ -32,7 +32,7 @@ final class ThemeService
         'rounded' => 'ui-rounded, "Segoe UI", "Trebuchet MS", "Varela Round", sans-serif',
     ];
 
-    public const CHAT_BG_FITS = ['cover', 'contain', 'repeat'];
+    public const CHAT_BG_FITS = ['contain', 'cover', 'repeat'];
 
     private const CSS_VARS = [
         'blurple' => '--c-blurple', 'blurple_dark' => '--c-blurple-dark',
@@ -315,7 +315,7 @@ final class ThemeService
             'light' => $palette['light'],
             'chat_bg_color' => self::hex((string) ($o['chat_bg_color'] ?? '')) ?: '',
             'chat_bg_image' => self::localPath((string) ($o['chat_bg_image'] ?? '')) ?: '',
-            'chat_bg_fit' => in_array($o['chat_bg_fit'] ?? '', self::CHAT_BG_FITS, true) ? (string) $o['chat_bg_fit'] : 'cover',
+            'chat_bg_fit' => in_array($o['chat_bg_fit'] ?? '', self::CHAT_BG_FITS, true) ? (string) $o['chat_bg_fit'] : 'contain',
         ];
     }
 
@@ -351,11 +351,21 @@ final class ThemeService
         $image = $r['chat_bg_image'];
         $fit = $r['chat_bg_fit'];
         if ($channel) {
+            $hasChannelBg = false;
             if ($hex = self::hex((string) ($channel['bg_color'] ?? ''))) {
                 $color = $hex;
+                $hasChannelBg = true;
             }
             if ($path = self::localPath((string) ($channel['bg_image'] ?? ''))) {
                 $image = $path;
+                $hasChannelBg = true;
+            }
+            if ($hasChannelBg) {
+                // A channel's own background defaults to "contain" regardless of
+                // the theme's fit, and is stored per-channel (channels.bg_fit).
+                $fit = in_array($channel['bg_fit'] ?? '', self::CHAT_BG_FITS, true)
+                    ? (string) $channel['bg_fit']
+                    : 'contain';
             }
         }
         $css = '#messages{';

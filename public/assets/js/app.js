@@ -2127,6 +2127,7 @@
   const chanBgColor = document.getElementById('chan-bg-color');
   const chanBgFile = document.getElementById('chan-bg-file');
   const chanBgCurrent = document.getElementById('chan-bg-current');
+  const chanBgFit = document.getElementById('chan-bg-fit');
   const chanBgMsg = document.getElementById('chan-bg-msg');
   let chanBgSlug = '';
   function openChanBg(slug, el) {
@@ -2137,7 +2138,9 @@
     // channel's, then to nothing).
     const bgColor = (el && el.dataset.bgColor) || body.dataset.chanBgColor || '';
     const bgImage = (el && el.dataset.bgImage) || body.dataset.chanBgImage || '';
+    const bgFit = (el && el.dataset.bgFit) || body.dataset.chanBgFit || 'contain';
     if (chanBgColor) chanBgColor.value = bgColor || '#2b2d31';
+    if (chanBgFit) chanBgFit.value = bgFit;
     if (chanBgCurrent) {
       chanBgCurrent.classList.toggle('hidden', !bgImage);
       chanBgCurrent.innerHTML = bgImage
@@ -2161,6 +2164,7 @@
     fd.append('csrf', CSRF);
     fd.append('channel', chanBgSlug);
     fd.append('bg_color', chanBgColor ? chanBgColor.value : '');
+    fd.append('bg_fit', chanBgFit ? chanBgFit.value : 'contain');
     if (chanBgFile && chanBgFile.files && chanBgFile.files[0]) fd.append('file', chanBgFile.files[0]);
     fetch('/api/channel/bg', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
       .then((r) => r.json().catch(() => ({ error: 'Server error (' + r.status + ')' })))

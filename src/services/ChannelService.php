@@ -232,7 +232,7 @@ final class ChannelService
 
     public static function joinedChannelNames(array $actor): array
     {
-        $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color';
+        $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color, c.bg_fit';
         // Online chatter count: members (users + guests) seen within 30s, users not away.
         $onlineSql = '((SELECT COUNT(*) FROM channel_members om JOIN users ou ON ou.id = om.user_id
                          WHERE om.channel_id = c.id AND ou.away IS NULL AND ou.last_seen >= datetime("now", "-30 seconds"))
@@ -325,7 +325,7 @@ final class ChannelService
         $allowed = [
             'topic', 'description', 'visibility', 'invite_only', 'moderated', 'member_limit',
             'mlock', 'topic_locked', 'forbidden', 'owner_id', 'successor_id', 'censor',
-            'bg_image', 'bg_color',
+            'bg_image', 'bg_color', 'bg_fit',
         ];
         foreach ($fields as $k => $v) {
             if (!in_array($k, $allowed, true)) {

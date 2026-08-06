@@ -3,7 +3,7 @@ $gt = $globalTheme;
 $ov = $gt['overrides'];
 $mode = $gt['mode'] !== '' ? $gt['mode'] : 'dark';
 $font = $ov['font'] ?? 'default';
-$fit = $ov['chat_bg_fit'] ?? 'cover';
+$fit = $ov['chat_bg_fit'] ?? 'contain';
 $bgColor = $ov['chat_bg_color'] ?? '';
 $bgImage = $ov['chat_bg_image'] ?? '';
 ?>

@@ -1233,6 +1233,11 @@ $bg = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'mod
 check('chat bg css has color + image + overlay', str_contains($bg, '#123456') && str_contains($bg, 'theme-bg-image') && str_contains($bg, 'url(\'/assets/themes/x.webp\')'));
 $chan = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight']), ['bg_color' => '#abcdef', 'bg_image' => '/assets/themes/c.webp']);
 check('channel bg overrides theme bg', str_contains($chan, '#abcdef') && str_contains($chan, 'c.webp') && !str_contains($chan, '123456'));
+check('channel bg defaults to contain', str_contains($chan, 'background-size:contain;') && !str_contains($chan, 'background-size:cover;'));
+$chanCover = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight']), ['bg_color' => '#abcdef', 'bg_image' => '/assets/themes/c.webp', 'bg_fit' => 'cover']);
+check('channel bg_fit cover honoured', str_contains($chanCover, 'background-size:cover;'));
+$themeFit = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'overrides' => ['chat_bg_image' => '/assets/themes/t.webp']]));
+check('theme bg defaults to contain', str_contains($themeFit, 'background-size:contain;') && !str_contains($themeFit, 'background-size:cover;'));
 check('no bg -> no image rules', ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight'])) === '#messages{}');
 check('manifest colors derive from server theme', str_starts_with(ThemeService::manifestColors()['theme_color'], '#'));
 

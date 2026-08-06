@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '24';
+    private const SCHEMA_VERSION = '25';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -232,6 +232,10 @@ final class Database
         }
         if (!in_array('bg_color', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN bg_color TEXT');
+        }
+        // Per-channel background image fit (schema v25): defaults to "contain".
+        if (!in_array('bg_fit', $chanCols, true)) {
+            $pdo->exec("ALTER TABLE channels ADD COLUMN bg_fit TEXT NOT NULL DEFAULT 'contain'");
         }
 
         // OpenClaw AI bots (schema v20).

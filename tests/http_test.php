@@ -955,10 +955,16 @@ $tB = csrf(req('GET', '/app', [], $cjB)[2]);
 check('bob creates bg channel', $s === 200, "$s $j");
 $chanId = (int) $pdo->query("SELECT id FROM channels WHERE name = '#bgtown'")->fetchColumn();
 check('bg channel exists', $chanId > 0, (string) $chanId);
+check('channel bg fit defaults to contain', (string) $pdo->query("SELECT bg_fit FROM channels WHERE id = $chanId")->fetchColumn() === 'contain');
 $tB = csrf(req('GET', '/app', [], $cjB)[2]);
 [$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef'], $cjB);
 check('owner sets channel bg colour', $s === 200, "$s $j");
 check('channel bg colour persisted', (string) $pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() === '#abcdef');
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef', 'bg_fit' => 'cover'], $cjB);
+check('channel bg fit can be changed', $s === 200 && (jsonDecode($j)['bg_fit'] ?? '') === 'cover', "$s $j");
+check('channel bg fit persisted', (string) $pdo->query("SELECT bg_fit FROM channels WHERE id = $chanId")->fetchColumn() === 'cover');
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef', 'bg_fit' => 'bogus'], $cjB);
+check('invalid bg fit falls back to contain', $s === 200 && (jsonDecode($j)['bg_fit'] ?? '') === 'contain', "$s $j");
 [$s, $body] = uploadReq('/api/channel/bg', $cjB, ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => ''], ['tmp' => '/tmp/opencode/dmtest.png', 'type' => 'image/png', 'name' => 'cbg.png']);
 $j = jsonDecode($body);
 check('owner uploads channel bg image', $s === 200 && str_contains($j['bg_image'] ?? '', '/assets/themes/'), "$s $body");
@@ -977,6 +983,7 @@ check('non-owner cannot set channel bg', $s === 403, "$s $j");
 [$s, , $j] = req('POST', '/api/channel/bg/remove', ['csrf' => $tB, 'channel' => 'bgtown'], $cjB);
 check('owner removes channel bg', $s === 200, "$s $j");
 check('channel bg cleared', ($pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '' && ($pdo->query("SELECT bg_image FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '');
+check('channel bg fit resets to contain on remove', (string) $pdo->query("SELECT bg_fit FROM channels WHERE id = $chanId")->fetchColumn() === 'contain');
 // The browser's raw fetch sends the CSRF token only in the X-CSRF header (no
 // POST field) — the server must accept it (that was the "save does nothing" bug).
 $ch = curl_init($BASE . '/api/channel/bg');
