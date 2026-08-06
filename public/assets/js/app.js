@@ -1362,17 +1362,31 @@
   }
   function showMentionAutocomplete(query) {
     const q = query.toLowerCase();
-    const active = channelMembers.filter((m) => m.username && m.is_online
-      && m.username.toLowerCase() !== MY_NICK && (!q || m.username.toLowerCase().startsWith(q)));
-    const activeNames = new Set(active.map((m) => m.username.toLowerCase()));
-    const offline = ALL_USERS.filter((u) => u.toLowerCase() !== MY_NICK
-      && !activeNames.has(u.toLowerCase()) && (!q || u.toLowerCase().startsWith(q)));
-    const items = active.map((m) => ({ name: m.username, online: true }))
-      .concat(offline.map((u) => ({ name: u, online: false })));
+    const seen = new Set();
+    const online = [];
+    const offline = [];
+    const addUser = (name, isOnline) => {
+      const key = String(name == null ? '' : name).toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      if (isOnline) { if (online.length < 25) online.push({ name: String(name), online: true }); }
+      else if (offline.length < 50) offline.push({ name: String(name), online: false });
+    };
+    // Registered users embedded by the server, already ordered online-first.
+    ALL_USERS.forEach((u) => {
+      if (!q || String(u.u).toLowerCase().startsWith(q)) addUser(u.u, !!u.on);
+    });
+    // Current channel members (covers guests and members not in the embedded list).
+    (channelMembers || []).forEach((m) => {
+      if (!q || String(m.username).toLowerCase().startsWith(q)) addUser(m.username, !!m.is_online);
+    });
+    // Always include yourself so the box never comes up empty.
+    addUser(MY_NICK, true);
+    const items = online.concat(offline).slice(0, 50);
     if (!items.length) { hideAutocomplete(); return; }
     acMode = 'mention';
     mentionAcIndex = 0;
-    ac.innerHTML = items.slice(0, 8).map((it, i) =>
+    ac.innerHTML = items.slice(0, 50).map((it, i) =>
       `<button type="button" data-ac="${i}" data-name="${esc(it.name)}" class="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${i === 0 ? 'bg-blurple/20 text-white' : 'text-discord-300'} hover:bg-blurple/20">
         <span class="w-2 h-2 rounded-full shrink-0 ${it.online ? 'bg-green-500' : 'bg-discord-500'}"></span>
         <span>@${esc(it.name)}</span>

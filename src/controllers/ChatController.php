@@ -73,10 +73,13 @@ final class ChatController
         foreach (Database::all('SELECT name, slug FROM channels') as $c) {
             $channelLinks[(string) $c['name']] = (string) $c['slug'];
         }
-        // Registered (non-guest) users for the @mention autocomplete pool.
+        // Registered (non-guest) users for the @mention autocomplete pool,
+        // ordered so the most recently active online users come first.
         $mentionUsers = Database::all(
-            "SELECT id, username FROM users WHERE guest = 0 AND status = 'active' AND id != ?
-             ORDER BY last_seen DESC, username COLLATE NOCASE LIMIT 2000",
+            "SELECT id, username,
+                    CASE WHEN last_seen >= datetime('now', '-30 seconds') AND away IS NULL THEN 1 ELSE 0 END AS online
+             FROM users WHERE guest = 0 AND status = 'active' AND id != ?
+             ORDER BY online DESC, last_seen DESC, username COLLATE NOCASE LIMIT 2000",
             [$user['id']]
         );
         $motd = (string) config_get('motd', '');

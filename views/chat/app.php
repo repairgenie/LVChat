@@ -226,7 +226,7 @@ function member_html(array $m, bool $online): string {
       data-ws-url="<?= h($wsUrl ?? '') ?>"
       data-commands="<?= h(json_encode($commands)) ?>"
       data-channels="<?= h(json_encode($channelLinks)) ?>"
-      data-users="<?= h(json_encode(array_map(fn ($u) => $u['username'], $mentionUsers))) ?>"
+      data-users="<?= h(json_encode(array_map(fn ($u) => ['u' => $u['username'], 'on' => (int) ($u['online'] ?? 0)], $mentionUsers))) ?>"
       data-sounds="<?= h(json_encode($sounds['sounds'])) ?>"
       data-sound-prefs="<?= h(json_encode(['dm_sound_id' => $sounds['dm_sound_id'], 'channel_sound_id' => $sounds['channel_sound_id']])) ?>"
       data-sound-overrides="<?= h(json_encode($sounds['overrides'])) ?>"
@@ -448,7 +448,7 @@ function member_html(array $m, bool $online): string {
          data-last-msg="<?= h(json_encode($lastMsg ?? null)) ?>">
       <button id="load-earlier" class="hidden w-full py-2 text-xs text-blurple hover:text-white hover:bg-blurple/10 transition-colors">↑ Load earlier messages</button>
       <?php if ($motd): ?>
-      <div class="msg-system px-4 py-3 text-xs text-discord-400 italic text-center whitespace-pre-wrap"><?= h($motd) ?></div>
+      <div class="msg-system px-4 py-3 text-xs text-discord-400 whitespace-pre-wrap"><?= h($motd) ?></div>
       <?php endif; ?>
       <?php
       $prev = null;
