@@ -1931,9 +1931,11 @@
       items.push({ label: 'Set topic', onClick: () => { const t = prompt('New topic:', ''); if (t !== null) runCommand('/topic ' + name + (t ? ' ' + t : '')); } });
       items.push({ label: 'Invite', onClick: () => { const n = prompt('Invite user:', ''); if (n) runCommand('/invite ' + n + ' ' + name); } });
     }
-    if (el.dataset.owned === '1') {
+    if (el.dataset.owned === '1' || CAN_ADMIN) {
       items.push({ div: true });
-      items.push({ label: 'Channel background', onClick: () => openChanBg(slug) });
+      items.push({ label: 'Channel background', onClick: () => openChanBg(slug, el) });
+    }
+    if (el.dataset.owned === '1') {
       items.push({ div: true });
       items.push({ label: 'Delete channel', danger: true, onClick: () => {
         if (!confirm('Delete ' + name + '? The channel will be closed, but its chat history is preserved for admins.')) return;
@@ -2120,20 +2122,26 @@
     });
   });
 
-  // ── Channel background (owner sets the chat background) ────────────────────
+  // ── Channel background (owner/admin sets the chat background) ──────────────
   const chanBgModal = document.getElementById('chan-bg-modal');
   const chanBgColor = document.getElementById('chan-bg-color');
   const chanBgFile = document.getElementById('chan-bg-file');
   const chanBgCurrent = document.getElementById('chan-bg-current');
   const chanBgMsg = document.getElementById('chan-bg-msg');
-  function openChanBg(slug) {
+  let chanBgSlug = '';
+  function openChanBg(slug, el) {
     if (!chanBgModal) return;
-    if (chanBgColor) chanBgColor.value = body.dataset.chanBgColor || '#2b2d31';
+    chanBgSlug = slug || '';
+    // The channel you clicked may not be the one you're currently viewing, so
+    // pull its current background from the link itself (falls back to the open
+    // channel's, then to nothing).
+    const bgColor = (el && el.dataset.bgColor) || body.dataset.chanBgColor || '';
+    const bgImage = (el && el.dataset.bgImage) || body.dataset.chanBgImage || '';
+    if (chanBgColor) chanBgColor.value = bgColor || '#2b2d31';
     if (chanBgCurrent) {
-      const img = body.dataset.chanBgImage;
-      chanBgCurrent.classList.toggle('hidden', !img);
-      chanBgCurrent.innerHTML = img
-        ? '<img src="' + esc(img) + '" alt="Current background" class="h-12 w-24 object-cover rounded border border-discord-600">'
+      chanBgCurrent.classList.toggle('hidden', !bgImage);
+      chanBgCurrent.innerHTML = bgImage
+        ? '<img src="' + esc(bgImage) + '" alt="Current background" class="h-12 w-24 object-cover rounded border border-discord-600">'
         : '';
     }
     if (chanBgMsg) chanBgMsg.classList.add('hidden');
@@ -2148,24 +2156,32 @@
   if (chanBgClear) chanBgClear.addEventListener('click', () => { if (chanBgColor) chanBgColor.value = '#000000'; });
   const chanBgSave = document.getElementById('chan-bg-save');
   if (chanBgSave) chanBgSave.addEventListener('click', () => {
+    if (!chanBgSlug) return;
     const fd = new FormData();
-    fd.append('channel', CHANNEL);
+    fd.append('csrf', CSRF);
+    fd.append('channel', chanBgSlug);
     fd.append('bg_color', chanBgColor ? chanBgColor.value : '');
     if (chanBgFile && chanBgFile.files && chanBgFile.files[0]) fd.append('file', chanBgFile.files[0]);
     fetch('/api/channel/bg', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
-      .then(r => r.json()).then((j) => {
+      .then((r) => r.json().catch(() => ({ error: 'Server error (' + r.status + ')' })))
+      .then((j) => {
         if (j.error) { alert(j.error); return; }
         if (chanBgMsg) { chanBgMsg.classList.remove('hidden'); setTimeout(() => chanBgMsg.classList.add('hidden'), 1500); }
         window.location.reload();
-      });
+      })
+      .catch(() => alert('Request failed. Please try again.'));
   });
   const chanBgRemove = document.getElementById('chan-bg-remove');
   if (chanBgRemove) chanBgRemove.addEventListener('click', () => {
+    if (!chanBgSlug) return;
     if (!confirm('Remove this channel\'s background?')) return;
     const fd = new FormData();
-    fd.append('channel', CHANNEL);
+    fd.append('csrf', CSRF);
+    fd.append('channel', chanBgSlug);
     fetch('/api/channel/bg/remove', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
-      .then(r => r.json()).then((j) => { if (!j.error) window.location.reload(); });
+      .then((r) => r.json().catch(() => ({ error: 'Server error (' + r.status + ')' })))
+      .then((j) => { if (j.error) { alert(j.error); return; } window.location.reload(); })
+      .catch(() => alert('Request failed. Please try again.'));
   });
 
   // ── Theme toggle (light/dark, sticky per browser + per account) ────────────

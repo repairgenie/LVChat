@@ -170,6 +170,8 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         . ' data-ctx-channel="' . h($c['slug']) . '"'
         . ' data-ctx-channel-name="' . h($c['name']) . '"'
         . ' data-owned="' . $owned . '"'
+        . ' data-bg-color="' . h((string) ($c['bg_color'] ?? '')) . '"'
+        . ' data-bg-image="' . h((string) ($c['bg_image'] ?? '')) . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
         . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis
         . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>'

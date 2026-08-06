@@ -20,7 +20,16 @@ final class Csrf
     public static function verify(): void
     {
         $sent = $_POST['csrf'] ?? '';
-        if (!is_string($sent) || !hash_equals(self::token(), $sent)) {
+        if (!is_string($sent)) {
+            $sent = '';
+        }
+        // Accept the token from the POST field or the X-CSRF header (the JS
+        // client sends both; some raw fetches only set the header).
+        if ($sent === '') {
+            $h = $_SERVER['HTTP_X_CSRF'] ?? '';
+            $sent = is_string($h) ? $h : '';
+        }
+        if ($sent === '' || !hash_equals(self::token(), $sent)) {
             http_response_code(419);
             exit('CSRF token mismatch');
         }

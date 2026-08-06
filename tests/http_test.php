@@ -977,6 +977,27 @@ check('non-owner cannot set channel bg', $s === 403, "$s $j");
 [$s, , $j] = req('POST', '/api/channel/bg/remove', ['csrf' => $tB, 'channel' => 'bgtown'], $cjB);
 check('owner removes channel bg', $s === 200, "$s $j");
 check('channel bg cleared', ($pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '' && ($pdo->query("SELECT bg_image FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '');
+// The browser's raw fetch sends the CSRF token only in the X-CSRF header (no
+// POST field) — the server must accept it (that was the "save does nothing" bug).
+$ch = curl_init($BASE . '/api/channel/bg');
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HEADER => true,
+    CURLOPT_FOLLOWLOCATION => false,
+    CURLOPT_TIMEOUT => 8,
+    CURLOPT_COOKIEFILE => $cjA,
+    CURLOPT_COOKIEJAR => $cjA,
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => http_build_query(['channel' => 'bgtown', 'bg_color' => '#112233']),
+    CURLOPT_HTTPHEADER => ['X-CSRF: ' . $tA],
+]);
+$raw = (string) curl_exec($ch);
+$status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+check('channel bg accepted via X-CSRF header only', $status === 200, (string) $status . ' ' . $raw);
+check('header-only csrf wrote the bg', (string) $pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() === '#112233');
+[$s, , $j] = req('POST', '/api/channel/bg/remove', ['csrf' => $tB, 'channel' => 'bgtown'], $cjB);
+check('owner removes channel bg again', $s === 200, "$s $j");
 
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);
