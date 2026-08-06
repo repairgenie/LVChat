@@ -52,8 +52,10 @@ services from Anope.
   delivered even when the chat is in the background or closed. Per-channel
   muting (the 🔔 button), per-user muting (mutes someone across push, the bell,
   sounds, and DM toasts — distinct from blocking), and per-context off-switches
-  (channel messages / DMs / invites) all live in your profile; a one-click
-  **Enable notifications** button sits in the chat's bell panel. Requires HTTPS.
+  (channel messages / DMs / invites) all live in your profile. **On by default**:
+  the first click/keystroke in the chat asks for the browser's permission and
+  subscribes automatically (respecting a previous "deny" or an all-off choice),
+  with a fallback **Enable** button in the chat's bell panel. Requires HTTPS.
   Notifications collapse per channel/sender and are suppressed when you're
   already looking at that conversation
 - **Themes & appearance** — a server-wide theme with a library of **75 preset

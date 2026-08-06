@@ -394,7 +394,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'ws_ip', 'ws_port', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -910,6 +910,7 @@ final class AdminController
                 config_set('presence_throttle', (string) max(5, (int) ($_POST['presence_throttle'] ?? 30)));
                 config_set('poll_interval', (string) max(1, (int) ($_POST['poll_interval'] ?? 2)));
                 config_set('realtime', in_array(($_POST['realtime'] ?? 'poll'), ['poll', 'sse', 'ws'], true) ? (string) $_POST['realtime'] : 'poll');
+                config_set('realtime_force', ($_POST['realtime_force'] ?? '0') === '1' ? '1' : '0');
                 $wsIp = trim((string) ($_POST['ws_ip'] ?? '0.0.0.0'));
                 if ($wsIp !== '' && strtolower($wsIp) !== 'localhost' && !filter_var($wsIp, FILTER_VALIDATE_IP)) {
                     $wsIp = '0.0.0.0';
@@ -1175,6 +1176,16 @@ final class AdminController
     {
         Auth::requireAdmin();
         json_out(array_merge(['ok' => true], Realtime::daemonStatus()));
+    }
+
+    /** POST /admin/ws/reconnect — force every open chat tab to reload onto the current gateway config. */
+    public static function wsReconnect(): void
+    {
+        Auth::requireAdmin();
+        Csrf::verify();
+        Realtime::reconnectClients();
+        log_audit('ws_reconnect_clients');
+        json_out(array_merge(['ok' => true, 'reconnect' => true], Realtime::daemonStatus()));
     }
 
     /** POST /admin/ws/control — start/stop/restart the realtime gateway daemon. */

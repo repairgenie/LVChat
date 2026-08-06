@@ -355,6 +355,9 @@ foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/adm
     [$s] = req('GET', $p, [], $cjA);
     check("GET $p 200", $s === 200, (string) $s);
 }
+$adminSettingsPage = req('GET', '/admin/settings', [], $cjA)[2];
+check('settings page has force-websocket checkbox', str_contains($adminSettingsPage, 'name="realtime_force"'), '');
+check('settings page has reconnect-clients button', str_contains($adminSettingsPage, 'id="ws-btn-reconnect"'), '');
 [$s] = req('GET', '/admin', [], $cjB);
 check('non-admin denied /admin', $s === 403, (string) $s);
 
@@ -1062,6 +1065,32 @@ check('profile page embeds VAPID key', str_contains($page, 'VAPID_KEY'), '');
 [$s, , $j] = req('POST', '/api/push/unsubscribe', ['csrf' => $tPush], $cjA);
 check('push unsubscribe ok', $s === 200, "$s $j");
 check('subscriptions cleared', (string) $pdo->query("SELECT COUNT(*) FROM push_subscriptions WHERE user_id = $aliceId")->fetchColumn() === '0');
+
+// Realtime force-WebSocket config: persist + expose to the chat page.
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'realtime' => 'ws', 'realtime_force' => '1', 'ws_port' => '8080', 'ws_ip' => '0.0.0.0', 'back' => '/admin/settings'], $cjA);
+check('settings_save accepts realtime_force', $s === 302, (string) $s);
+check('realtime_force persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'realtime_force'")->fetchColumn() === '1');
+$page = req('GET', '/app', [], $cjA)[2];
+check('chat page exposes data-rt-force', str_contains($page, 'data-rt="ws"') && str_contains($page, 'data-rt-force="1"'), '');
+$forcePage = req('GET', '/admin/settings', [], $cjA)[2];
+check('force checkbox reflects saved state', preg_match('/name="realtime_force"[^>]*checked/', $forcePage) === 1, '');
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'realtime' => 'poll', 'realtime_force' => '0', 'ws_port' => '8080', 'ws_ip' => '0.0.0.0', 'back' => '/admin/settings'], $cjA);
+check('settings restore poll', $s === 302, (string) $s);
+
+// Realtime transport report accepts the forced-offline ('none') state.
+[$s, , $j] = req('POST', '/api/rt/report', ['transport' => 'none'], $cjA, ['X-CSRF: ' . $tPush]);
+check('rt report accepts none', $s === 200 && (jsonDecode($j)['ok'] ?? false) === true, "$s $j");
+check('rt none persisted', (dbq("SELECT transport FROM rt_transports WHERE actor_id = $aliceId")[0]['transport'] ?? '') === 'none');
+
+// Admin "reconnect all clients": trigger → next poll carries the reload flag.
+[$s, , $j] = req('POST', '/admin/ws/reconnect', ['csrf' => $tPush], $cjA);
+check('ws reconnect admin ok', $s === 200 && (jsonDecode($j)['reconnect'] ?? false) === true, "$s $j");
+[$s] = req('POST', '/admin/ws/reconnect', ['csrf' => 'x'], $cjA);
+check('ws reconnect requires valid csrf', $s === 419, (string) $s);
+[$s] = req('POST', '/admin/ws/reconnect', ['csrf' => $tPush]);
+check('ws reconnect requires auth', $s === 302, (string) $s);
+[$s, , $j] = req('GET', '/api/poll?since=0', [], $cjA);
+check('reconnect flag surfaces in poll', (jsonDecode($j)['reconnect'] ?? 0) === 1, $j);
 
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);

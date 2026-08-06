@@ -221,6 +221,7 @@ function member_html(array $m, bool $online): string {
       data-my-id="<?= (int) $user['id'] ?>"
       data-my-guest="<?= (int) ($user['guest'] ?? 0) ?>"
       data-vapid-key="<?= h(PushService::publicKey()) ?>"
+      data-push-all-off="<?= (int) (!(int) ($user['guest'] ?? 0) && (int) $pushPrefs['channels'] === 0 && (int) $pushPrefs['dms'] === 0 && (int) $pushPrefs['invites'] === 0) ?>"
       data-my-level="<?= h($currentLevel) ?>"
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
@@ -234,6 +235,7 @@ function member_html(array $m, bool $online): string {
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-rt="<?= config_get('realtime', 'poll') === 'sse' ? 'sse' : (config_get('realtime', 'poll') === 'ws' ? 'ws' : 'poll') ?>"
+      data-rt-force="<?= (config_get('realtime_force', '0') ?? '0') === '1' ? '1' : '0' ?>"
       data-rt-ticket="<?= h($wsTicket ?? '') ?>"
       data-ws-url="<?= h($wsUrl ?? '') ?>"
       data-commands="<?= h(json_encode($commands)) ?>"
@@ -261,10 +263,18 @@ function member_html(array $m, bool $online): string {
     </div>
 
     <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+      <!-- Realtime transport status: websocket / sse / polling / offline. -->
+      <div id="rt-status" class="hidden px-2 pt-3" hidden>
+        <div class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wide select-none" title="Realtime connection status">
+          <span id="rt-dot" class="w-2 h-2 rounded-full bg-discord-500 shrink-0"></span>
+          <span id="rt-label" class="truncate">connecting…</span>
+        </div>
+      </div>
+
       <?php if ($user['role'] === 'admin'): ?>
       <nav class="px-2 pt-3">
-        <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
-          <span class="text-discord-400">🛡</span> Admin dashboard
+        <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-red-400 font-bold hover:bg-discord-600/40 hover:text-red-300 text-sm">
+          <span class="text-red-400">🛡</span> Admin dashboard
         </a>
       </nav>
       <?php elseif ($user['role'] === 'staff'): ?>
@@ -274,12 +284,6 @@ function member_html(array $m, bool $online): string {
         </a>
       </nav>
       <?php endif; ?>
-
-      <nav class="px-2 pt-3">
-        <a href="https://buymeacoffee.com/georgethegeek" target="_blank" rel="noopener" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-amber-300 hover:bg-discord-600/40 hover:text-amber-200" title="Support the project">
-          <span class="text-discord-400">☕</span> Buy me a coffee
-        </a>
-      </nav>
 
       <?php if ($myChannels): ?>
       <nav class="px-2 pt-2 pb-1">
@@ -985,9 +989,6 @@ function member_html(array $m, bool $online): string {
   </div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
-  <!-- Live realtime transport badge; filled in by app.js so silent poll/SSE
-       fallbacks are visible instead of looking like healthy WebSockets. -->
-  <div id="rt-badge" class="hidden fixed bottom-3 left-3 z-50 px-2 py-1 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wide pointer-events-none select-none" hidden></div>
   <script src="/assets/vendor/ai/marked.min.js"></script>
   <script src="/assets/vendor/ai/purify.min.js"></script>
   <script src="/assets/vendor/ai/highlight.min.js"></script>

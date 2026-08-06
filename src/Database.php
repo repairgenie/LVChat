@@ -514,6 +514,7 @@ final class Database
             'presence_throttle' => '30',
             'poll_interval' => '2',
             'realtime' => 'poll',
+            'realtime_force' => '0',
             'ws_ip' => '0.0.0.0',
             'ws_url' => '',
             'ws_port' => '8080',

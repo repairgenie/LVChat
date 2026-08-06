@@ -231,6 +231,11 @@ wcheck('channel message broadcast', strpos($allA, '600001') !== false, $allA);
 wcheck('message update broadcast', strpos($allA, 'msg_update') !== false && strpos($allA, '600003') !== false, $allA);
 wcheck('dm broadcast', strpos($allB, '600002') !== false, $allB);
 
+// ── Admin reconnect broadcast ─────────────────────────────────────────────
+Realtime::reconnectClients();
+$framesR = wsReceive($connA, 2);
+wcheck('reconnect frame broadcast', strpos(implode(' ', $framesR), '"reconnect"') !== false, implode(' ', $framesR));
+
 fclose($connA);
 fclose($connB);
 

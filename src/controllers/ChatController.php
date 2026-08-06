@@ -131,6 +131,7 @@ final class ChatController
             'notifyMode' => $notifyMode,
             'sounds' => SoundService::soundsForClient($user),
             'bgLast' => $bgLast,
+            'pushPrefs' => PushService::prefs($user),
             'friends' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getFriendsWithStatus((int) $user['id']) : [],
             'friendRequests' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getPendingIncoming((int) $user['id']) : [],
             'channelInvites' => (int) ($user['guest'] ?? 0) !== 1 ? ChannelService::pendingInvites((int) $user['id']) : [],
@@ -499,6 +500,11 @@ final class ChatController
     private static function pollPayload(array $user, int $since, bool $markRead = true): array
     {
         $out = ['ok' => true, 'messages' => [], 'presence' => [], 'notify_count' => 0, 'dm_list' => [], 'bg_messages' => []];
+        // Admin-triggered "reconnect all clients": every tab reloads while this
+        // flag is set so it re-renders with the current gateway config.
+        if (Realtime::reconnectRequested()) {
+            $out['reconnect'] = 1;
+        }
 
         $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0', [$user['id'], $user['id']]);
         $out['notify_count'] = $notifyCount;
@@ -610,14 +616,15 @@ final class ChatController
 
     /**
      * POST /api/rt/report — the browser records which realtime transport it
-     * actually ended up on (ws/sse/poll). Used by the admin status panel to
-     * surface silent transport fallbacks. Fire-and-forget from the client.
+     * actually ended up on (ws/sse/poll). 'none' = WebSocket was forced but is
+     * unreachable. Used by the admin status panel to surface silent fallbacks
+     * and forced-offline clients. Fire-and-forget from the client.
      */
     public static function reportTransport(): void
     {
         $user = self::requireUser();
         $transport = (string) ($_POST['transport'] ?? '');
-        if (!in_array($transport, ['ws', 'sse', 'poll'], true)) {
+        if (!in_array($transport, ['ws', 'sse', 'poll', 'none'], true)) {
             json_out(['error' => 'Bad transport.'], 400);
         }
         $guest = (int) ($user['guest'] ?? 0) === 1 ? 1 : 0;

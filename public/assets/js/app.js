@@ -728,6 +728,10 @@
   // Shared handler for a realtime payload (poll response or SSE message).
   function handleRealtime(j) {
     if (!j) return;
+    // Admin-forced "reconnect all clients": reload so the page re-renders with
+    // the current gateway config (fresh ticket + URL). Delivered via poll, SSE
+    // and WS frames alike.
+    if (j.reconnect) { window.location.reload(); return; }
     if (j.redirect) { window.location = j.redirect; return; }
     if (j.error) return;
     if (j.messages && j.messages.length) {
@@ -1257,6 +1261,9 @@
   // must be a secure context with PushManager support.
   const pushSupported = !IS_GUEST && !!VAPID_KEY && ('serviceWorker' in navigator)
     && ('PushManager' in window) && ('Notification' in window) && window.isSecureContext;
+  // True when the user explicitly turned every push category off in settings —
+  // in that case we never prompt for permission on their behalf.
+  const PUSH_ALL_OFF = body.dataset.pushAllOff === '1';
 
   function b64uToBytes(b64) {
     const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
@@ -1331,8 +1338,25 @@
       pushEnable.title = denied ? 'Push is blocked in your browser settings' : 'Get OS notifications for new messages, DMs, and invites';
     }
   }
-  if (pushEnable) pushEnable.addEventListener('click', () => {
+  let pushAutoPrompted = false;
+  function subscribePushFromButton() {
+    // The button's pointerdown already started the flow via auto-prompt.
+    if (pushAutoPrompted) return;
     subscribePush().then((ok) => { if (ok) { showReply('🔔 Push notifications enabled.'); renderPushRow(); } });
+  }
+  if (pushEnable) pushEnable.addEventListener('click', subscribePushFromButton);
+  // Default behaviour is ON: the first click/keystroke/tap anywhere in the chat
+  // triggers the browser's permission prompt, so users get push notifications
+  // without having to find the Enable button. Respecting a previous "deny" and
+  // an explicit all-off preference; only undecided ("default") permission prompts.
+  function maybeAutoEnablePush() {
+    if (!pushSupported || pushAutoPrompted || PUSH_ALL_OFF) return;
+    if (Notification.permission !== 'default') return;
+    pushAutoPrompted = true;
+    subscribePush().then((ok) => { if (ok) { showReply('🔔 Push notifications enabled.'); renderPushRow(); } });
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
+    document.addEventListener(ev, maybeAutoEnablePush, { once: true, passive: true });
   });
   syncPush();
   renderPushRow();
@@ -2732,21 +2756,33 @@
   // the sidebar summaries (DM list, unread badges, presence counts, friends,
   // bell) stay fresh without a per-event push for each of them.
   const rtMode = body.dataset.rt || 'poll';
+  // "Force WebSocket": when enabled the browser must never fall back to
+  // SSE/polling. A broken gateway becomes a loud red badge + quiet retries,
+  // not a silent downgrade (which reads as a phantom 0 in the counter).
+  // Only meaningful when WebSocket mode is actually selected.
+  const RT_FORCE = rtMode === 'ws' && body.dataset.rtForce === '1';
 
   // Tell the server — and show the user — which transport actually won. This
   // surfaces silent fallbacks: "websockets configured but everyone is on
   // polling" becomes visible instead of a phantom 0 in the gateway counter.
   let liveTransport = '';
-  const RT_BADGE_STYLES = { ws: 'bg-green-600/80 text-white', sse: 'bg-sky-600/80 text-white', poll: 'bg-amber-600/80 text-white' };
-  function showTransport(t) {
+  const RT_BADGE_TEXT = { ws: 'websocket', sse: 'sse', poll: 'polling', none: 'websocket offline', connecting: 'connecting…' };
+  const RT_DOT_COLOR = { ws: 'bg-green-500', sse: 'bg-sky-500', poll: 'bg-amber-400', none: 'bg-red-500', connecting: 'bg-discord-400' };
+  const RT_LABEL_COLOR = { ws: 'text-green-400', sse: 'text-sky-400', poll: 'text-amber-400', none: 'text-red-400', connecting: 'text-discord-300' };
+  function showTransport(t, report) {
     if (t === liveTransport) return;
     liveTransport = t;
-    const badge = document.getElementById('rt-badge');
-    if (badge) {
-      badge.textContent = t === 'ws' ? 'websocket' : (t === 'sse' ? 'sse' : 'polling');
-      badge.className = 'fixed bottom-3 left-3 z-50 px-2 py-1 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wide pointer-events-none select-none ' + (RT_BADGE_STYLES[t] || RT_BADGE_STYLES.poll);
-      badge.hidden = false;
+    const status = document.getElementById('rt-status');
+    if (status) {
+      const label = document.getElementById('rt-label');
+      const dot = document.getElementById('rt-dot');
+      if (label) label.textContent = RT_BADGE_TEXT[t] || 'polling';
+      if (label) label.className = 'truncate ' + (RT_LABEL_COLOR[t] || RT_LABEL_COLOR.poll);
+      if (dot) dot.className = 'w-2 h-2 rounded-full shrink-0 ' + (RT_DOT_COLOR[t] || RT_DOT_COLOR.poll);
+      status.classList.remove('hidden');
+      status.hidden = false;
     }
+    if (report === false) return;
     fetch('/api/rt/report', {
       method: 'POST',
       headers: { 'X-CSRF': CSRF },
@@ -2760,14 +2796,17 @@
     schedulePoll();
   }
 
-  if (rtMode === 'ws' && window.WebSocket && body.dataset.rtTicket) {
+  // Shared WebSocket machinery. `onUnrecoverable` decides what a broken gateway
+  // means: normal mode falls back to polling, force mode shows the offline badge
+  // (and never downgrades — messages simply stop until the socket returns).
+  function setupWs(onUnrecoverable) {
     let ws = null;
     let wsFails = 0;
     let wsGone = false;
     let reconcileTimer = null;
     let wsRetryTimer = null;
     let wsBase = body.dataset.wsUrl || '';
-    let wsTicket = body.dataset.rtTicket;
+    let wsTicket = body.dataset.rtTicket || '';
 
     function wsSend(obj) {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -2785,14 +2824,13 @@
         })
         .catch(() => done());
     }
-    function fallbackToPoll() {
+    function giveUp() {
       if (reconcileTimer) { clearInterval(reconcileTimer); reconcileTimer = null; }
-      showTransport('poll');
-      startPolling();
+      onUnrecoverable();
       scheduleWsRetry();
     }
-    // A failed handshake used to fall back to polling forever. Re-probe quietly
-    // every few minutes so a later proxy fix/daemon restart re-enables realtime.
+    // A failed handshake used to stop retrying forever. Re-probe quietly every
+    // few minutes so a later proxy fix/daemon restart re-enables realtime.
     function scheduleWsRetry() {
       if (wsRetryTimer) return;
       wsRetryTimer = setInterval(() => {
@@ -2806,7 +2844,7 @@
       const sep = wsBase.indexOf('?') >= 0 ? '&' : '?';
       try { ws = new WebSocket(wsBase + sep + 'ticket=' + encodeURIComponent(wsTicket)); }
       catch (e) { ws = null; }
-      if (!ws) { fallbackToPoll(); return; }
+      if (!ws) { giveUp(); return; }
       ws.onopen = () => { wsFails = 0; showTransport('ws'); wsSubscribe(); };
       ws.onmessage = (ev) => {
         let j = null;
@@ -2814,24 +2852,44 @@
         if (j.pong) return;
         handleRealtime(j);
       };
-      ws.onerror = () => { try { ws.close(); } catch (e) {} };
+      // In force mode the very first failure is already "no fallback, offline" —
+      // don't wait for three slow timeouts to admit the socket is down.
+      ws.onerror = () => { if (RT_FORCE) showTransport('none'); try { ws.close(); } catch (e) {} };
       ws.onclose = () => {
         ws = null;
         if (wsGone) return;
+        if (RT_FORCE) showTransport('none');
         wsFails++;
-        if (wsFails >= 3) { fallbackToPoll(); return; }
+        if (wsFails >= 3) { giveUp(); return; }
         // A ticket only lives 60s; mint a fresh one before reconnecting.
         refreshTicket(() => setTimeout(openWs, pollMs * (wsFails + 1)));
       };
     }
+    showTransport('connecting', false); // badge is visible from boot, not just after a fallback
     openWs();
     // Presence heartbeat keeps last_seen fresh server-side and the connection
     // alive past idle timeouts.
     setInterval(() => wsSend({ action: 'ping' }), 30000);
     // Hybrid reconcile: WS carries messages instantly; this cheap HTTP call
-    // refreshes the sidebar summaries every 30s.
+    // refreshes the sidebar summaries every 30s (only while WS is actually open,
+    // so force mode never becomes polling by another name).
     reconcileTimer = setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) poll(); }, 30000);
-  } else if (rtMode === 'sse' && window.EventSource) {
+  }
+
+  if (rtMode === 'ws' && window.WebSocket) {
+    if (body.dataset.rtTicket) {
+      // Normal mode: fall back to polling. Force mode: go offline + keep retrying.
+      setupWs(RT_FORCE
+        ? () => showTransport('none')
+        : () => { showTransport('poll'); startPolling(); });
+    } else if (RT_FORCE) {
+      // Forced but no handshake ticket — never downgrade; re-probe for one.
+      showTransport('none');
+      setupWs(() => showTransport('none'));
+    } else {
+      startPolling();
+    }
+  } else if (rtMode === 'sse' && window.EventSource && !RT_FORCE) {
     let es = null;
     function openStream() {
       const q = new URLSearchParams({ since: lastId });
@@ -2850,6 +2908,9 @@
       };
     }
     openStream();
+  } else if (RT_FORCE) {
+    // WS is selected + forced but the API is missing — loud offline state.
+    showTransport('none');
   } else {
     startPolling();
   }

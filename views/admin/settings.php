@@ -116,6 +116,10 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     <div>
       <div class="text-sm font-medium text-white">Realtime mode</div>
       <div class="text-xs text-discord-400">Polling is the shared-hosting default. SSE streams live updates but holds a PHP worker per client. WebSocket needs the realtime gateway daemon running. Open chat tabs report which transport they actually landed on, so the gateway status below shows real WebSocket usage — a browser that falls back to polling (bad proxy/mixed content) is visible instead of looking like a healthy connection.</div>
+      <label class="flex items-center gap-2 mt-2 cursor-pointer" id="rt-force-row">
+        <input type="checkbox" name="realtime_force" value="1" class="w-4 h-4 accent-blurple" <?= ($settings['realtime_force'] ?? '0') === '1' ? 'checked' : '' ?>>
+        <span class="text-xs text-discord-300">Force WebSocket — never fall back to SSE/polling. If the gateway is unreachable, clients show an <em>offline</em> badge and keep retrying instead of silently degrading.</span>
+      </label>
     </div>
     <select name="realtime" class="input w-36 !py-1.5">
       <option value="poll" <?= ($settings['realtime'] ?? 'poll') === 'poll' ? 'selected' : '' ?>>Polling</option>
@@ -139,7 +143,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
       }
   }
   ?>
-  <div id="ws-settings" class="card p-4 <?= ($settings['realtime'] ?? 'poll') === 'ws' ? '' : 'hidden' ?>">
+  <div id="ws-settings" class="card p-4">
     <div class="text-sm font-medium text-white mb-1">WebSocket gateway</div>
     <p class="text-xs text-discord-400 mb-3">Manual override for the gateway bind address — a last resort. deploy.sh normally auto-selects the first free port (8080–8089).</p>
     <div class="grid grid-cols-2 gap-4">
@@ -169,11 +173,12 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
           <button type="button" id="ws-btn-start" class="btn bg-green-600/80 hover:bg-green-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Start</button>
           <button type="button" id="ws-btn-restart" class="btn bg-blurple hover:bg-blurple-dark text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Restart</button>
           <button type="button" id="ws-btn-stop" class="btn bg-red-600/80 hover:bg-red-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Stop</button>
+          <button type="button" id="ws-btn-reconnect" class="btn bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" title="Make every open chat tab reload so it reconnects with the current gateway config" disabled>Reconnect clients</button>
         </div>
       </div>
       <pre id="ws-output" class="hidden mt-2 p-2 rounded bg-black/40 text-[11px] text-discord-300 leading-relaxed max-h-48 overflow-auto whitespace-pre-wrap font-mono"></pre>
     </div>
-    <p class="text-xs text-discord-400 mt-2">Start/stop/restart control the daemon directly — no SSH needed. Status refreshes automatically.</p>
+    <p class="text-xs text-discord-400 mt-2">Start/stop/restart control the daemon directly — no SSH needed. "Reconnect clients" makes every open chat tab reload so it picks up the current gateway config (use after changing the port/IP). Status refreshes automatically.</p>
   </div>
   <div class="card p-4 mt-4">
     <div class="flex items-center justify-between">
@@ -221,14 +226,26 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     </div>
   </div>
   <script>
-  document.querySelector('select[name="realtime"]').addEventListener('change', function() {
+  document.querySelector('select[name="realtime"]').addEventListener('change', function() { syncRtUi(this.value); });
+  // The WebSocket gateway panel, the force checkbox and the poll section are all
+  // toggled from the live dropdown value on load (not baked in server-side), so
+  // they can never be hidden by a stale/mismatched stored config.
+  function syncRtUi(value) {
     var ps = document.getElementById('poll-settings');
     var ws = document.getElementById('ws-settings');
-    var isStream = (this.value === 'sse' || this.value === 'ws');
-    ps.style.opacity = isStream ? '0.4' : '1';
-    ps.style.pointerEvents = isStream ? 'none' : 'auto';
-    if (ws) ws.classList.toggle('hidden', this.value !== 'ws');
-  });
+    var rf = document.getElementById('rt-force-row');
+    var on = value === 'ws';
+    if (ps) {
+      ps.style.opacity = (value === 'sse' || on) ? '0.4' : '1';
+      ps.style.pointerEvents = (value === 'sse' || on) ? 'none' : 'auto';
+    }
+    if (ws) ws.classList.toggle('hidden', !on);
+    if (rf) {
+      rf.style.opacity = on ? '1' : '0.5';
+      rf.style.pointerEvents = on ? 'auto' : 'none';
+    }
+  }
+  syncRtUi(document.querySelector('select[name="realtime"]').value);
   </script>
 
   <div class="pt-4 border-t border-discord-700">
@@ -301,6 +318,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     var startBtn = document.getElementById('ws-btn-start');
     var stopBtn = document.getElementById('ws-btn-stop');
     var restartBtn = document.getElementById('ws-btn-restart');
+    var reconnectBtn = document.getElementById('ws-btn-reconnect');
     var deployBtn = document.getElementById('deploy-run');
     if (!statusEl) return;
 
@@ -331,17 +349,20 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
         if (tr.ws) parts.push(tr.ws + ' on websocket');
         if (tr.sse) parts.push(tr.sse + ' on sse');
         if (tr.poll) parts.push(tr.poll + ' on polling');
+        if (tr.none) parts.push('<span class="text-red-400">' + tr.none + ' offline (websocket forced but unreachable)</span>');
         if (parts.length) s += ' — clients: ' + parts.join(', ');
         statusEl.innerHTML = s
           + (j.pid ? ' (pid ' + j.pid + ')' : '');
         startBtn.disabled = true;
         stopBtn.disabled = false;
         restartBtn.disabled = false;
+        if (reconnectBtn) reconnectBtn.disabled = false;
       } else {
         statusEl.innerHTML = '<span class="text-red-400 font-semibold">● Stopped</span>';
         startBtn.disabled = false;
         stopBtn.disabled = true;
         restartBtn.disabled = true;
+        if (reconnectBtn) reconnectBtn.disabled = true;
       }
     }
 
@@ -374,6 +395,18 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     if (startBtn) startBtn.addEventListener('click', function () { wsControl('start', this); });
     if (stopBtn) stopBtn.addEventListener('click', function () { wsControl('stop', this); });
     if (restartBtn) restartBtn.addEventListener('click', function () { wsControl('restart', this); });
+    if (reconnectBtn) reconnectBtn.addEventListener('click', function () {
+      if (reconnectBtn.disabled) return;
+      reconnectBtn.disabled = true;
+      showOutput(outEl, 'Sending reconnect signal to every open chat tab…\n');
+      post('/admin/ws/reconnect', {}, function (j) {
+        showOutput(outEl, j && j.ok ? 'Done. Tabs are reloading with the current gateway config.'
+          : 'Error: ' + ((j && j.error) || 'request failed'));
+        if (j && j.status) renderStatus(j.status);
+        refreshStatus();
+        reconnectBtn.disabled = false;
+      });
+    });
 
     // ── Deploy modal: streams bin/deploy.sh like a terminal ────────────────────
     function openDeployModal() {
@@ -445,6 +478,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
   })();
   </script>
   <button name="action" value="settings_save" class="btn-primary">Save settings</button>
+  <p class="text-xs text-discord-500 pt-2">Build <?= h(LVC_VERSION) ?> · settings view mtime <?= gmdate('Y-m-d H:i:s', (int) @filemtime(__FILE__)) ?> UTC — if this date doesn't match what you uploaded, the server is serving a stale cached copy (restart PHP-FPM / clear OPcache, then re-check).</p>
 </form>
 
 <!-- Deploy output modal: streams bin/deploy.sh like a terminal -->

@@ -164,6 +164,12 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
                     return (int) ($st['user']['id'] ?? 0) === (int) ($event['user_id'] ?? -1);
                 });
                 break;
+            case 'reconnect':
+                // Admin-forced: every connected WS client reloads on this frame so
+                // it re-renders with the current gateway config (poll/SSE clients
+                // get the same signal from their own payloads).
+                $broadcast(['reconnect' => true]);
+                break;
             case 'msg_update':
                 // A channel message was edited/deleted/reacted: sync every viewer.
                 $broadcast(['msg_update' => [

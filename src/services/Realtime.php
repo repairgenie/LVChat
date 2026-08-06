@@ -278,4 +278,23 @@ final class Realtime
         );
         self::publish(['type' => 'bell', 'user_id' => (int) $user['id'], 'notify_count' => $count]);
     }
+
+    /**
+     * Admin "reconnect all clients": every open tab reloads on its next poll,
+     * SSE frame or WS message so it re-renders with the current gateway config
+     * (fresh ticket + URL). Works for all three transports — WS clients get the
+     * daemon frame; poll/SSE clients see the flag in the next payload.
+     */
+    public static function reconnectClients(): void
+    {
+        config_set('rt_reconnect_at', (string) time());
+        self::publish(['type' => 'reconnect']);
+    }
+
+    /** True while a reconnect-all request is still "fresh" (short window). */
+    public static function reconnectRequested(): bool
+    {
+        $at = (int) (config_get('rt_reconnect_at', '0') ?? '0');
+        return $at > 0 && (time() - $at) <= 15;
+    }
 }
