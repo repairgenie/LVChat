@@ -192,12 +192,17 @@ CommandRegistry::register('motd', [
     'usage' => '/motd [set <text>]',
     'run' => function (array $args, array $user, ?array $channel) {
         if (($args[0] ?? '') === 'set' && $user['role'] === 'admin') {
-            $text = implode(' ', array_slice($args, 1));
+            // Join with spaces so the command reads naturally, but honour
+            // explicit "\n" sequences so a multi-line MOTD can be set in-chat.
+            $text = str_replace('\\n', "\n", implode(' ', array_slice($args, 1)));
             config_set('motd', $text);
             log_audit('motd', null, 'updated');
             return ['replies' => ['MOTD updated.']];
         }
-        return ['replies' => array_map('h', explode("\n", (string) config_get('motd', '')))];
+        // One line per reply. The lines are NOT pre-escaped: the client renders
+        // replies through linkify(), which HTML-escapes (escaping here too would
+        // double-escape & < > and mangle URLs/HTML in the MOTD text).
+        return ['replies' => explode("\n", (string) config_get('motd', ''))];
     },
 ]);
 

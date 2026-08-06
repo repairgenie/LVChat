@@ -1302,7 +1302,7 @@
   function showReply(text) {
     if (!msgsEl) return;
     msgsEl.insertAdjacentHTML('beforeend',
-      `<div class="msg-system px-4 py-1 text-xs text-sky-400 italic text-center select-none">${linkify(text)}</div>`);
+      `<div class="msg-system px-4 py-1 text-xs text-sky-400 italic text-center select-none whitespace-pre-wrap break-words">${linkify(text)}</div>`);
     maybeScroll();
   }
 

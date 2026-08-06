@@ -551,6 +551,12 @@ $res = CommandParser::run('/motd', $alice, $ch);
 check('/motd view', count($res['replies']) >= 1);
 $res = CommandParser::run('/motd set new motd here', $alice, $ch);
 check('/motd set', $res['replies'][0] === 'MOTD updated.');
+// MOTD lines must be returned raw (the client escapes via linkify) — pre-escaping
+// here double-escapes & < > and mangles URLs. \n sequences set a multi-line MOTD.
+$res = CommandParser::run('/motd set Line one\nLine two & <b>x</b>', $alice, $ch);
+check('/motd set preserves \\n + raw text', $res['replies'][0] === 'MOTD updated.');
+$res = CommandParser::run('/motd', $alice, $ch);
+check('/motd lines unescaped + split', $res['replies'] === ['Line one', 'Line two & <b>x</b>'], json_encode($res['replies']));
 $res = CommandParser::run('/wallops hello everyone', $alice, $ch);
 check('/wallops', $res['replies'][0] === 'Announcement sent to all channels.');
 $res = CommandParser::run('/gline dave 1h bad', $alice, $ch);

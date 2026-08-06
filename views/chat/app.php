@@ -452,7 +452,7 @@ function member_html(array $m, bool $online): string {
          data-last-msg="<?= h(json_encode($lastMsg ?? null)) ?>">
       <button id="load-earlier" class="hidden w-full py-2 text-xs text-blurple hover:text-white hover:bg-blurple/10 transition-colors">↑ Load earlier messages</button>
       <?php if ($motd): ?>
-      <div class="msg-system px-4 py-3 text-xs text-discord-400 whitespace-pre-wrap"><?= h($motd) ?></div>
+      <div class="msg-system px-4 py-3 text-xs text-discord-400 whitespace-pre-wrap break-words"><?= h($motd) ?></div>
       <?php endif; ?>
       <?php
       $prev = null;
