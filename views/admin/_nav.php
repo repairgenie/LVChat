@@ -25,6 +25,7 @@ function admin_nav(string $active, array $user): void {
     'operclasses' => ['/admin/operclasses', 'Operclasses', $isAdmin],
     'motd' => ['/admin/motd', 'MOTD', $isAdmin],
     'sounds' => ['/admin/sounds', 'Sounds', $isAdmin],
+    'theme' => ['/admin/theme', 'Appearance', $isAdmin],
     'logs' => ['/admin/logs', 'Chat logs', $isAdmin],
     'webhooks' => ['/admin/webhooks', 'Webhooks', $isAdmin],
     'openclaw' => ['/admin/openclaw', 'OpenClaw', $isAdmin],

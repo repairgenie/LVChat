@@ -405,6 +405,19 @@ final class AdminController
         render_view('admin/settings', ['admin' => $admin, 'settings' => $settings]);
     }
 
+    /** GET /admin/theme — server-wide appearance: preset library + chat background. */
+    public static function theme(): void
+    {
+        $admin = self::require();
+        render_view('admin/theme', [
+            'admin' => $admin,
+            'presets' => ThemeService::presets(),
+            'globalTheme' => ThemeService::globalTheme(),
+            'customizationEnabled' => ThemeService::customizationEnabled(),
+            'rendered' => ThemeService::render(ThemeService::globalTheme()),
+        ]);
+    }
+
     public static function invites(): void
     {
         $admin = self::require();
@@ -921,6 +934,68 @@ final class AdminController
                 config_set('mfa_require_user', ($_POST['mfa_require_user'] ?? '0') === '1' ? '1' : '0');
                 log_audit('settings_save');
                 $message = 'Settings saved.';
+                break;
+            case 'theme_save':
+                $current = ThemeService::globalTheme();
+                $image = (string) ($_POST['chat_bg_image'] ?? '');
+                if (ThemeService::localPath($image) === '' && !empty($current['overrides']['chat_bg_image'])) {
+                    $image = (string) $current['overrides']['chat_bg_image'];
+                }
+                ThemeService::saveGlobal([
+                    'preset' => (string) ($_POST['preset'] ?? ''),
+                    'mode' => (string) ($_POST['mode'] ?? ''),
+                    'overrides' => [
+                        'accent' => (string) ($_POST['accent'] ?? ''),
+                        'sidebar' => (string) ($_POST['sidebar'] ?? ''),
+                        'font' => (string) ($_POST['font'] ?? ''),
+                        'chat_bg_color' => (string) ($_POST['chat_bg_color'] ?? ''),
+                        'chat_bg_image' => $image,
+                        'chat_bg_fit' => (string) ($_POST['chat_bg_fit'] ?? ''),
+                    ],
+                ]);
+                config_set('theme_user_customization', ($_POST['theme_user_customization'] ?? '0') === '1' ? '1' : '0');
+                log_audit('theme_save');
+                $message = 'Theme saved.';
+                break;
+            case 'theme_bg_upload':
+                if (!isset($_FILES['file']) || !UploadService::isImageUpload($_FILES['file'])) {
+                    $ok = false;
+                    $message = 'Choose an image file first.';
+                    break;
+                }
+                $stored = UploadService::store($_FILES['file'], 'theme');
+                if (!$stored['ok']) {
+                    $ok = false;
+                    $message = $stored['error'];
+                    break;
+                }
+                $current = ThemeService::globalTheme();
+                if (!empty($current['overrides']['chat_bg_image'])) {
+                    UploadService::remove((string) $current['overrides']['chat_bg_image']);
+                }
+                $current['overrides']['chat_bg_image'] = $stored['url'];
+                ThemeService::saveGlobal($current);
+                log_audit('theme_bg_upload');
+                $message = 'Background uploaded.';
+                break;
+            case 'theme_bg_remove':
+                $current = ThemeService::globalTheme();
+                if (!empty($current['overrides']['chat_bg_image'])) {
+                    UploadService::remove((string) $current['overrides']['chat_bg_image']);
+                }
+                $current['overrides']['chat_bg_image'] = '';
+                ThemeService::saveGlobal($current);
+                log_audit('theme_bg_remove');
+                $message = 'Background removed.';
+                break;
+            case 'theme_reset':
+                $current = ThemeService::globalTheme();
+                if (!empty($current['overrides']['chat_bg_image'])) {
+                    UploadService::remove((string) $current['overrides']['chat_bg_image']);
+                }
+                config_set('theme', '');
+                log_audit('theme_reset');
+                $message = 'Theme reset to the default.';
                 break;
             case 'user_approve':
                 $id = (int) ($_POST['id'] ?? 0);

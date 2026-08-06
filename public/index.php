@@ -88,6 +88,14 @@ $router->post('/api/sound/prefs', [SoundController::class, 'prefs']);
 $router->post('/api/sound/override', [SoundController::class, 'setOverride']);
 $router->post('/api/sound/override/remove', [SoundController::class, 'removeOverride']);
 
+// Theme settings (per-user) + live CSS preview
+$router->get('/api/theme/css', [ThemeController::class, 'css']);
+$router->post('/api/theme', [ThemeController::class, 'save']);
+$router->post('/api/theme/bg', [ThemeController::class, 'uploadBg']);
+$router->post('/api/theme/bg/remove', [ThemeController::class, 'removeBg']);
+$router->post('/api/channel/bg', [ChannelController::class, 'setBackground']);
+$router->post('/api/channel/bg/remove', [ChannelController::class, 'removeBackground']);
+
 // Legal pages (public)
 $router->get('/terms', [LegalController::class, 'terms']);
 $router->get('/privacy', [LegalController::class, 'privacy']);
@@ -130,6 +138,7 @@ $router->get('/admin/logs', [AdminController::class, 'logs']);
 $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
 $router->get('/admin/logs/export', [AdminController::class, 'logDayExport']);
 $router->get('/admin/settings', [AdminController::class, 'settings']);
+$router->get('/admin/theme', [AdminController::class, 'theme']);
 $router->get('/admin/invites', [AdminController::class, 'invites']);
 $router->get('/admin/openclaw', [AdminController::class, 'openclaw']);
 $router->post('/admin/action', [AdminController::class, 'action']);

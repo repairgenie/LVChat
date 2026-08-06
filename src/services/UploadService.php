@@ -7,6 +7,7 @@ final class UploadService
     private const AVATAR_DIR = '/assets/avatars';
     private const UPLOAD_DIR = '/uploads';
     private const TICKET_DIR = '/uploads/tickets';
+    private const THEME_DIR = '/assets/themes';
     private const AVATAR_MAX_BYTES = 1048576;   // 1 MB
     private const IMAGE_MAX_BYTES = 5242880;    // 5 MB
     private const TICKET_MAX_BYTES = 26214400;  // 25 MB
@@ -26,6 +27,7 @@ final class UploadService
         $rel = match ($kind) {
             'avatar' => self::AVATAR_DIR,
             'ticket' => self::TICKET_DIR,
+            'theme' => self::THEME_DIR,
             default => self::UPLOAD_DIR,
         };
         $abs = ROOT . '/public' . $rel;
@@ -122,7 +124,12 @@ final class UploadService
             return ['ok' => false, 'error' => 'Could not store the uploaded image.'];
         }
         @chmod($target, 0644);
-        $rel = $kind === 'avatar' ? self::AVATAR_DIR : self::UPLOAD_DIR;
+        $rel = match ($kind) {
+            'avatar' => self::AVATAR_DIR,
+            'ticket' => self::TICKET_DIR,
+            'theme' => self::THEME_DIR,
+            default => self::UPLOAD_DIR,
+        };
         return ['ok' => true, 'url' => $rel . '/' . $name, 'ext' => $v['ext']];
     }
 

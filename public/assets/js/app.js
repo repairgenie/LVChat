@@ -1933,6 +1933,8 @@
     }
     if (el.dataset.owned === '1') {
       items.push({ div: true });
+      items.push({ label: 'Channel background', onClick: () => openChanBg(slug) });
+      items.push({ div: true });
       items.push({ label: 'Delete channel', danger: true, onClick: () => {
         if (!confirm('Delete ' + name + '? The channel will be closed, but its chat history is preserved for admins.')) return;
         post('/api/channel/delete', { channel: slug }, () => { window.location = '/app'; });
@@ -2118,6 +2120,54 @@
     });
   });
 
+  // ── Channel background (owner sets the chat background) ────────────────────
+  const chanBgModal = document.getElementById('chan-bg-modal');
+  const chanBgColor = document.getElementById('chan-bg-color');
+  const chanBgFile = document.getElementById('chan-bg-file');
+  const chanBgCurrent = document.getElementById('chan-bg-current');
+  const chanBgMsg = document.getElementById('chan-bg-msg');
+  function openChanBg(slug) {
+    if (!chanBgModal) return;
+    if (chanBgColor) chanBgColor.value = body.dataset.chanBgColor || '#2b2d31';
+    if (chanBgCurrent) {
+      const img = body.dataset.chanBgImage;
+      chanBgCurrent.classList.toggle('hidden', !img);
+      chanBgCurrent.innerHTML = img
+        ? '<img src="' + esc(img) + '" alt="Current background" class="h-12 w-24 object-cover rounded border border-discord-600">'
+        : '';
+    }
+    if (chanBgMsg) chanBgMsg.classList.add('hidden');
+    chanBgModal.classList.remove('hidden');
+  }
+  function closeChanBg() { if (chanBgModal) chanBgModal.classList.add('hidden'); }
+  if (chanBgModal) {
+    chanBgModal.querySelectorAll('[data-chan-bg-close]').forEach((el) => el.addEventListener('click', closeChanBg));
+    chanBgModal.addEventListener('click', (e) => { if (e.target === chanBgModal) closeChanBg(); });
+  }
+  const chanBgClear = document.getElementById('chan-bg-color-clear');
+  if (chanBgClear) chanBgClear.addEventListener('click', () => { if (chanBgColor) chanBgColor.value = '#000000'; });
+  const chanBgSave = document.getElementById('chan-bg-save');
+  if (chanBgSave) chanBgSave.addEventListener('click', () => {
+    const fd = new FormData();
+    fd.append('channel', CHANNEL);
+    fd.append('bg_color', chanBgColor ? chanBgColor.value : '');
+    if (chanBgFile && chanBgFile.files && chanBgFile.files[0]) fd.append('file', chanBgFile.files[0]);
+    fetch('/api/channel/bg', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
+      .then(r => r.json()).then((j) => {
+        if (j.error) { alert(j.error); return; }
+        if (chanBgMsg) { chanBgMsg.classList.remove('hidden'); setTimeout(() => chanBgMsg.classList.add('hidden'), 1500); }
+        window.location.reload();
+      });
+  });
+  const chanBgRemove = document.getElementById('chan-bg-remove');
+  if (chanBgRemove) chanBgRemove.addEventListener('click', () => {
+    if (!confirm('Remove this channel\'s background?')) return;
+    const fd = new FormData();
+    fd.append('channel', CHANNEL);
+    fetch('/api/channel/bg/remove', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
+      .then(r => r.json()).then((j) => { if (!j.error) window.location.reload(); });
+  });
+
   // ── Theme toggle (light/dark, sticky per browser + per account) ────────────
   const themeBtn = document.getElementById('theme-toggle');
   function setThemeIcon() {
@@ -2125,7 +2175,13 @@
     themeBtn.textContent = document.documentElement.classList.contains('light') ? '☀️' : '🌙';
     themeBtn.title = document.documentElement.classList.contains('light') ? 'Switch to dark mode' : 'Switch to light mode';
   }
-  if (themeBtn) themeBtn.addEventListener('click', () => {
+  // The admin kill-switch hides the theme controls for everyone — they are
+  // forced onto the server theme.
+  const themeCustom = body.dataset.themeCustom === '1';
+  if (!themeCustom) {
+    document.querySelectorAll('#theme-toggle, #header-theme-toggle').forEach((b) => { b.classList.add('hidden'); });
+  }
+  if (themeBtn && themeCustom) themeBtn.addEventListener('click', () => {
     const light = document.documentElement.classList.toggle('light');
     const theme = light ? 'light' : 'dark';
     try { localStorage.setItem('lvc.theme', theme); } catch (e) {}
@@ -2160,16 +2216,30 @@
     });
   }
 
-  // ── How to install modal (PWA) ─────────────────────────────────────────────
-  // Always offers the step-by-step guide; additionally, when the browser is
-  // installable (Chrome/Edge fire `beforeinstallprompt`) an "Install now" CTA
-  // appears at the top that triggers the native install flow.
+  // ── App install modal (PWA) ────────────────────────────────────────────────
+  // Three states for the install buttons (#install-btn desktop, #install-btn-m
+  // mobile header menu — each repeated per header variant):
+  //   · running inside the installed PWA  → buttons are hidden entirely
+  //   · installable browser (Chrome/Edge) → "How to install" opens the
+  //     step-by-step guide + an "Install now" CTA when `beforeinstallprompt` fires
+  //   · browser that can't install PWAs (desktop Firefox/Safari) → relabelled
+  //     "App install unsupported", opening a modal that lists supported browsers.
   const installModal = document.getElementById('install-modal');
+  const unsupportedModal = document.getElementById('install-unsupported-modal');
   const installNow = document.getElementById('install-now');
   let deferredInstall = null;
+  const isStandalone = () => navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const installBtns = () => document.querySelectorAll('#install-btn, #install-btn-m');
+  const hideInstallButtons = () => installBtns().forEach((el) => { el.style.display = 'none'; });
+  const labelInstallButtons = (unsupported) => installBtns().forEach((el) => {
+    el.textContent = unsupported ? '⚠ App install unsupported' : '⬇ How to install';
+  });
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredInstall = e;
+    labelInstallButtons(false);
     if (installNow) installNow.classList.remove('hidden');
   });
   if (installNow) installNow.addEventListener('click', () => {
@@ -2185,12 +2255,39 @@
     deferredInstall = null;
     if (installNow) installNow.classList.add('hidden');
     if (installModal) installModal.classList.add('hidden');
+    if (unsupportedModal) unsupportedModal.classList.add('hidden');
+    hideInstallButtons();
   });
-  const installBtn = document.getElementById('install-btn');
-  if (installBtn) installBtn.addEventListener('click', () => { if (installModal) installModal.classList.remove('hidden'); });
+
+  installBtns().forEach((el) => el.addEventListener('click', () => {
+    if (isStandalone()) return;
+    // No beforeinstallprompt (and not iOS, where "Add to Home Screen" works):
+    // the browser can't install the app, so explain which ones can.
+    if (deferredInstall === null && !isIOS()) {
+      labelInstallButtons(true);
+      if (unsupportedModal) unsupportedModal.classList.remove('hidden');
+      return;
+    }
+    if (installModal) installModal.classList.remove('hidden');
+  }));
+
+  if (unsupportedModal) {
+    unsupportedModal.querySelectorAll('[data-install-unsupported-close]').forEach((el) => el.addEventListener('click', () => unsupportedModal.classList.add('hidden')));
+    unsupportedModal.addEventListener('click', (e) => { if (e.target === unsupportedModal) unsupportedModal.classList.add('hidden'); });
+  }
   if (installModal) {
     installModal.querySelectorAll('[data-install-close]').forEach((el) => el.addEventListener('click', () => installModal.classList.add('hidden')));
     installModal.addEventListener('click', (e) => { if (e.target === installModal) installModal.classList.add('hidden'); });
+  }
+
+  if (isStandalone()) {
+    hideInstallButtons();
+  } else if (!isIOS()) {
+    // No `beforeinstallprompt` by now usually means the browser can't install
+    // the app. Rather than leave a dead "How to install" link, relabel it.
+    window.setTimeout(() => {
+      if (deferredInstall === null && !isStandalone()) labelInstallButtons(true);
+    }, 5000);
   }
 
   // ── Header overflow dropdown (mobile) ───────────────────────────────────────
@@ -2226,7 +2323,7 @@
 
   // Header theme toggle (mobile dropdown).
   const hdrTheme = document.getElementById('header-theme-toggle');
-  if (hdrTheme) hdrTheme.addEventListener('click', () => {
+  if (hdrTheme && themeCustom) hdrTheme.addEventListener('click', () => {
     const light = document.documentElement.classList.toggle('light');
     const theme = light ? 'light' : 'dark';
     try { localStorage.setItem('lvc.theme', theme); } catch (e) {}

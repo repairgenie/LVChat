@@ -896,6 +896,88 @@ $t = csrf(req('GET', '/login', [], $cjG4)[2]);
 [$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'wanderer', 'next' => '/app', 'age18' => '1'], $cjG4);
 check('guest nick free after logout (re-login ok)', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
 
+// ── Themes (server appearance + per-user customization + channel bg) ────────
+echo "== themes ==\n";
+[$s, , $b] = req('GET', '/admin/theme', [], $cjA);
+check('GET /admin/theme 200', $s === 200, (string) $s);
+check('theme page has preset gallery + kill-switch', str_contains($b, 'preset-card') && str_contains($b, 'Allow users to customize'), 'len=' . strlen($b));
+
+$tA = csrf($b);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'theme_save', 'preset' => 'nord', 'mode' => 'light', 'font' => 'serif', 'chat_bg_color' => '#123456', 'chat_bg_fit' => 'cover', 'chat_bg_image' => '', 'theme_user_customization' => '1', 'back' => '/admin/theme'], $cjA);
+check('theme_save redirects', $s === 302, (string) $s);
+$pdo = new PDO('sqlite:' . $DB);
+$themeRow = json_decode((string) $pdo->query("SELECT value FROM server_config WHERE key = 'theme'")->fetchColumn(), true);
+check('global theme persisted', ($themeRow['preset'] ?? '') === 'nord' && ($themeRow['mode'] ?? '') === 'light' && ($themeRow['overrides']['font'] ?? '') === 'serif' && ($themeRow['overrides']['chat_bg_color'] ?? '') === '#123456', json_encode($themeRow));
+check('customization flag on', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'theme_user_customization'")->fetchColumn() === '1');
+
+// Live CSS preview endpoint.
+[$s, , $b] = req('GET', '/api/theme/css?preset=nord&mode=dark&font=mono&accent=ff0000');
+check('css preview 200 + theme vars', $s === 200 && str_contains($b, '--c-blurple:255 0 0') && str_contains($b, '--font-sans:') && str_contains($b, 'html.light'), $b);
+
+// Regular user saves a personal theme that overrides the server theme.
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $j] = req('POST', '/api/theme', ['csrf' => $tB, 'preset' => 'dracula', 'mode' => 'dark', 'font' => 'mono', 'chat_bg_fit' => 'cover', 'chat_bg_image' => ''], $cjB);
+check('user theme save ok', $s === 200 && !empty(jsonDecode($j)['ok']), "$s $j");
+$bobId = (int) $pdo->query("SELECT id FROM users WHERE username = 'bob'")->fetchColumn();
+$bobTheme = json_decode((string) $pdo->query('SELECT theme_json FROM users WHERE id = ' . $bobId)->fetchColumn(), true);
+check('user theme persisted', ($bobTheme['preset'] ?? '') === 'dracula' && ($bobTheme['overrides']['font'] ?? '') === 'mono', json_encode($bobTheme));
+[$s, , $b] = req('GET', '/app?channel=general', [], $cjB);
+check('chat renders personal theme CSS', str_contains($b, '--c-d-800:40 42 54') && str_contains($b, 'id="theme-css"'), 'len=' . strlen($b));
+
+// Personal chat-background upload + remove.
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, $body] = uploadReq('/api/theme/bg', $cjB, ['csrf' => $tB], ['tmp' => '/tmp/opencode/dmtest.png', 'type' => 'image/png', 'name' => 'bg.png']);
+$j = jsonDecode($body);
+check('theme bg upload ok', $s === 200 && !empty($j['url'] ?? ''), "$s $body");
+$bobTheme = json_decode((string) $pdo->query('SELECT theme_json FROM users WHERE id = ' . $bobId)->fetchColumn(), true);
+check('bg image stored in user theme', str_contains($bobTheme['overrides']['chat_bg_image'] ?? '', '/assets/themes/'), json_encode($bobTheme));
+[$s] = req('POST', '/api/theme/bg/remove', ['csrf' => $tB], $cjB);
+check('bg remove ok', $s === 200, (string) $s);
+$bobTheme = json_decode((string) $pdo->query('SELECT theme_json FROM users WHERE id = ' . $bobId)->fetchColumn(), true);
+check('bg image cleared from user theme', ($bobTheme['overrides']['chat_bg_image'] ?? '') === '', json_encode($bobTheme));
+
+// Kill-switch: disabled customization blocks user saves and hides controls.
+$tA = csrf(req('GET', '/admin/theme', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'theme_save', 'preset' => 'midnight', 'mode' => 'dark', 'theme_user_customization' => '0', 'back' => '/admin/theme'], $cjA);
+check('kill-switch save redirects', $s === 302, (string) $s);
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $j] = req('POST', '/api/theme', ['csrf' => $tB, 'preset' => 'forest'], $cjB);
+check('user theme blocked when disabled', $s === 403, "$s $j");
+[$s, , $b] = req('GET', '/app?channel=general', [], $cjB);
+check('kill-switch exposed to client', str_contains($b, 'data-theme-custom="0"'), 'len=' . strlen($b));
+$tA = csrf(req('GET', '/admin/theme', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'theme_save', 'preset' => 'midnight', 'mode' => 'dark', 'theme_user_customization' => '1', 'back' => '/admin/theme'], $cjA);
+check('customization re-enabled', $s === 302 && (string) $pdo->query("SELECT value FROM server_config WHERE key = 'theme_user_customization'")->fetchColumn() === '1');
+
+// Channel background (owner only).
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $j] = req('POST', '/api/channels', ['csrf' => $tB, 'name' => '#bgtown'], $cjB);
+check('bob creates bg channel', $s === 200, "$s $j");
+$chanId = (int) $pdo->query("SELECT id FROM channels WHERE name = '#bgtown'")->fetchColumn();
+check('bg channel exists', $chanId > 0, (string) $chanId);
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef'], $cjB);
+check('owner sets channel bg colour', $s === 200, "$s $j");
+check('channel bg colour persisted', (string) $pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() === '#abcdef');
+[$s, $body] = uploadReq('/api/channel/bg', $cjB, ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => ''], ['tmp' => '/tmp/opencode/dmtest.png', 'type' => 'image/png', 'name' => 'cbg.png']);
+$j = jsonDecode($body);
+check('owner uploads channel bg image', $s === 200 && str_contains($j['bg_image'] ?? '', '/assets/themes/'), "$s $body");
+check('channel bg image persisted', str_contains((string) $pdo->query("SELECT bg_image FROM channels WHERE id = $chanId")->fetchColumn(), '/assets/themes/'));
+$tA = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tA, 'channel' => 'bgtown', 'bg_color' => '#000000'], $cjA);
+check('admin can set any channel bg', $s === 200, "$s $j");
+// A non-owner, non-admin user is blocked.
+$cjBG = '/tmp/opencode/httptest-bg.txt';
+$t = csrf(req('GET', '/register', [], $cjBG)[2]);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'bguser', 'email' => 'bguser@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/app?channel=general'], $cjBG);
+check('bguser registers', $s === 302, "$s " . ($h['location'] ?? ''));
+$tBG = csrf(req('GET', '/app', [], $cjBG)[2]);
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tBG, 'channel' => 'bgtown', 'bg_color' => '#000000'], $cjBG);
+check('non-owner cannot set channel bg', $s === 403, "$s $j");
+[$s, , $j] = req('POST', '/api/channel/bg/remove', ['csrf' => $tB, 'channel' => 'bgtown'], $cjB);
+check('owner removes channel bg', $s === 200, "$s $j");
+check('channel bg cleared', ($pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '' && ($pdo->query("SELECT bg_image FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '');
+
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);
 check('logout redirects', $s === 302 && ($h['location'] ?? '') === '/login', "$s " . ($h['location'] ?? ''));

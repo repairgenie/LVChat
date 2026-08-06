@@ -321,7 +321,35 @@ edit).
   rejoin with `/back`. While away, you appear offline to "online" lists and get the
   💤 symbol in member lists and profile.
 
-### 7.1 Notification sounds
+### 7.1 Your theme
+
+Your **Profile & settings** page has a **My theme** card where you can make the
+chat look the way you like — your choice overrides the server-wide theme that
+the admin configured:
+
+- **Mode** — Dark or Light (each theme ships both palettes; toggling applies
+  instantly).
+- **Preset** — pick from the library of **75 colour schemes** (Midnight, Nord,
+  Dracula, Solarized, One Dark, Gruvbox, Catppuccin, Tokyo Night, Cyberpunk,
+  Forest, Ocean, Sunset, Rose, Monochrome, …). Each previews instantly.
+- **Accent / Sidebar colours** — fine-tune the preset with a colour picker, or
+  "use preset" to fall back to the preset's values.
+- **Font** — Default, Sans, Serif, Mono, or Rounded (system fonts only).
+- **Chat background** — a colour and/or an image behind the message list
+  (upload your own **PNG/JPG/WebP/GIF** up to 5 MB, or pick Cover/Contain/Repeat).
+- **Save theme** applies your choices; **Reset to server default** drops them
+  and puts you back on the admin's theme. The quick 🌙/☀️ toggle in the chat
+  header flips just the dark/light mode and is remembered per account.
+
+If the admin has disabled personal themes, the card shows a notice and the theme
+controls are hidden — everyone uses the server theme.
+
+**Channel backgrounds** — if you own a channel, right-click it in the sidebar
+and choose **Channel background** to give it its own image/colour. Everyone
+viewing the channel sees it (channel owners can also set the background on
+channels they own). Admins can set any channel's background too.
+
+### 7.2 Notification sounds
 
 Audio alerts play in your browser when a message lands while you're looking
 elsewhere. Open your **Profile & settings** page (from the `⚙` menu) and scroll
@@ -342,11 +370,11 @@ to **Notification sounds**:
 Guests get the default sounds automatically but can't change them. Any sound the
 admin uploads is available to everyone — you can't upload your own.
 
-### 7.2 Hide your online status
+### 7.3 Hide your online status
 
 `/set hide on` hides you from the online list; `/set hide off` unhides.
 
-### 7.3 Your public profile
+### 7.4 Your public profile
 
 Every user has a profile at `/u/<username>` (click any nick, or right-click →
 **View profile**). It shows your avatar initial, status (Guest / Helper /
@@ -355,7 +383,7 @@ the channels you're in. For other registered users, the profile also shows
 friend actions (Add Friend / Accept / Decline / Remove / Block / Unblock).
 A ✕ button in the corner returns you to the chat.
 
-### 7.4 Support & legal
+### 7.5 Support & legal
 
 - **Support tickets:** from the `⚙` account menu choose **Support** to open
   tickets. Registered users can create a ticket (subject + description), reply

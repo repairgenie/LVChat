@@ -1,5 +1,12 @@
+<?php
+// The effective mode (account/global) is emitted as data-theme so the inline
+// head script applies it before paint; visitors without a saved preference fall
+// back to their browser/OS preference.
+$layoutTheme = ThemeService::effectiveForView($user ?? null);
+$layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
+?>
 <!DOCTYPE html>
-<html lang="en" class="dark" data-theme="<?= isset($user) && $user ? h((string) ($user['theme'] ?? '')) : '' ?>">
+<html lang="en" class="dark" data-theme="<?= $layoutThemeMode ?>">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -14,6 +21,7 @@
   })();
   </script>
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
+  <?php require ROOT . '/views/partials/theme.php'; ?>
   <?php require ROOT . '/views/partials/pwa.php'; ?>
 </head>
 <body class="bg-discord-900 text-discord-200 antialiased min-h-screen flex flex-col" data-csrf="<?= h(Csrf::token()) ?>">

@@ -34,6 +34,10 @@ final class UserController
             'soundOverrides' => $soundOverrides,
             'allUsers' => $allUsers,
             'friendStatus' => $friendStatus,
+            'themePresets' => ThemeService::presets(),
+            'themeCustomizationEnabled' => ThemeService::customizationEnabled(),
+            'userThemeJson' => ThemeService::userTheme($user),
+            'effectiveTheme' => ThemeService::effectiveForView($user),
         ]);
     }
 
@@ -83,7 +87,21 @@ final class UserController
             $fields['away_at'] = $_POST['away'] !== '' ? now() : null;
         }
         if (isset($_POST['theme'])) {
-            $fields['theme'] = $_POST['theme'] === 'light' ? 'light' : 'dark';
+            $mode = $_POST['theme'] === 'light' ? 'light' : 'dark';
+            $fields['theme'] = $mode;
+            // Mirror the quick-toggle mode into the personal theme JSON so the
+            // header toggle and the profile theme editor stay in sync.
+            $tj = Database::scalar('SELECT theme_json FROM users WHERE id = ?', [$user['id']]);
+            if ($tj) {
+                $t = json_decode((string) $tj, true);
+                if (is_array($t)) {
+                    $t['mode'] = $mode;
+                    Database::query(
+                        'UPDATE users SET theme_json = ? WHERE id = ?',
+                        [json_encode(ThemeService::normalize($t)), (int) $user['id']]
+                    );
+                }
+            }
         }
         if (!$fields) {
             json_out(['ok' => true]);

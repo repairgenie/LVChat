@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
   banned INTEGER NOT NULL DEFAULT 0,
   ban_reason TEXT,
   theme TEXT NOT NULL DEFAULT '',
+  theme_json TEXT,
   registered_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen TEXT,
   last_ip TEXT,
@@ -71,6 +72,8 @@ CREATE TABLE IF NOT EXISTS channels (
   forbidden INTEGER NOT NULL DEFAULT 0,
   censor INTEGER NOT NULL DEFAULT 0,
   no_logging INTEGER NOT NULL DEFAULT 0,
+  bg_image TEXT,
+  bg_color TEXT,
   successor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registered_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

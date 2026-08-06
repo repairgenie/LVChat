@@ -1187,5 +1187,48 @@ check('kitchen-sink keeps safe color, strips position', str_contains($ks, 'color
 LegalService::save('terms', '<h1>Custom terms</h1><p>Body</p>');
 check('legal save/get round-trip', str_contains(LegalService::get('terms'), 'Custom terms'));
 
+// ── Themes (presets + per-user/server precedence) ────────────────────────────
+echo "== themes ==\n";
+$presets = ThemeService::presets();
+check('preset library has 75 combos', count($presets) === 75, (string) count($presets));
+$ids = array_column($presets, 'id');
+check('preset ids unique', count($ids) === count(array_unique($ids)));
+check('default preset is midnight', ThemeService::presetId('') === 'midnight' && ThemeService::presetId('nord') === 'nord');
+check('unknown preset falls back', ThemeService::presetId('bogus') === 'midnight');
+foreach (['midnight', 'nord', 'dracula', 'cyberpunk', 'mono'] as $pid) {
+    $css = ThemeService::cssFor(['preset' => $pid, 'mode' => 'dark']);
+    $ok = str_contains($css, '--c-blurple:') && str_contains($css, '--c-d-950:')
+        && str_contains($css, '--c-sidebar:') && str_contains($css, 'html.light')
+        && str_contains($css, '--font-sans:');
+    check("preset $pid emits full palette", $ok);
+}
+check('cssFor validates hex/urls', ThemeService::hex('ff0000') === '#ff0000' && ThemeService::hex('zzz') === '' && ThemeService::hex('#abc') === '#aabbcc');
+check('localPath rejects traversal', ThemeService::localPath('/ok/x.png') === '/ok/x.png' && ThemeService::localPath('https://x/y.png') === '' && ThemeService::localPath('/../etc') === '');
+check('invalid overrides dropped', empty(ThemeService::normalize(['preset' => 'nord', 'overrides' => ['accent' => 'notacolor', 'font' => 'bogus', 'sidebar' => '#112233']])['overrides']['accent']));
+
+config_set('theme', json_encode(['preset' => 'dracula', 'mode' => 'light']));
+$noUser = ThemeService::resolve(null);
+check('no user -> server theme', $noUser['preset'] === 'dracula' && $noUser['mode'] === 'light');
+$plain = ThemeService::resolve(['id' => 9001, 'theme' => '', 'theme_json' => null]);
+check('registered w/o theme -> server theme', $plain['preset'] === 'dracula' && $plain['mode'] === 'light');
+$legacy = ThemeService::resolve(['id' => 9002, 'theme' => 'dark', 'theme_json' => null]);
+check('legacy theme column sets mode', $legacy['mode'] === 'dark' && $legacy['preset'] === 'dracula');
+$personal = ThemeService::resolve(['id' => 9003, 'theme' => 'dark', 'theme_json' => json_encode(['preset' => 'nord', 'overrides' => ['font' => 'mono']])]);
+check('personal theme wins', $personal['preset'] === 'nord' && $personal['overrides']['font'] === 'mono' && $personal['mode'] === 'dark');
+$personalLight = ThemeService::resolve(['id' => 9004, 'theme' => 'dark', 'theme_json' => json_encode(['preset' => 'nord', 'mode' => 'light', 'overrides' => []])]);
+check('personal mode wins over toggle', $personalLight['mode'] === 'light');
+config_set('theme_user_customization', '0');
+$disabled = ThemeService::resolve(['id' => 9005, 'theme' => 'light', 'theme_json' => json_encode(['preset' => 'forest', 'overrides' => ['font' => 'serif']])]);
+check('kill-switch forces server theme', $disabled['preset'] === 'dracula' && $disabled['mode'] === 'light');
+config_set('theme_user_customization', '1');
+check('customization re-enabled', ThemeService::customizationEnabled() === true);
+
+$bg = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'mode' => 'dark', 'overrides' => ['chat_bg_color' => '#123456', 'chat_bg_image' => '/assets/themes/x.webp', 'chat_bg_fit' => 'cover']]));
+check('chat bg css has color + image + overlay', str_contains($bg, '#123456') && str_contains($bg, 'theme-bg-image') && str_contains($bg, 'url(\'/assets/themes/x.webp\')'));
+$chan = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight']), ['bg_color' => '#abcdef', 'bg_image' => '/assets/themes/c.webp']);
+check('channel bg overrides theme bg', str_contains($chan, '#abcdef') && str_contains($chan, 'c.webp') && !str_contains($chan, '123456'));
+check('no bg -> no image rules', ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight'])) === '#messages{}');
+check('manifest colors derive from server theme', str_starts_with(ThemeService::manifestColors()['theme_color'], '#'));
+
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

@@ -6,6 +6,8 @@ module.exports = {
       colors: {
         blurple: 'rgb(var(--c-blurple) / <alpha-value>)',
         'blurple-dark': 'rgb(var(--c-blurple-dark) / <alpha-value>)',
+        sidebar: 'rgb(var(--c-sidebar) / <alpha-value>)',
+        'sidebar-hover': 'rgb(var(--c-sidebar-hover) / <alpha-value>)',
         discord: {
           100: 'rgb(var(--c-d-100) / <alpha-value>)',
           200: 'rgb(var(--c-d-200) / <alpha-value>)',
@@ -22,7 +24,7 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ['"gg sans"', '"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
+        sans: ['var(--font-sans)'],
       },
     },
   },

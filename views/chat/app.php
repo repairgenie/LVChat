@@ -3,7 +3,7 @@ $site = config_get('site_name', 'LVChat');
 $csrf = Csrf::token();
 $channelSlug = $channel['slug'] ?? '';
 $dmName = $dm['username'] ?? '';
-$theme = (string) ($user['theme'] ?? '') === 'light' ? 'light' : '';
+$theme = ThemeService::effectiveForView($user)['mode'] === 'light' ? 'light' : '';
 $currentLevel = $channel ? AccessService::effectiveLevel($channel['id'], (int) $user['id']) : 'normal';
 $myLevelWeight = level_weight($currentLevel);
 $lastMsg = null;
@@ -207,6 +207,7 @@ function member_html(array $m, bool $online): string {
   })();
   </script>
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
+  <?php require ROOT . '/views/partials/theme.php'; ?>
   <?php require ROOT . '/views/partials/pwa.php'; ?>
 </head>
 <body class="chat-app bg-discord-800 text-discord-200 antialiased flex"
@@ -219,6 +220,9 @@ function member_html(array $m, bool $online): string {
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
       data-my-nick="<?= h($user['username']) ?>"
       data-site-name="<?= h($site) ?>"
+      data-theme-custom="<?= ThemeService::customizationEnabled() ? '1' : '0' ?>"
+      data-chan-bg-color="<?= h($channel['bg_color'] ?? '') ?>"
+      data-chan-bg-image="<?= h($channel['bg_image'] ?? '') ?>"
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-rt="<?= config_get('realtime', 'poll') === 'sse' ? 'sse' : (config_get('realtime', 'poll') === 'ws' ? 'ws' : 'poll') ?>"
@@ -233,7 +237,7 @@ function member_html(array $m, bool $online): string {
       data-bg-last="<?= (int) $bgLast ?>">
 
   <!-- ── Left: channel sidebar ── -->
-  <aside id="sidebar" class="sidebar w-60 md:w-64 bg-discord-800 flex flex-col shrink-0">
+  <aside id="sidebar" class="sidebar w-60 md:w-64 bg-sidebar flex flex-col shrink-0">
     <div class="h-12 px-4 flex items-center justify-between border-b border-discord-700 shadow-sm shrink-0">
       <?php if ($logo = site_logo()): ?>
       <img src="<?= h($logo) ?>" alt="<?= h($site) ?>" class="max-h-8 max-w-[160px] w-auto object-contain">
@@ -326,7 +330,7 @@ function member_html(array $m, bool $online): string {
       </nav>
     </div>
 
-    <div class="border-t border-discord-700 bg-discord-800 p-2 shrink-0">
+    <div class="border-t border-discord-700 bg-sidebar p-2 shrink-0">
       <a href="https://georgethegeek.com" target="_blank" rel="noopener" class="block text-center text-[10px] text-discord-500 hover:text-discord-300 py-1 transition-colors">Made with ❤️ in Las Vegas</a>
       <div class="flex items-center gap-2 rounded-md hover:bg-discord-600/40 px-2 py-1.5">
         <div class="w-8 h-8 rounded-full bg-blurple flex items-center justify-center text-sm font-bold text-white"><?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?></div>
@@ -444,7 +448,7 @@ function member_html(array $m, bool $online): string {
     </div>
     <?php endif; ?>
 
-    <div id="messages" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
+    <div id="messages" class="theme-bg-image flex-1 min-h-0 overflow-y-auto scrollbar-thin"
          data-last-msg="<?= h(json_encode($lastMsg ?? null)) ?>">
       <button id="load-earlier" class="hidden w-full py-2 text-xs text-blurple hover:text-white hover:bg-blurple/10 transition-colors">↑ Load earlier messages</button>
       <?php if ($motd): ?>
@@ -520,7 +524,7 @@ function member_html(array $m, bool $online): string {
   <div id="right-panel-backdrop" class="hidden fixed inset-0 z-[55] bg-black/60 md:hidden"></div>
 
   <!-- ── Right: friends + member list ── -->
-  <aside id="right-panel" class="right-panel hidden md:flex w-60 bg-discord-800 flex-col shrink-0 min-h-0">
+  <aside id="right-panel" class="right-panel hidden md:flex w-60 bg-sidebar flex-col shrink-0 min-h-0">
     <?php if ((int) ($user['guest'] ?? 0) !== 1): ?>
     <?php
     $onlineFriends = array_values(array_filter($friends, fn($f) => !empty($f['is_online'])));
@@ -827,6 +831,34 @@ function member_html(array $m, bool $online): string {
     </div>
   </div>
 
+  <!-- Channel background modal (channel owner sets the chat background) -->
+  <div id="chan-bg-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-chan-bg-close></div>
+    <div class="relative card p-6 w-[min(92vw,440px)] shadow-2xl">
+      <button type="button" data-chan-bg-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
+      <h2 class="text-lg font-bold text-white">Channel background</h2>
+      <p class="text-xs text-discord-400 mt-1 mb-4">Everyone viewing this channel sees this behind the message list.</p>
+      <div class="space-y-4">
+        <div>
+          <label class="label">Background colour <button type="button" id="chan-bg-color-clear" class="text-[10px] text-blurple hover:underline ml-1">none</button></label>
+          <input type="color" id="chan-bg-color" value="#2b2d31" class="w-10 h-9 rounded cursor-pointer bg-discord-750 border border-discord-600">
+        </div>
+        <div>
+          <label class="label">Background image</label>
+          <label class="btn-ghost !py-1.5 text-xs cursor-pointer">Upload image<input type="file" id="chan-bg-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden"></label>
+          <div id="chan-bg-current" class="hidden mt-2"></div>
+          <p class="text-xs text-discord-400 mt-1">PNG/JPG/WebP/GIF up to 5&nbsp;MB. Best as a wide, muted image.</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="chan-bg-save" class="btn-primary flex-1 justify-center">Save background</button>
+          <button id="chan-bg-remove" class="btn-ghost text-red-400">Remove</button>
+          <button data-chan-bg-close class="btn-ghost">Close</button>
+        </div>
+        <div id="chan-bg-msg" class="text-sm text-green-400 hidden">Saved.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Image lightbox -->
   <div id="lightbox" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/85">
     <button data-lightbox-close class="absolute top-3 right-3 text-white text-2xl leading-none p-2">✕</button>
@@ -899,6 +931,29 @@ function member_html(array $m, bool $online): string {
 
         <div class="rounded-lg bg-discord-850 border border-discord-700 px-3 py-2.5 text-xs text-discord-400">
           <strong class="text-discord-200">Works offline:</strong> the app opens instantly and keeps the messages you've already viewed available without a connection. Anything you send while offline is queued and delivered automatically when you reconnect.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App install unsupported modal (shown when the browser can't install PWAs) -->
+  <div id="install-unsupported-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-install-unsupported-close></div>
+    <div class="relative card shadow-2xl w-[min(92vw,480px)] flex flex-col max-h-[80vh]">
+      <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
+        <h2 class="text-lg font-bold text-white">App install isn't supported here</h2>
+        <button type="button" data-install-unsupported-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+      </div>
+      <div class="px-6 py-4 overflow-y-auto scrollbar-thin space-y-4 text-sm">
+        <p class="text-discord-200">Your current browser doesn't support installing this chat as an app. To get the standalone app experience, use one of these instead:</p>
+        <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
+          <li><strong class="text-white">Chrome or Edge</strong> (Windows · Mac · Linux) — click the <span class="text-discord-400">⭣ install</span> icon in the address bar, or the <span class="text-discord-400">⋮</span> menu → <em>Install <?= h($site) ?></em>.</li>
+          <li><strong class="text-white">Chrome</strong> (Android) — <span class="text-discord-400">⋮</span> menu → <em>Install app</em>.</li>
+          <li><strong class="text-white">Safari</strong> (iPhone · iPad) — <em>Share</em> → <em>Add to Home Screen</em>.</li>
+          <li><strong class="text-white">Firefox</strong> (desktop) — install support is limited, so Chrome or Edge is recommended.</li>
+        </ul>
+        <div class="rounded-lg bg-discord-850 border border-discord-700 px-3 py-2.5 text-xs text-discord-400">
+          The chat works fine right here in your browser either way — installing just gives you its own window and offline support.
         </div>
       </div>
     </div>

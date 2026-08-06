@@ -35,7 +35,7 @@
     <?php if ($user['bot']): ?><div class="mt-2 text-sm text-blurple">Bot</div><?php endif; ?>
     <div class="mt-4 text-xs text-discord-400">Registered <?= date('M j, Y', strtotime($user['registered_at'] . ' UTC')) ?></div>
 
-    <?php if ($isSelf): ?>
+    <?php if ($isSelf && $themeCustomizationEnabled): ?>
     <button id="profile-theme-toggle" class="btn-ghost w-full justify-center mt-4 text-sm">🌙 Dark mode</button>
     <?php endif; ?>
 
@@ -91,6 +91,106 @@
         return $html . '</select>';
     };
     ?>
+
+    <?php
+    // ── My theme ───────────────────────────────────────────────────────────
+    $ut = $userThemeJson;
+    $uo = $ut['overrides'];
+    $umode = $ut['mode'] !== '' ? $ut['mode'] : ($effectiveTheme['mode'] === 'light' ? 'light' : 'dark');
+    $ufont = $uo['font'] ?? 'default';
+    $ufit = $uo['chat_bg_fit'] ?? 'cover';
+    $ubgColor = $uo['chat_bg_color'] ?? '';
+    $ubgImage = $uo['chat_bg_image'] ?? '';
+    ?>
+    <div class="card p-6">
+      <h2 class="font-semibold text-white mb-1">My theme</h2>
+      <?php if (!$themeCustomizationEnabled): ?>
+      <p class="text-xs text-discord-400">Theme customization has been disabled by the administrator. You're using the server theme.</p>
+      <?php else: ?>
+      <p class="text-xs text-discord-400 mb-4">Pick a preset and fine-tune it to override the server theme. Changes preview instantly on this page.</p>
+
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <div class="flex items-center gap-2 text-sm">
+          <span class="text-xs font-semibold uppercase tracking-wide text-discord-400">Mode</span>
+          <button type="button" data-mode="dark" class="p-mode-btn px-3 py-1 rounded-md text-sm font-medium border <?= $umode === 'dark' ? 'bg-blurple/20 border-blurple/50 text-white' : 'border-discord-600 text-discord-300 hover:bg-discord-700' ?>">Dark</button>
+          <button type="button" data-mode="light" class="p-mode-btn px-3 py-1 rounded-md text-sm font-medium border <?= $umode === 'light' ? 'bg-blurple/20 border-blurple/50 text-white' : 'border-discord-600 text-discord-300 hover:bg-discord-700' ?>">Light</button>
+        </div>
+        <div class="flex items-center gap-2 text-sm ml-auto">
+          <span class="text-xs font-semibold uppercase tracking-wide text-discord-400">Font</span>
+          <select id="p-theme-font" class="input !w-40 !py-1.5">
+            <?php foreach (array_keys(ThemeService::FONTS) as $f): ?>
+            <option value="<?= h($f) ?>" <?= $ufont === $f ? 'selected' : '' ?>><?= h(ucfirst($f)) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto scrollbar-thin pr-1 mb-4" id="p-preset-grid">
+        <?php foreach ($themePresets as $p): ?>
+        <button type="button" data-preset="<?= h($p['id']) ?>"
+                class="p-preset-card text-left rounded-lg border p-2 transition-colors <?= $ut['preset'] === $p['id'] ? 'border-blurple/70 bg-blurple/10' : 'border-discord-600 hover:border-discord-400 hover:bg-discord-700' ?>">
+          <div class="flex gap-1 mb-1">
+            <span class="w-3.5 h-3.5 rounded-full border border-black/30" style="background:<?= h($p['swatch']['accent']) ?>" title="Accent"></span>
+            <span class="w-3.5 h-3.5 rounded-full border border-black/30" style="background:<?= h($p['swatch']['sidebar']) ?>" title="Sidebar"></span>
+            <span class="w-3.5 h-3.5 rounded-md border border-black/30" style="background:<?= h($p['swatch']['surface']) ?>" title="Surface"></span>
+          </div>
+          <div class="text-[11px] text-discord-200 truncate"><?= h($p['name']) ?></div>
+        </button>
+        <?php endforeach; ?>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+        <div>
+          <label class="label">Accent colour <button type="button" data-clear="accent" class="text-[10px] text-blurple hover:underline ml-1 clear-btn">use preset</button></label>
+          <div class="flex items-center gap-2">
+            <input type="color" id="p-theme-accent" value="<?= h($uo['accent'] ?? ($themePresets[0]['accent'] ?? '#5865f2')) ?>" class="w-10 h-9 rounded cursor-pointer bg-discord-750 border border-discord-600">
+            <span class="text-xs text-discord-400 font-mono" id="p-accent-label"><?= !empty($uo['accent']) ? h(strtoupper(ltrim($uo['accent'], '#'))) : 'preset' ?></span>
+          </div>
+        </div>
+        <div>
+          <label class="label">Sidebar colour <button type="button" data-clear="sidebar" class="text-[10px] text-blurple hover:underline ml-1 clear-btn">use preset</button></label>
+          <div class="flex items-center gap-2">
+            <input type="color" id="p-theme-sidebar" value="<?= h($uo['sidebar'] ?? ($themePresets[0]['sidebar'] ?? '#2b2d31')) ?>" class="w-10 h-9 rounded cursor-pointer bg-discord-750 border border-discord-600">
+            <span class="text-xs text-discord-400 font-mono" id="p-sidebar-label"><?= !empty($uo['sidebar']) ? h(strtoupper(ltrim($uo['sidebar'], '#'))) : 'preset' ?></span>
+          </div>
+        </div>
+        <div>
+          <label class="label">Chat background colour <button type="button" data-clear="chat_bg_color" class="text-[10px] text-blurple hover:underline ml-1 clear-btn">none</button></label>
+          <div class="flex items-center gap-2">
+            <input type="color" id="p-theme-bg-color" value="<?= h($ubgColor !== '' ? $ubgColor : '#313338') ?>" class="w-10 h-9 rounded cursor-pointer bg-discord-750 border border-discord-600">
+            <span class="text-xs text-discord-400 font-mono" id="p-bg-color-label"><?= $ubgColor !== '' ? h(strtoupper(ltrim($ubgColor, '#'))) : 'none' ?></span>
+          </div>
+        </div>
+        <div>
+          <label class="label">Chat background image</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="btn-ghost !py-1.5 text-xs cursor-pointer">Upload<input type="file" id="p-theme-bg-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden"></label>
+            <?php if ($ubgImage !== ''): ?>
+            <button type="button" id="p-theme-bg-remove" class="btn-ghost !py-1.5 text-xs text-red-400">Remove</button>
+            <?php endif; ?>
+          </div>
+          <?php if ($ubgImage !== ''): ?>
+          <img src="<?= h(url($ubgImage)) ?>" alt="Your chat background" class="mt-2 h-12 w-24 object-cover rounded border border-discord-600">
+          <?php endif; ?>
+        </div>
+        <div>
+          <label class="label">Image fit</label>
+          <select id="p-theme-bg-fit" class="input !py-1.5">
+            <?php foreach (ThemeService::CHAT_BG_FITS as $f): ?>
+            <option value="<?= h($f) ?>" <?= $ufit === $f ? 'selected' : '' ?>><?= h(ucfirst($f)) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button class="btn-primary" id="p-theme-save">Save theme</button>
+        <button class="btn-ghost" id="p-theme-reset">Reset to server default</button>
+        <span id="p-theme-msg" class="text-sm text-green-400 hidden">Saved.</span>
+      </div>
+      <?php endif; ?>
+    </div>
+
     <div class="card p-6">
       <h2 class="font-semibold text-white mb-1">Notification sounds</h2>
       <p class="text-xs text-discord-400 mb-4">Sounds play when a DM arrives or a message lands in a channel you're not viewing. Pick an alert per context, or mute each entirely.</p>
@@ -384,6 +484,136 @@
     if (blockBtn) blockBtn.addEventListener('click', () => { if (confirm('Block this user?')) friendPost('/api/friend/block'); });
     const unblockBtn = document.getElementById('friend-unblock');
     if (unblockBtn) unblockBtn.addEventListener('click', () => friendPost('/api/friend/unblock'));
+  }
+
+  // ── My theme editor ───────────────────────────────────────────────────────
+  <?php
+  $pUt = $userThemeJson;
+  $pUo = $pUt['overrides'];
+  $pUmode = $pUt['mode'] !== '' ? $pUt['mode'] : ($effectiveTheme['mode'] === 'light' ? 'light' : 'dark');
+  $pUfont = $pUo['font'] ?? 'default';
+  $pUfit = $pUo['chat_bg_fit'] ?? 'cover';
+  $pUbgColor = $pUo['chat_bg_color'] ?? '';
+  $pUbgImage = $pUo['chat_bg_image'] ?? '';
+  ?>
+  const pStyleEl = document.getElementById('theme-css');
+  const pPresets = <?= json_encode(array_column($themePresets, null, 'id')) ?>;
+  const pState = {
+    preset: <?= json_encode($pUt['preset']) ?>,
+    mode: <?= json_encode($pUmode) ?>,
+    accent: <?= json_encode($pUo['accent'] ?? '') ?>,
+    sidebar: <?= json_encode($pUo['sidebar'] ?? '') ?>,
+    font: <?= json_encode($pUfont) ?>,
+    chat_bg_color: <?= json_encode($pUbgColor) ?>,
+    chat_bg_fit: <?= json_encode($pUfit) ?>,
+    chat_bg_image: <?= json_encode($pUbgImage) ?>,
+  };
+  if (pStyleEl && document.querySelector('.p-preset-card')) {
+    let pTimer = null;
+    function pRender() {
+      clearTimeout(pTimer);
+      pTimer = setTimeout(() => {
+        const p = new URLSearchParams();
+        p.set('preset', pState.preset);
+        p.set('mode', pState.mode);
+        if (pState.accent) p.set('accent', pState.accent);
+        if (pState.sidebar) p.set('sidebar', pState.sidebar);
+        p.set('font', pState.font);
+        if (pState.chat_bg_color) p.set('chat_bg_color', pState.chat_bg_color);
+        if (pState.chat_bg_image) p.set('chat_bg_image', pState.chat_bg_image);
+        p.set('chat_bg_fit', pState.chat_bg_fit);
+        fetch('/api/theme/css?' + p.toString(), { cache: 'no-store' })
+          .then(r => r.text())
+          .then(css => { pStyleEl.textContent = css; document.documentElement.classList.toggle('light', pState.mode === 'light'); })
+          .catch(() => {});
+      }, 120);
+    }
+    function pMarkSelected() {
+      document.querySelectorAll('.p-preset-card').forEach(el => {
+        const on = el.dataset.preset === pState.preset;
+        el.classList.toggle('border-blurple/70', on);
+        el.classList.toggle('bg-blurple/10', on);
+        el.classList.toggle('border-discord-600', !on);
+        el.classList.toggle('hover:border-discord-400', !on);
+        el.classList.toggle('hover:bg-discord-700', !on);
+      });
+    }
+    document.querySelectorAll('.p-preset-card').forEach(el => {
+      el.addEventListener('click', () => {
+        pState.preset = el.dataset.preset;
+        if (!pState.accent) document.getElementById('p-theme-accent').value = pPresets[pState.preset].accent;
+        if (!pState.sidebar) document.getElementById('p-theme-sidebar').value = pPresets[pState.preset].sidebar;
+        pMarkSelected();
+        pRender();
+      });
+    });
+    pMarkSelected();
+    document.querySelectorAll('.p-mode-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        pState.mode = el.dataset.mode;
+        document.querySelectorAll('.p-mode-btn').forEach(b => {
+          const on = b.dataset.mode === pState.mode;
+          b.className = 'p-mode-btn px-3 py-1 rounded-md text-sm font-medium border ' + (on ? 'bg-blurple/20 border-blurple/50 text-white' : 'border-discord-600 text-discord-300 hover:bg-discord-700');
+        });
+        pRender();
+      });
+    });
+    document.getElementById('p-theme-font').addEventListener('change', (e) => { pState.font = e.target.value; pRender(); });
+    document.getElementById('p-theme-accent').addEventListener('input', (e) => { pState.accent = e.target.value; pRender(); });
+    document.getElementById('p-theme-sidebar').addEventListener('input', (e) => { pState.sidebar = e.target.value; pRender(); });
+    document.getElementById('p-theme-bg-color').addEventListener('input', (e) => { pState.chat_bg_color = e.target.value; pRender(); });
+    document.getElementById('p-theme-bg-fit').addEventListener('change', (e) => { pState.chat_bg_fit = e.target.value; pRender(); });
+    document.querySelectorAll('.clear-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        const key = el.dataset.clear;
+        pState[key] = '';
+        if (key === 'accent') { document.getElementById('p-theme-accent').value = pPresets[pState.preset].accent; document.getElementById('p-accent-label').textContent = 'preset'; }
+        if (key === 'sidebar') { document.getElementById('p-theme-sidebar').value = pPresets[pState.preset].sidebar; document.getElementById('p-sidebar-label').textContent = 'preset'; }
+        if (key === 'chat_bg_color') { document.getElementById('p-theme-bg-color').value = '#313338'; document.getElementById('p-bg-color-label').textContent = 'none'; }
+        pRender();
+      });
+    });
+    const pSave = document.getElementById('p-theme-save');
+    if (pSave) pSave.addEventListener('click', () => {
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('preset', pState.preset);
+      fd.append('mode', pState.mode);
+      fd.append('accent', pState.accent);
+      fd.append('sidebar', pState.sidebar);
+      fd.append('font', pState.font);
+      fd.append('chat_bg_color', pState.chat_bg_color);
+      fd.append('chat_bg_fit', pState.chat_bg_fit);
+      fd.append('chat_bg_image', pState.chat_bg_image);
+      fetch('/api/theme', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+        .then(r => r.json()).then(j => { if (j.error) { alert(j.error); return; } location.reload(); });
+    });
+    const pReset = document.getElementById('p-theme-reset');
+    if (pReset) pReset.addEventListener('click', () => {
+      if (!confirm('Reset your theme to the server default?')) return;
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('preset', '');
+      fetch('/api/theme', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+        .then(r => r.json()).then(j => { if (!j.error) location.reload(); });
+    });
+    const pBg = document.getElementById('p-theme-bg-file');
+    if (pBg) pBg.addEventListener('change', () => {
+      if (!pBg.files || !pBg.files[0]) return;
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('file', pBg.files[0]);
+      fetch('/api/theme/bg', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+        .then(r => r.json()).then(j => { if (!j.error) location.reload(); });
+    });
+    const pBgRm = document.getElementById('p-theme-bg-remove');
+    if (pBgRm) pBgRm.addEventListener('click', () => {
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fetch('/api/theme/bg/remove', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+        .then(r => r.json()).then(j => { if (!j.error) location.reload(); });
+    });
+    pRender();
   }
 })();
 </script>

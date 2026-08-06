@@ -408,7 +408,35 @@ is offered to **every user** in their Profile → **Notification sounds** settin
   are regenerated automatically on boot if missing, so there are always alerts
   to pick from. Upload actions are audited (`sound_add`, `sound_del`).
 
-### 2.20 Support tickets (`/admin/support`)
+### 2.20 Appearance (`/admin/theme`)
+
+The server-wide theme: the colours, font, and chat background every visitor sees,
+and a kill-switch for personal themes.
+
+- **Allow users to customize their theme** — when on (default), every registered
+  user can pick a personal theme from their profile (see the user guide). When
+  off, **everyone is forced onto the server theme** — their stored choices are
+  kept but ignored, and the theme controls/toggles are hidden for them.
+- **Mode** — Dark or Light (each preset ships both palettes; toggling just flips
+  the `html.light` class).
+- **Preset library** — 75 complementing colour schemes (curated anchors such as
+  Midnight, Nord, Dracula, Solarized, One Dark, Gruvbox, Catppuccin, Tokyo
+  Night, Cyberpunk, Forest, Ocean, Sunset, Rose, Monochrome, each with
+  hue-rotated sidebar/accent variants). Click one to preview it instantly on
+  the whole admin page.
+- **Accent / Sidebar colours** — override the preset's values with a colour
+  picker; "use preset" clears the override.
+- **Font** — system font stacks only (Default, Sans, Serif, Mono, Rounded) so
+  the app stays fully offline/PWA-safe with no CDN.
+- **Chat background** — a colour and/or an uploaded image
+  (**PNG/JPG/WebP/GIF**, max 5 MB, stored under `public/assets/themes/`) that
+  sits behind the message list with a readability overlay. Choose Cover /
+  Contain / Repeat. Channel owners can set their own per-channel background on
+  top of this (right-click a channel they own → **Channel background**).
+- **Reset to default** — clears the server theme back to the Midnight preset.
+  Global theme changes are audited (`theme_save`, `theme_bg_upload`).
+
+### 2.21 Support tickets (`/admin/support`)
 
 Staff and admins manage the support inbox. The **＋ Open a ticket** button
 starts a ticket for either:
@@ -427,7 +455,7 @@ SMTP (see §6) — to the ticket's email for email-only tickets, or to the linke
 account's address. Users see their own tickets at `/support` in the app; an
 email-only ticket is never visible to another user.
 
-### 2.21 Terms & Privacy (`/admin/legal`)
+### 2.22 Terms & Privacy (`/admin/legal`)
 
 Edit the public **Terms of Service** and **Privacy Policy** with the full
 kitchen-sink rich-text editor — headings (H1–H6), bold/italic/underline/
@@ -443,7 +471,7 @@ horizontal rules, links, images, and tables. Both documents render at
 - **Reset to boilerplate** replaces the selected document with the built-in
   US-federal / Nevada boilerplate (COPPA, NRS 597.790/597.795).
 
-### 2.22 Webhooks (`/admin/webhooks`)
+### 2.23 Webhooks (`/admin/webhooks`)
 
 Discord-compatible incoming webhooks post into a channel as a bot — the full
 API is documented in **§6.5** below. This page manages them:
@@ -585,6 +613,8 @@ DESC LIMIT 100;"`).
 | `smtp_from_email` | — | Envelope + From address |
 | `smtp_from_name` | — | Display name for the From header |
 | `legal_terms` / `legal_privacy` | — | Sanitized HTML for `/terms` and `/privacy` |
+| `theme` | — | Server-wide theme JSON (`preset`, `mode`, `overrides` incl. accent/sidebar/font/chat background) — set via **Admin → Appearance** |
+| `theme_user_customization` | `1` | `0` forces everyone onto the server theme (personal themes ignored) |
 | `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |
 | `max_channels_per_user` | `100` | Owned-channel cap |
 | `smtp_enabled` | `0` | Master switch for email sending |

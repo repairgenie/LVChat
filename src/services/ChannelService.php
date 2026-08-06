@@ -325,6 +325,7 @@ final class ChannelService
         $allowed = [
             'topic', 'description', 'visibility', 'invite_only', 'moderated', 'member_limit',
             'mlock', 'topic_locked', 'forbidden', 'owner_id', 'successor_id', 'censor',
+            'bg_image', 'bg_color',
         ];
         foreach ($fields as $k => $v) {
             if (!in_array($k, $allowed, true)) {

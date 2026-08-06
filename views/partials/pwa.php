@@ -3,7 +3,7 @@
 // The service worker is always on — it adds installability plus offline reading
 // of previously viewed channels/DMs, and it wipes user-specific caches on logout. ?>
 <link rel="manifest" href="/manifest">
-<meta name="theme-color" content="#313338">
+<meta name="theme-color" content="<?= h(ThemeService::manifestColors()['theme_color']) ?>">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">

@@ -46,6 +46,15 @@ services from Anope.
   (custom sound or mute) all configurable from your profile. Admins upload the
   alert sounds (**Admin → Sounds**); three defaults ship built-in and every
   sound is available to all users
+- **Themes & appearance** — a server-wide theme with a library of **75 preset
+  colour schemes** (curated anchors + generated sidebar/accent combinations),
+  custom accent/sidebar colours, a font choice, and a chat background colour or
+  image, all managed live under **Admin → Appearance**. Every registered user
+  (admins included) can pick their own personal theme — preset, colours, font,
+  and chat background — from their profile to override the server theme, and
+  channel **owners can set a per-channel background** image/colour via the
+  channel menu. Admins can switch personal customization off entirely with one
+  toggle (**Admin → Appearance**).
 - **Resilient sending** — the composer posts via AJAX, with a native no-JS fallback that
   still delivers the message and returns you to the channel
 - **GIF search** — a Giphy-backed GIF picker in the composer (channels and DMs) with

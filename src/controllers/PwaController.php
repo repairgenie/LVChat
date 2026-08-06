@@ -15,6 +15,7 @@ final class PwaController
     {
         $site = (string) (config_get('site_name', 'LVChat') ?: 'LVChat');
         $short = mb_substr($site, 0, 12);
+        $colors = ThemeService::manifestColors();
 
         header('Content-Type: application/manifest+json; charset=utf-8');
         // Short TTL: the manifest rarely changes, but this keeps the configured
@@ -29,8 +30,8 @@ final class PwaController
             'scope' => '/',
             'display' => 'standalone',
             'orientation' => 'any',
-            'background_color' => '#2b2d31',
-            'theme_color' => '#313338',
+            'background_color' => $colors['background_color'],
+            'theme_color' => $colors['theme_color'],
             'lang' => 'en',
             'categories' => ['social', 'communication'],
             'icons' => [

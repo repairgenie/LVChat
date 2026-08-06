@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '23';
+    private const SCHEMA_VERSION = '24';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -64,6 +64,9 @@ final class Database
         }
         if (!in_array('theme', $userCols, true)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT ''");
+        }
+        if (!in_array('theme_json', $userCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN theme_json TEXT');
         }
         if (!in_array('notify', $userCols, true)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN notify TEXT NOT NULL DEFAULT 'all'");
@@ -222,6 +225,13 @@ final class Database
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('no_logging', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN no_logging INTEGER NOT NULL DEFAULT 0');
+        }
+        // Per-channel chat background (owner-set image/colour, schema v24).
+        if (!in_array('bg_image', $chanCols, true)) {
+            $pdo->exec('ALTER TABLE channels ADD COLUMN bg_image TEXT');
+        }
+        if (!in_array('bg_color', $chanCols, true)) {
+            $pdo->exec('ALTER TABLE channels ADD COLUMN bg_color TEXT');
         }
 
         // OpenClaw AI bots (schema v20).
@@ -483,6 +493,7 @@ final class Database
             'mfa_require_admin' => '0',
             'mfa_require_staff' => '0',
             'mfa_require_user' => '0',
+            'theme_user_customization' => '1',
         ];
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');
         foreach ($config as $k => $v) {

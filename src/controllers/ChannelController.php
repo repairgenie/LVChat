@@ -224,4 +224,64 @@ final class ChannelController
         Database::query('DELETE FROM notifications WHERE kind = "invite" AND user_id = ? AND channel_id = ?', [(int) $user['id'], (int) $channel['id']]);
         json_out(['ok' => true]);
     }
+
+    /** POST /api/channel/bg — channel owner sets the channel's chat background
+     *  (upload an image and/or pick a colour; empty bg_color clears the colour). */
+    public static function setBackground(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        if ($user['role'] !== 'admin' && (int) $channel['owner_id'] !== (int) $user['id']) {
+            json_out(['error' => 'Only the channel owner can set the background.'], 403);
+        }
+
+        $color = ThemeService::hex((string) ($_POST['bg_color'] ?? ''));
+        $fields = ['bg_color' => $color !== '' ? $color : null];
+
+        $hasFile = isset($_FILES['file'])
+            && !empty($_FILES['file']['tmp_name'])
+            && is_uploaded_file((string) $_FILES['file']['tmp_name']);
+        if ($hasFile) {
+            $stored = UploadService::store($_FILES['file'], 'theme');
+            if (!$stored['ok']) {
+                json_out(['error' => $stored['error']], 400);
+            }
+            if (!empty($channel['bg_image'])) {
+                UploadService::remove((string) $channel['bg_image']);
+            }
+            $fields['bg_image'] = $stored['url'];
+        }
+
+        ChannelService::update((string) $channel['id'], $fields);
+        log_audit('channel_bg', $channel['name'], implode(',', array_filter($fields)));
+        json_out([
+            'ok' => true,
+            'bg_color' => $fields['bg_color'] ?? null,
+            'bg_image' => $fields['bg_image'] ?? (isset($channel['bg_image']) ? (string) $channel['bg_image'] : null),
+        ]);
+    }
+
+    /** POST /api/channel/bg/remove — channel owner clears the channel background. */
+    public static function removeBackground(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        if ($user['role'] !== 'admin' && (int) $channel['owner_id'] !== (int) $user['id']) {
+            json_out(['error' => 'Only the channel owner can remove the background.'], 403);
+        }
+        if (!empty($channel['bg_image'])) {
+            UploadService::remove((string) $channel['bg_image']);
+        }
+        ChannelService::update((string) $channel['id'], ['bg_image' => null, 'bg_color' => null]);
+        log_audit('channel_bg_remove', $channel['name']);
+        json_out(['ok' => true]);
+    }
 }
