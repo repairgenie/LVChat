@@ -62,6 +62,7 @@ final class ThemeController
                 'chat_bg_color' => (string) ($_POST['chat_bg_color'] ?? ''),
                 'chat_bg_image' => $image,
                 'chat_bg_fit' => (string) ($_POST['chat_bg_fit'] ?? ''),
+                'chat_bg_overlay' => (int) ($_POST['chat_bg_overlay'] ?? -1),
             ],
         ]);
         json_out(['ok' => true]);

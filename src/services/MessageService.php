@@ -36,12 +36,19 @@ final class MessageService
         if (self::sameActor($recipient, $sender)) {
             return;
         }
+        // A per-user mute silences that person across every surface (bell + push).
+        $senderUid = self::isGuest($sender) ? null : (int) $sender['id'];
+        if ($senderUid !== null && !self::isGuest($recipient) && PushService::isMuted((int) $recipient['id'], $senderUid)) {
+            return;
+        }
         $rc = self::isGuest($recipient) ? 'guest_user_id' : 'user_id';
         $sc = self::isGuest($sender) ? 'sender_guest_id' : 'sender_id';
         Database::query(
             "INSERT INTO notifications ($rc, kind, $sc, message_id) VALUES (?, 'dm', ?, ?)",
             [$recipient['id'], $sender['id'], $pmId]
         );
+        $row = Database::row('SELECT content, kind FROM private_messages WHERE id = ?', [$pmId]);
+        PushService::dm($recipient, $sender, (string) ($row['content'] ?? ''), (string) ($row['kind'] ?? 'message'));
     }
 
     /** [userColValue, guestColValue] — the side not in play is 0 so it never matches a real id. */
@@ -81,7 +88,7 @@ final class MessageService
              FROM messages m';
     }
 
-    public static function send(int $channelId, array $sender, string $content, string $kind = 'message', ?int $replyTo = null): array
+    public static function send(int $channelId, array $sender, string $content, string $kind = 'message', ?int $replyTo = null, bool $skipPush = false): array
     {
         $isGuest = self::isGuest($sender);
         $senderCol = $isGuest ? 'sender_guest_id' : 'sender_id';
@@ -100,6 +107,11 @@ final class MessageService
             $isGuest ? 1 : 0
         );
         self::notifyMentions($msg, $channelId, $sender);
+        // Browser push for channel messages. $skipPush is used by the word-filter
+        // "block" path, where the row is deleted immediately after (never shown).
+        if (!$skipPush) {
+            PushService::channelMessage($msg);
+        }
         return $msg;
     }
 
@@ -407,6 +419,7 @@ final class MessageService
         [$meU, $meG] = self::actorPair($me);
         $rows = Database::all(
             "SELECT p.user_id, p.username, p.role, p.guest, p.last_seen, p.away,
+                    (SELECT 1 FROM user_mutes um WHERE um.user_id = ? AND um.muted_user_id = p.id) AS muted,
                     (SELECT COUNT(*) FROM private_messages pm
                      WHERE pm.read_at IS NULL
                        AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?)
@@ -450,6 +463,7 @@ final class MessageService
              ORDER BY p.username COLLATE NOCASE
              LIMIT ?",
             [
+                $meU,
                 $meU, $meG, $meU, $meG, $meU, $meG, $meU, $meG,
                 $meU, $meG, $meU, $meG, $meU, $meG, $meU, $meG,
                 $meU, $meG,
@@ -468,6 +482,7 @@ final class MessageService
                 'unread' => (int) $r['unread'],
                 'last_content' => (string) ($r['last_content'] ?? ''),
                 'last_id' => (int) ($r['last_id'] ?? 0),
+                'muted' => (int) ($r['muted'] ?? 0),
             ];
         }
         return $out;
@@ -507,6 +522,11 @@ final class MessageService
                         [$channelId, (int) $target['user_id']]
                     );
                     if ($mode === 'muted') {
+                        continue;
+                    }
+                    // A per-user mute silences that person's mentions too.
+                    $senderUid = $senderIsGuest ? null : (int) $sender['id'];
+                    if ($senderUid !== null && PushService::isMuted((int) $target['user_id'], $senderUid)) {
                         continue;
                     }
                 }

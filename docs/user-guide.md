@@ -337,7 +337,9 @@ the admin configured:
 - **Font** — Default, Sans, Serif, Mono, or Rounded (system fonts only).
 - **Chat background** — a colour and/or an image behind the message list
   (upload your own **PNG/JPG/WebP/GIF** up to 5 MB, or pick Contain (default) /
-  Cover / Repeat).
+  Cover / Repeat). An **overlay opacity** slider adds a translucent layer
+  between the text and the image — raise it when a busy image makes chat hard
+  to read.
 - **Save theme** applies your choices; **Reset to server default** drops them
   and puts you back on the admin's theme. The quick 🌙/☀️ toggle in the chat
   header flips just the dark/light mode and is remembered per account.
@@ -346,9 +348,9 @@ If the admin has disabled personal themes, the card shows a notice and the theme
 controls are hidden — everyone uses the server theme.
 
 **Channel backgrounds** — if you own a channel, right-click it in the sidebar
-and choose **Channel background** to give it its own image, colour, and image
-fit (defaults to **Contain**). Everyone viewing the channel sees it. Admins can
-set (or remove) any channel's background too.
+and choose **Channel background** to give it its own image, colour, image fit
+(defaults to **Contain**), and overlay opacity (default 55%). Everyone viewing
+the channel sees it. Admins can set (or remove) any channel's background too.
 
 ### 7.2 Notification sounds
 

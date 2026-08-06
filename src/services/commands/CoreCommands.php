@@ -284,7 +284,13 @@ CommandRegistry::register('topic', [
         ChannelService::update($channel['id'], ['topic' => mb_substr($topic, 0, 500)]);
         MessageService::system($channel['id'], 'topic', $user['username'] . ' set the topic to: ' . $topic);
         log_audit('topic', $channel['name'], $topic);
-        return ['replies' => ["Topic set to: $topic"]];
+        // topic_set/topic_channel let the chat client refresh the header topic
+        // instantly for the channel it is currently viewing (no page reload).
+        return [
+            'replies' => ["Topic set to: $topic"],
+            'topic_set' => $topic,
+            'topic_channel' => $channel['slug'],
+        ];
     },
 ]);
 
@@ -315,11 +321,16 @@ CommandRegistry::register('invite', [
         if ((int) $target['id'] === (int) $user['id']) {
             return ['replies' => ['You cannot invite yourself.']];
         }
+        // A per-user mute silences that person's invites (bell + push) too.
+        if (PushService::isMuted((int) $target['id'], (int) $user['id'])) {
+            return ['replies' => ["$nick cannot receive your invites."]];
+        }
         Database::query(
             'INSERT OR IGNORE INTO invites (channel_id, user_id, invited_by) VALUES (?, ?, ?)',
             [$channel['id'], $target['id'], $user['id']]
         );
         MessageService::notify((int) $target['id'], 'invite', (int) $channel['id'], (int) $user['id']);
+        PushService::invite((int) $target['id'], (int) $channel['id'], (int) $user['id']);
         return ['replies' => ["$nick has been invited to " . $channel['name'] . '.'], 'events' => [
             ['channel_id' => $channel['id'], 'kind' => 'system', 'content' => $user['username'] . ' invited ' . $nick . ' to ' . $channel['name']],
         ]];
@@ -345,6 +356,9 @@ CommandRegistry::register('knock', [
             [$ch['id']]
         );
         foreach ($ops as $op) {
+            if (PushService::isMuted((int) $op['id'], (int) $user['id'])) {
+                continue;
+            }
             MessageService::notify((int) $op['id'], 'knock', (int) $ch['id'], (int) $user['id']);
         }
         return ['replies' => ["Your knock has been sent to the operators of $name."]];

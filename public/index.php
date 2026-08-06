@@ -42,6 +42,7 @@ $router->post('/api/command', [ChatController::class, 'command']);
 $router->get('/api/poll', [ChatController::class, 'poll']);
 $router->get('/api/stream', [ChatController::class, 'stream']);
 $router->get('/api/ws/ticket', [ChatController::class, 'wsTicket']);
+$router->post('/api/rt/report', [ChatController::class, 'reportTransport']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
 $router->get('/api/browse', [ChatController::class, 'browseData']);
 $router->post('/api/notifications/read', [ChatController::class, 'readNotifications']);
@@ -87,6 +88,13 @@ $router->post('/api/friend/unblock', [FriendController::class, 'unblock']);
 $router->post('/api/sound/prefs', [SoundController::class, 'prefs']);
 $router->post('/api/sound/override', [SoundController::class, 'setOverride']);
 $router->post('/api/sound/override/remove', [SoundController::class, 'removeOverride']);
+
+// Push notifications (user settings)
+$router->post('/api/push/subscribe', [PushController::class, 'subscribe']);
+$router->post('/api/push/unsubscribe', [PushController::class, 'unsubscribe']);
+$router->post('/api/push/prefs', [PushController::class, 'prefs']);
+$router->post('/api/push/mute', [PushController::class, 'mute']);
+$router->post('/api/push/unmute', [PushController::class, 'unmute']);
 
 // Theme settings (per-user) + live CSS preview
 $router->get('/api/theme/css', [ThemeController::class, 'css']);

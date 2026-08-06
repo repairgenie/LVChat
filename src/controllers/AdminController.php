@@ -887,6 +887,13 @@ final class AdminController
                 $message = 'MOTD saved.';
                 break;
             case 'settings_save':
+                // The gateway reads ws_ip/ws_port only at boot. If these change
+                // here without a restart, the daemon keeps the old port while
+                // every browser is told the new one — refused, silent polling
+                // fallback, phantom 0 connections. Capture the old values so we
+                // can restart the daemon when the bind actually changed.
+                $oldWsPort = (int) (config_get('ws_port', '8080') ?? 8080);
+                $oldWsIp = (string) (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0');
                 config_set('site_name', trim((string) ($_POST['site_name'] ?? 'LVChat')));
                 config_set('site_tagline', trim((string) ($_POST['site_tagline'] ?? 'IRC-style web chat')));
                 config_set('logo_url', trim((string) ($_POST['logo_url'] ?? '')));
@@ -934,6 +941,25 @@ final class AdminController
                 config_set('mfa_require_user', ($_POST['mfa_require_user'] ?? '0') === '1' ? '1' : '0');
                 log_audit('settings_save');
                 $message = 'Settings saved.';
+                $newWsPort = (int) (config_get('ws_port', '8080') ?? 8080);
+                $newWsIp = (string) (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0');
+                if (($newWsPort !== $oldWsPort || $newWsIp !== $oldWsIp)
+                    && (string) (config_get('realtime', 'poll') ?? 'poll') === 'ws') {
+                    // Restart the daemon so it re-reads the new bind address.
+                    // Without this the running daemon keeps the old port and
+                    // every client silently falls back to polling.
+                    $status = Realtime::daemonStatus();
+                    if (!empty($status['running'])) {
+                        $cmd = escapeshellarg(self::cliPhp()) . ' ' . escapeshellarg(ROOT . '/bin/ws-server.php') . ' restart -d';
+                        [$code, $output] = CommandRunner::run($cmd, 20);
+                        log_audit('ws_daemon_restart', '', trim($output) !== '' ? trim($output) : null);
+                        $message = $code === 0
+                            ? 'Settings saved. Gateway restarted to apply the new bind address/port.'
+                            : 'Settings saved. Gateway restart FAILED: ' . trim($output);
+                    } else {
+                        $message = 'Settings saved. The gateway is not running — start it to apply the new bind address/port.';
+                    }
+                }
                 break;
             case 'theme_save':
                 $current = ThemeService::globalTheme();
@@ -951,6 +977,7 @@ final class AdminController
                         'chat_bg_color' => (string) ($_POST['chat_bg_color'] ?? ''),
                         'chat_bg_image' => $image,
                         'chat_bg_fit' => (string) ($_POST['chat_bg_fit'] ?? ''),
+                        'chat_bg_overlay' => (int) ($_POST['chat_bg_overlay'] ?? -1),
                     ],
                 ]);
                 config_set('theme_user_customization', ($_POST['theme_user_customization'] ?? '0') === '1' ? '1' : '0');

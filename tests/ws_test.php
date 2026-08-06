@@ -204,6 +204,17 @@ $ackB = wsReceive($connB, 2);
 wcheck('channel sub acked', isset($ackA[0]) && strpos($ackA[0], '"ok":true') !== false, implode('|', $ackA));
 wcheck('dm sub acked', isset($ackB[0]) && strpos($ackB[0], '"ok":true') !== false, implode('|', $ackB));
 
+// ── Health endpoint reflects live connections ─────────────────────────────
+$health = function () use ($pushUrl): array {
+    $base = str_replace('/push', '/health', $pushUrl);
+    $ctx = stream_context_create(['http' => ['timeout' => 2]]);
+    $body = @file_get_contents($base, false, $ctx);
+    return $body !== false ? json_decode($body, true) : [];
+};
+$h = $health();
+wcheck('health reports live connections', (int) ($h['connections'] ?? 0) >= 2, json_encode($h));
+wcheck('health reports the bound ws port', (int) ($h['ws_port'] ?? 0) === $wsPort, json_encode($h));
+
 // ── Fire the pushes (simulates other users' php-fpm requests) ──────────────
 Realtime::message('general', ['id' => 600001, 'kind' => 'message', 'content' => 'ws msg', 'username' => 'rtalice', 'channel' => 'general']);
 Realtime::dm($alice, $bob, ['id' => 600002, 'kind' => 'message', 'content' => 'ws dm', 'username' => 'rtalice', 'is_pm' => true]);

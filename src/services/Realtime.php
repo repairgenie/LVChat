@@ -73,11 +73,41 @@ final class Realtime
         if ($cfg !== '') {
             return $cfg;
         }
-        $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || ($_SERVER['SERVER_PORT'] ?? '') === '443';
         $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
-        $port = (int) (config_get('ws_port', '8080') ?? 8080);
-        return ($secure ? 'wss' : 'ws') . '://' . $host . ':' . $port . '/';
+        // Mirror the daemon's port resolution (bin/ws-server.php): WS_PORT env
+        // wins, then the ws_port config. If these ever disagreed, the browser
+        // would connect to the config port while the daemon listens on the env
+        // port — refused, silent fallback to polling, phantom 0 connections.
+        $port = (int) (getenv('WS_PORT') ?: (config_get('ws_port', '8080') ?? 8080));
+        return (self::requestSecure() ? 'wss' : 'ws') . '://' . $host . ':' . $port . '/';
+    }
+
+    /**
+     * Was this request delivered over TLS? Honors reverse-proxy headers
+     * (X-Forwarded-Proto, X-Forwarded-SSL, Cloudflare CF-Visitor) as well as
+     * the direct HTTPS/443 signals, so the gateway URL uses wss:// when TLS is
+     * terminated upstream. An https page forces a plain ws:// into mixed content
+     * and the browser blocks the handshake — which silently drops clients to
+     * the polling fallback.
+     */
+    private static function requestSecure(): bool
+    {
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            return true;
+        }
+        if (($_SERVER['SERVER_PORT'] ?? '') === '443') {
+            return true;
+        }
+        if (stripos((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''), 'https') !== false) {
+            return true;
+        }
+        if (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '')) === 'on') {
+            return true;
+        }
+        if (stripos((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), 'https') !== false) {
+            return true;
+        }
+        return false;
     }
 
     /** Internal push endpoint the request layer POSTs events to. */
@@ -98,6 +128,7 @@ final class Realtime
     {
         $running = false;
         $connections = 0;
+        $wsPort = 0;
         $url = self::pushUrl();
         if ($url !== '') {
             $parts = parse_url($url);
@@ -116,6 +147,7 @@ final class Realtime
                     if (is_array($j)) {
                         $running = !empty($j['ok']);
                         $connections = (int) ($j['connections'] ?? 0);
+                        $wsPort = (int) ($j['ws_port'] ?? 0);
                     }
                 }
             }
@@ -125,7 +157,22 @@ final class Realtime
         if (is_file($pidFile)) {
             $pid = (int) trim((string) file_get_contents($pidFile));
         }
-        return ['running' => $running, 'connections' => $connections, 'pid' => $pid];
+        // Browsers report which realtime transport they ended up on, so an admin
+        // can tell a silent poll/SSE fallback from real WebSocket connections.
+        $transports = [];
+        foreach (Database::all(
+            'SELECT transport, COUNT(*) AS n FROM rt_transports WHERE updated_at >= datetime("now", "-2 minutes") GROUP BY transport',
+            []
+        ) as $row) {
+            $transports[$row['transport']] = (int) $row['n'];
+        }
+        return [
+            'running' => $running,
+            'connections' => $connections,
+            'pid' => $pid,
+            'ws_port' => $wsPort, // the port the daemon actually bound (0 = down)
+            'transports' => $transports,
+        ];
     }
 
     /** Shared secret for the internal push endpoint (auto-provisioned on first use). */

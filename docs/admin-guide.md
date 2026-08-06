@@ -430,11 +430,14 @@ and a kill-switch for personal themes.
   the app stays fully offline/PWA-safe with no CDN.
 - **Chat background** — a colour and/or an uploaded image
   (**PNG/JPG/WebP/GIF**, max 5 MB, stored under `public/assets/themes/`) that
-  sits behind the message list with a readability overlay. Choose **Contain**
-  (default, the whole image fits inside), Cover, or Repeat. Channel owners
-  (and admins) can set their own per-channel background — image, colour, and
-  fit — on top of this (right-click a channel → **Channel background**); a
-  channel's background defaults to Contain regardless of the theme's fit.
+  sits behind the message list. Choose **Contain** (default, the whole image
+  fits inside), Cover, or Repeat, and set an **overlay opacity** (0–100%) — a
+  translucent layer (black in dark mode, white in light mode) between the text
+  and the image, so you can keep chat readable over a busy image. Channel
+  owners (and admins) can set their own per-channel background — image, colour,
+  fit, and overlay — on top of this (right-click a channel → **Channel
+  background**); a channel's background defaults to Contain at 55% overlay
+  regardless of the theme.
 - **Reset to default** — clears the server theme back to the Midnight preset.
   Global theme changes are audited (`theme_save`, `theme_bg_upload`).
 

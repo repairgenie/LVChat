@@ -71,6 +71,76 @@ self.addEventListener('message', (event) => {
   });
 });
 
+// ── Push notifications ───────────────────────────────────────────────────────
+// The server POSTs encrypted Web Push messages for new channel messages, DMs,
+// and channel invites; here they become OS notifications. The payload is JSON:
+//   { type: 'channel'|'dm'|'invite', title, body, tag, data:{type, channel|username} }
+const PUSH_ICON = '/assets/pwa/icon-192.png';
+
+// Is any open client already looking at the target of this push? If so we skip
+// the notification — the message is already on screen.
+function clientIsViewing(payload) {
+  return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    if (!clients.length) return false;
+    return clients.some((c) => {
+      let u;
+      try { u = new URL(c.url); } catch (e) { return false; }
+      if (u.origin !== self.location.origin) return false;
+      const params = u.searchParams;
+      if (payload.type === 'dm' && payload.username) {
+        return (params.get('dm') || '').toLowerCase() === String(payload.username).toLowerCase();
+      }
+      if ((payload.type === 'channel' || payload.type === 'invite') && payload.channel) {
+        return (params.get('channel') || '') === payload.channel;
+      }
+      return false;
+    });
+  });
+}
+
+self.addEventListener('push', (event) => {
+  let data = null;
+  try { data = event.data ? JSON.parse(event.data.text()) : null; } catch (e) {}
+  if (!data || !data.title || !data.data) return;
+  const payload = data.data;
+  const tagKey = payload.type === 'dm'
+    ? 'dm:' + (payload.username || '')
+    : 'channel:' + (payload.channel || '');
+  event.waitUntil(
+    clientIsViewing(payload).then((viewing) => {
+      if (viewing) return;
+      return self.registration.showNotification(data.title, {
+        body: data.body || '',
+        icon: PUSH_ICON,
+        badge: PUSH_ICON,
+        tag: tagKey,
+        vibrate: [100, 50, 100],
+        data: payload,
+      });
+    })
+  );
+});
+
+// Clicking a notification opens (or focuses) the right place in the chat.
+self.addEventListener('notificationclick', (event) => {
+  const payload = event.notification.data || {};
+  event.notification.close();
+  let url = '/app';
+  if (payload.type === 'channel' && payload.channel) url = '/app?channel=' + encodeURIComponent(payload.channel);
+  else if (payload.type === 'dm' && payload.username) url = '/app?dm=' + encodeURIComponent(payload.username);
+  else if (payload.type === 'invite' && payload.channel) url = '/app?channel=' + encodeURIComponent(payload.channel);
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const c of clients) {
+        if (c.url && c.url.indexOf(self.location.origin) === 0) {
+          return c.focus().then(() => c.navigate(url)).catch(() => c.focus());
+        }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
+});
+
 // Cache-first for a versioned static asset; drop superseded entries for the
 // same path so re-uploads (new ?v= query) never leave orphans behind.
 function cacheStatic(request, response) {

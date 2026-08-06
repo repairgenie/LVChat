@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '25';
+    private const SCHEMA_VERSION = '27';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -175,6 +175,28 @@ final class Database
             $pdo->exec('CREATE INDEX idx_ws_tickets_expires ON ws_tickets(expires_at)');
         }
 
+        // Push notifications (schema v27): Web Push subscriptions, per-context
+        // push toggles, and the all-surface per-user mute list.
+        if (!in_array('push_subscriptions', $tables, true)) {
+            $pdo->exec('CREATE TABLE push_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), last_seen TEXT)');
+            $pdo->exec('CREATE INDEX idx_push_subs_user ON push_subscriptions(user_id)');
+        }
+        if (!in_array('user_push_prefs', $tables, true)) {
+            $pdo->exec('CREATE TABLE user_push_prefs (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, channels INTEGER NOT NULL DEFAULT 1, dms INTEGER NOT NULL DEFAULT 1, invites INTEGER NOT NULL DEFAULT 1)');
+        }
+        if (!in_array('user_mutes', $tables, true)) {
+            $pdo->exec('CREATE TABLE user_mutes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, muted_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), UNIQUE (user_id, muted_user_id))');
+            $pdo->exec('CREATE INDEX idx_user_mutes_user ON user_mutes(user_id)');
+        }
+
+        // Realtime transport report: each browser records which realtime
+        // transport it actually uses (ws/sse/poll) so the admin UI can surface
+        // silent fallbacks instead of showing a phantom WebSocket count.
+        if (!in_array('rt_transports', $tables, true)) {
+            $pdo->exec('CREATE TABLE rt_transports (actor_id INTEGER NOT NULL, guest INTEGER NOT NULL DEFAULT 0, transport TEXT NOT NULL DEFAULT \'poll\', updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')), PRIMARY KEY (actor_id, guest))');
+            $pdo->exec('CREATE INDEX idx_rt_transports_updated ON rt_transports(updated_at)');
+        }
+
         // Moderation / reporting / support (added in schema v13).
         if (!in_array('moderation_events', $tables, true)) {
             $pdo->exec('CREATE TABLE moderation_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, kind TEXT NOT NULL, action TEXT NOT NULL DEFAULT "applied", match TEXT NOT NULL DEFAULT "", content TEXT NOT NULL DEFAULT "", target TEXT NOT NULL DEFAULT "", channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
@@ -236,6 +258,10 @@ final class Database
         // Per-channel background image fit (schema v25): defaults to "contain".
         if (!in_array('bg_fit', $chanCols, true)) {
             $pdo->exec("ALTER TABLE channels ADD COLUMN bg_fit TEXT NOT NULL DEFAULT 'contain'");
+        }
+        // Per-channel background overlay opacity (schema v26): 0–100.
+        if (!in_array('bg_overlay', $chanCols, true)) {
+            $pdo->exec('ALTER TABLE channels ADD COLUMN bg_overlay INTEGER NOT NULL DEFAULT 55');
         }
 
         // OpenClaw AI bots (schema v20).

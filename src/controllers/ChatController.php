@@ -312,7 +312,7 @@ final class ChatController
                 if ($censor['action'] === 'censor') {
                     $content = $censor['censored'];
                 } else {
-                    $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
+                    $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo, true);
                     Database::query('UPDATE messages SET deleted = 1 WHERE id = ?', [$msg['id']]);
                     $notice = 'Chanserv removed message from ' . $user['username'] . ' due to prohibited words';
                     $sysId = MessageService::system((int) $channel['id'], 'system', $notice);
@@ -606,6 +606,29 @@ final class ChatController
     {
         $user = self::requireUser();
         json_out(['ok' => true, 'ticket' => Realtime::mintTicket($user), 'url' => Realtime::clientUrl()]);
+    }
+
+    /**
+     * POST /api/rt/report — the browser records which realtime transport it
+     * actually ended up on (ws/sse/poll). Used by the admin status panel to
+     * surface silent transport fallbacks. Fire-and-forget from the client.
+     */
+    public static function reportTransport(): void
+    {
+        $user = self::requireUser();
+        $transport = (string) ($_POST['transport'] ?? '');
+        if (!in_array($transport, ['ws', 'sse', 'poll'], true)) {
+            json_out(['error' => 'Bad transport.'], 400);
+        }
+        $guest = (int) ($user['guest'] ?? 0) === 1 ? 1 : 0;
+        Database::query(
+            'INSERT INTO rt_transports (actor_id, guest, transport, updated_at)
+             VALUES (?, ?, ?, datetime(\'now\'))
+             ON CONFLICT (actor_id, guest)
+             DO UPDATE SET transport = excluded.transport, updated_at = excluded.updated_at',
+            [(int) $user['id'], $guest, $transport]
+        );
+        json_out(['ok' => true]);
     }
 
     /**

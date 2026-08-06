@@ -86,7 +86,7 @@ $ws = new Worker('websocket://' . $wsIp . ':' . $wsPort);
 $ws->name = 'lvchat-ws';
 $ws->count = 1;
 
-$ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, $writePresence, $pushHost, $pushPort, $pushPath): void {
+$ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, $writePresence, $pushHost, $pushPort, $pushPath, $wsPort): void {
     // We forked from the master process which already opened the SQLite
     // connection; re-open it inside this worker so each process owns its PDO.
     Database::close();
@@ -115,10 +115,13 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
         }
     };
 
-    $push->onMessage = function (TcpConnection $conn, Request $req) use ($pushSecret, $pushPath, $broadcast, &$state): void {
+    $push->onMessage = function (TcpConnection $conn, Request $req) use ($pushSecret, $pushPath, $broadcast, &$state, $wsPort): void {
         if ($req->path() !== $pushPath || $req->method() !== 'POST') {
             if ($req->path() === '/health') {
-                $conn->send(json_encode(['ok' => true, 'connections' => count($state)]));
+                // Report the bound WS port too, so the admin UI can flag when the
+                // daemon's actual port disagrees with the ws_port config (a stale
+                // daemon after a config change, or a WS_PORT env override).
+                $conn->send(json_encode(['ok' => true, 'connections' => count($state), 'ws_port' => (int) $wsPort]));
                 $conn->close(); // status checks read until EOF — close promptly
                 return;
             }

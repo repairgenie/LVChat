@@ -101,6 +101,7 @@
     $ufit = $uo['chat_bg_fit'] ?? 'contain';
     $ubgColor = $uo['chat_bg_color'] ?? '';
     $ubgImage = $uo['chat_bg_image'] ?? '';
+    $uOverlay = isset($uo['chat_bg_overlay']) ? (int) $uo['chat_bg_overlay'] : ThemeService::CHAT_BG_OVERLAY_DEFAULT;
     ?>
     <div class="card p-6">
       <h2 class="font-semibold text-white mb-1">My theme</h2>
@@ -182,6 +183,11 @@
           </select>
         </div>
       </div>
+      <div class="mt-4 max-w-md">
+        <label class="label">Overlay opacity <span id="p-bg-overlay-label" class="text-discord-400 normal-case"><?= (int) $uOverlay ?>%</span></label>
+        <input type="range" id="p-theme-bg-overlay" min="0" max="100" step="5" value="<?= (int) $uOverlay ?>" class="w-full accent-blurple cursor-pointer">
+        <p class="text-xs text-discord-400 mt-1">A translucent layer between the text and the image — raise it when a busy image makes chat hard to read.</p>
+      </div>
 
       <div class="flex flex-wrap items-center gap-3">
         <button class="btn-primary" id="p-theme-save">Save theme</button>
@@ -241,6 +247,52 @@
             <?= $soundSelect(null, 'sound') ?>
           </div>
           <button class="btn-ghost">Add override</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card p-6">
+      <h2 class="font-semibold text-white mb-1">Push notifications</h2>
+      <p class="text-xs text-discord-400 mb-4">OS/browser notifications for new channel messages, direct messages, and channel invites — even when the chat is in the background. Requires a secure (HTTPS) connection and a one-time permission.</p>
+      <div class="flex flex-wrap items-center gap-2 mb-4">
+        <button type="button" id="push-enable" class="btn-primary">Enable push notifications</button>
+        <button type="button" id="push-disable" class="btn-ghost hidden">Disable</button>
+        <span id="push-status" class="text-sm text-discord-300"></span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" id="push-prefs">
+        <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer">
+          <input type="checkbox" data-pref="channels" class="w-4 h-4 accent-blurple" <?= $pushPrefs['channels'] ? 'checked' : '' ?>> Channel messages
+        </label>
+        <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer">
+          <input type="checkbox" data-pref="dms" class="w-4 h-4 accent-blurple" <?= $pushPrefs['dms'] ? 'checked' : '' ?>> Direct messages
+        </label>
+        <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer">
+          <input type="checkbox" data-pref="invites" class="w-4 h-4 accent-blurple" <?= $pushPrefs['invites'] ? 'checked' : '' ?>> Channel invites
+        </label>
+      </div>
+
+      <div class="mt-6 pt-5 border-t border-discord-700">
+        <div class="text-sm font-medium text-white mb-1">Muted users</div>
+        <p class="text-xs text-discord-400 mb-3">Muting someone silences every notification from them — push, the notification bell, sounds, and DM toasts. They can still message you.</p>
+        <div id="mute-list" class="space-y-2 mb-4">
+          <?php foreach ($pushMutedUsers as $m): ?>
+          <div class="flex items-center gap-2" data-mute="<?= (int) $m['muted_user_id'] ?>">
+            <span class="text-sm text-discord-200 w-40 truncate"><?= h($m['username']) ?></span>
+            <button type="button" class="btn-ghost text-xs text-red-400 !py-1 shrink-0" data-unmute="<?= (int) $m['muted_user_id'] ?>">Unmute</button>
+          </div>
+          <?php endforeach; ?>
+        </div>
+        <form id="push-mute-form" class="flex flex-wrap items-end gap-2">
+          <?= Csrf::field() ?>
+          <div class="min-w-44 flex-1">
+            <label class="label">User</label>
+            <select name="user_id" class="input !py-1.5" required>
+              <?php foreach ($allUsers as $u): ?>
+              <option value="<?= (int) $u['id'] ?>"><?= h($u['username']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <button class="btn-ghost">Mute user</button>
         </form>
       </div>
     </div>
@@ -437,6 +489,101 @@
     sndPost('/api/sound/override', new FormData(ovForm), () => location.reload());
   });
 
+  // ── Push notifications ─────────────────────────────────────────────────────
+  const VAPID_KEY = <?= json_encode($vapidPublicKey) ?>;
+  const pushSupported = !!VAPID_KEY && ('serviceWorker' in navigator)
+    && ('PushManager' in window) && ('Notification' in window) && window.isSecureContext;
+  const pushEnable = document.getElementById('push-enable');
+  const pushDisable = document.getElementById('push-disable');
+  const pushStatus = document.getElementById('push-status');
+  function b64uToBytes(b64) {
+    const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  function b64uFromBytes(bytes) {
+    let bin = '';
+    bytes.forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function pushPayload(sub) {
+    const p256 = sub.getKey ? sub.getKey('p256dh') : null;
+    const auth = sub.getKey ? sub.getKey('auth') : null;
+    if (!p256 || !auth) return null;
+    return { endpoint: sub.endpoint, p256dh: b64uFromBytes(new Uint8Array(p256)), auth: b64uFromBytes(new Uint8Array(auth)) };
+  }
+  function renderPushState() {
+    if (!pushSupported || !pushEnable || !pushStatus) return;
+    if (Notification.permission === 'granted') {
+      navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()).then((sub) => {
+        const on = !!sub;
+        pushEnable.classList.toggle('hidden', on);
+        pushDisable.classList.toggle('hidden', !on);
+        pushStatus.textContent = on ? '✓ Notifications on' : 'Not subscribed';
+      }).catch(() => {});
+    } else {
+      pushEnable.classList.remove('hidden');
+      pushDisable.classList.add('hidden');
+      const denied = Notification.permission === 'denied';
+      pushStatus.textContent = denied ? 'Blocked in browser settings' : 'Click enable to allow notifications';
+    }
+  }
+  function subscribePush() {
+    return Notification.requestPermission().then((perm) => {
+      if (perm !== 'granted') { renderPushState(); return; }
+      return navigator.serviceWorker.ready
+        .then((reg) => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(VAPID_KEY) }))
+        .then((sub) => {
+          const payload = pushPayload(sub);
+          if (!payload) return;
+          return fetch('/api/push/subscribe', { method: 'POST', body: (() => {
+            const fd = new FormData(); fd.append('csrf', csrf); fd.append('endpoint', payload.endpoint);
+            fd.append('p256dh', payload.p256dh); fd.append('auth', payload.auth); return fd;
+          })(), headers: { 'X-CSRF': csrf } });
+        })
+        .catch(() => {})
+        .then(() => renderPushState());
+    });
+  }
+  function unsubscribePush() {
+    const done = () => post('/api/push/unsubscribe', new FormData(), () => renderPushState());
+    if (!('serviceWorker' in navigator)) { done(); return; }
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => (sub ? sub.unsubscribe() : Promise.resolve()))
+      .catch(() => {})
+      .then(done);
+  }
+  if (pushEnable) pushEnable.addEventListener('click', subscribePush);
+  if (pushDisable) pushDisable.addEventListener('click', unsubscribePush);
+  renderPushState();
+
+  const pushPrefs = document.getElementById('push-prefs');
+  if (pushPrefs) pushPrefs.addEventListener('change', () => {
+    const fd = new FormData();
+    fd.append('csrf', csrf);
+    fd.append('channels', document.querySelector('[data-pref="channels"]').checked ? '1' : '0');
+    fd.append('dms', document.querySelector('[data-pref="dms"]').checked ? '1' : '0');
+    fd.append('invites', document.querySelector('[data-pref="invites"]').checked ? '1' : '0');
+    fetch('/api/push/prefs', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } }).catch(() => {});
+  });
+  document.querySelectorAll('[data-unmute]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const fd = new FormData();
+      fd.append('user_id', btn.dataset.unmute);
+      post('/api/push/unmute', fd, () => {
+        const row = btn.closest('[data-mute]');
+        if (row) row.remove();
+      });
+    });
+  });
+  const pushMuteForm = document.getElementById('push-mute-form');
+  if (pushMuteForm) pushMuteForm.addEventListener('submit', e => {
+    e.preventDefault();
+    post('/api/push/mute', new FormData(pushMuteForm), () => location.reload());
+  });
+
   const themeBtn = document.getElementById('profile-theme-toggle');
   if (themeBtn) {
     function setIcon() { themeBtn.textContent = document.documentElement.classList.contains('light') ? '☀️ Light mode' : '🌙 Dark mode'; }
@@ -495,6 +642,7 @@
   $pUfit = $pUo['chat_bg_fit'] ?? 'contain';
   $pUbgColor = $pUo['chat_bg_color'] ?? '';
   $pUbgImage = $pUo['chat_bg_image'] ?? '';
+  $pUoverlay = isset($pUo['chat_bg_overlay']) ? (int) $pUo['chat_bg_overlay'] : ThemeService::CHAT_BG_OVERLAY_DEFAULT;
   ?>
   const pStyleEl = document.getElementById('theme-css');
   const pPresets = <?= json_encode(array_column($themePresets, null, 'id')) ?>;
@@ -506,6 +654,7 @@
     font: <?= json_encode($pUfont) ?>,
     chat_bg_color: <?= json_encode($pUbgColor) ?>,
     chat_bg_fit: <?= json_encode($pUfit) ?>,
+    chat_bg_overlay: <?= (int) $pUoverlay ?>,
     chat_bg_image: <?= json_encode($pUbgImage) ?>,
   };
   if (pStyleEl && document.querySelector('.p-preset-card')) {
@@ -522,6 +671,7 @@
         if (pState.chat_bg_color) p.set('chat_bg_color', pState.chat_bg_color);
         if (pState.chat_bg_image) p.set('chat_bg_image', pState.chat_bg_image);
         p.set('chat_bg_fit', pState.chat_bg_fit);
+        p.set('chat_bg_overlay', pState.chat_bg_overlay);
         fetch('/api/theme/css?' + p.toString(), { cache: 'no-store' })
           .then(r => r.text())
           .then(css => { pStyleEl.textContent = css; document.documentElement.classList.toggle('light', pState.mode === 'light'); })
@@ -563,6 +713,11 @@
     document.getElementById('p-theme-sidebar').addEventListener('input', (e) => { pState.sidebar = e.target.value; pRender(); });
     document.getElementById('p-theme-bg-color').addEventListener('input', (e) => { pState.chat_bg_color = e.target.value; pRender(); });
     document.getElementById('p-theme-bg-fit').addEventListener('change', (e) => { pState.chat_bg_fit = e.target.value; pRender(); });
+    document.getElementById('p-theme-bg-overlay').addEventListener('input', (e) => {
+      pState.chat_bg_overlay = parseInt(e.target.value, 10) || 0;
+      document.getElementById('p-bg-overlay-label').textContent = pState.chat_bg_overlay + '%';
+      pRender();
+    });
     document.querySelectorAll('.clear-btn').forEach(el => {
       el.addEventListener('click', () => {
         const key = el.dataset.clear;
@@ -584,6 +739,7 @@
       fd.append('font', pState.font);
       fd.append('chat_bg_color', pState.chat_bg_color);
       fd.append('chat_bg_fit', pState.chat_bg_fit);
+      fd.append('chat_bg_overlay', pState.chat_bg_overlay);
       fd.append('chat_bg_image', pState.chat_bg_image);
       fetch('/api/theme', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
         .then(r => r.json()).then(j => { if (j.error) { alert(j.error); return; } location.reload(); });

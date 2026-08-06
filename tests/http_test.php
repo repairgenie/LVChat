@@ -252,6 +252,16 @@ dbq("UPDATE users SET totp_secret = NULL, totp_enabled_at = NULL WHERE username 
 // ── Channel + messaging API ──────────────────────────────────────────────────
 echo "== channel + messaging ==\n";
 $t = csrf(req('GET', '/app', [], $cjA)[2]);
+
+// Realtime transport report: browsers tell the server which transport won.
+[$s, , $b] = req('POST', '/api/rt/report', ['transport' => 'ws'], $cjA, ['X-CSRF: ' . $t]);
+check('rt report ws ok', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+check('rt report persisted', (dbq("SELECT transport FROM rt_transports WHERE actor_id = (SELECT id FROM users WHERE username = 'alice')")[0]['transport'] ?? '') === 'ws');
+[$s, , $b] = req('POST', '/api/rt/report', ['transport' => 'bogus'], $cjA, ['X-CSRF: ' . $t]);
+check('rt report rejects bad transport', $s === 400, (string) $s);
+[$s] = req('POST', '/api/rt/report', ['transport' => 'poll'], null);
+check('rt report requires auth', $s === 401, (string) $s);
+
 [$s, , $b] = req('POST', '/api/channels', ['csrf' => $t, 'name' => '#gaming'], $cjA);
 check('create #gaming', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 [$s] = req('GET', '/app?channel=gaming', [], $cjA);
@@ -903,11 +913,12 @@ check('GET /admin/theme 200', $s === 200, (string) $s);
 check('theme page has preset gallery + kill-switch', str_contains($b, 'preset-card') && str_contains($b, 'Allow users to customize'), 'len=' . strlen($b));
 
 $tA = csrf($b);
-[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'theme_save', 'preset' => 'nord', 'mode' => 'light', 'font' => 'serif', 'chat_bg_color' => '#123456', 'chat_bg_fit' => 'cover', 'chat_bg_image' => '', 'theme_user_customization' => '1', 'back' => '/admin/theme'], $cjA);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'theme_save', 'preset' => 'nord', 'mode' => 'light', 'font' => 'serif', 'chat_bg_color' => '#123456', 'chat_bg_fit' => 'cover', 'chat_bg_overlay' => '80', 'chat_bg_image' => '', 'theme_user_customization' => '1', 'back' => '/admin/theme'], $cjA);
 check('theme_save redirects', $s === 302, (string) $s);
 $pdo = new PDO('sqlite:' . $DB);
 $themeRow = json_decode((string) $pdo->query("SELECT value FROM server_config WHERE key = 'theme'")->fetchColumn(), true);
 check('global theme persisted', ($themeRow['preset'] ?? '') === 'nord' && ($themeRow['mode'] ?? '') === 'light' && ($themeRow['overrides']['font'] ?? '') === 'serif' && ($themeRow['overrides']['chat_bg_color'] ?? '') === '#123456', json_encode($themeRow));
+check('global theme overlay persisted', ($themeRow['overrides']['chat_bg_overlay'] ?? '') === 80, json_encode($themeRow));
 check('customization flag on', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'theme_user_customization'")->fetchColumn() === '1');
 
 // Live CSS preview endpoint.
@@ -956,6 +967,7 @@ check('bob creates bg channel', $s === 200, "$s $j");
 $chanId = (int) $pdo->query("SELECT id FROM channels WHERE name = '#bgtown'")->fetchColumn();
 check('bg channel exists', $chanId > 0, (string) $chanId);
 check('channel bg fit defaults to contain', (string) $pdo->query("SELECT bg_fit FROM channels WHERE id = $chanId")->fetchColumn() === 'contain');
+check('channel bg overlay defaults to 55', (int) $pdo->query("SELECT bg_overlay FROM channels WHERE id = $chanId")->fetchColumn() === 55);
 $tB = csrf(req('GET', '/app', [], $cjB)[2]);
 [$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef'], $cjB);
 check('owner sets channel bg colour', $s === 200, "$s $j");
@@ -965,6 +977,11 @@ check('channel bg fit can be changed', $s === 200 && (jsonDecode($j)['bg_fit'] ?
 check('channel bg fit persisted', (string) $pdo->query("SELECT bg_fit FROM channels WHERE id = $chanId")->fetchColumn() === 'cover');
 [$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef', 'bg_fit' => 'bogus'], $cjB);
 check('invalid bg fit falls back to contain', $s === 200 && (jsonDecode($j)['bg_fit'] ?? '') === 'contain', "$s $j");
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef', 'bg_overlay' => '20'], $cjB);
+check('channel bg overlay can be set', $s === 200 && (jsonDecode($j)['bg_overlay'] ?? '') === 20, "$s $j");
+check('channel bg overlay persisted', (int) $pdo->query("SELECT bg_overlay FROM channels WHERE id = $chanId")->fetchColumn() === 20);
+[$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => '#abcdef', 'bg_overlay' => '999'], $cjB);
+check('invalid bg overlay falls back to default', $s === 200 && (jsonDecode($j)['bg_overlay'] ?? '') === 55, "$s $j");
 [$s, $body] = uploadReq('/api/channel/bg', $cjB, ['csrf' => $tB, 'channel' => 'bgtown', 'bg_color' => ''], ['tmp' => '/tmp/opencode/dmtest.png', 'type' => 'image/png', 'name' => 'cbg.png']);
 $j = jsonDecode($body);
 check('owner uploads channel bg image', $s === 200 && str_contains($j['bg_image'] ?? '', '/assets/themes/'), "$s $body");
@@ -984,6 +1001,7 @@ check('non-owner cannot set channel bg', $s === 403, "$s $j");
 check('owner removes channel bg', $s === 200, "$s $j");
 check('channel bg cleared', ($pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '' && ($pdo->query("SELECT bg_image FROM channels WHERE id = $chanId")->fetchColumn() ?: '') === '');
 check('channel bg fit resets to contain on remove', (string) $pdo->query("SELECT bg_fit FROM channels WHERE id = $chanId")->fetchColumn() === 'contain');
+check('channel bg overlay resets to default on remove', (int) $pdo->query("SELECT bg_overlay FROM channels WHERE id = $chanId")->fetchColumn() === 55);
 // The browser's raw fetch sends the CSRF token only in the X-CSRF header (no
 // POST field) — the server must accept it (that was the "save does nothing" bug).
 $ch = curl_init($BASE . '/api/channel/bg');
@@ -1005,6 +1023,45 @@ check('channel bg accepted via X-CSRF header only', $status === 200, (string) $s
 check('header-only csrf wrote the bg', (string) $pdo->query("SELECT bg_color FROM channels WHERE id = $chanId")->fetchColumn() === '#112233');
 [$s, , $j] = req('POST', '/api/channel/bg/remove', ['csrf' => $tB, 'channel' => 'bgtown'], $cjB);
 check('owner removes channel bg again', $s === 200, "$s $j");
+
+// Push notifications API.
+$tPush = csrf(req('GET', '/app', [], $cjA)[2]);
+$pt = "\x04" . str_repeat("\x01", 64);
+$p256 = rtrim(strtr(base64_encode($pt), '+/', '-_'), '=');
+$authB64 = rtrim(strtr(base64_encode(str_repeat("\xAB", 16)), '+/', '-_'), '=');
+$aliceId = (int) $pdo->query("SELECT id FROM users WHERE username = 'alice'")->fetchColumn();
+$bobId = (int) $pdo->query("SELECT id FROM users WHERE username = 'bob'")->fetchColumn();
+[$s, , $j] = req('POST', '/api/push/subscribe', ['csrf' => $tPush, 'endpoint' => 'https://127.0.0.1:59999/httptest', 'p256dh' => $p256, 'auth' => $authB64], $cjA);
+check('push subscribe ok', $s === 200 && (jsonDecode($j)['ok'] ?? false) === true, "$s $j");
+check('subscription persisted', (string) $pdo->query("SELECT COUNT(*) FROM push_subscriptions WHERE user_id = $aliceId")->fetchColumn() === '1');
+[$s, , $j] = req('POST', '/api/push/subscribe', ['csrf' => $tPush, 'endpoint' => 'http://127.0.0.1:59999/bad', 'p256dh' => $p256, 'auth' => $authB64], $cjA);
+check('push subscribe rejects non-https', $s === 400, "$s $j");
+[$s, , $j] = req('POST', '/api/push/subscribe', ['csrf' => $tPush, 'endpoint' => 'https://127.0.0.1:59999/c', 'p256dh' => 'nope', 'auth' => $authB64], $cjA);
+check('push subscribe rejects bad p256dh', $s === 400, "$s $j");
+[$s] = req('POST', '/api/push/subscribe', ['endpoint' => 'https://127.0.0.1:59999/d', 'p256dh' => $p256, 'auth' => $authB64], $cjA);
+check('push subscribe requires CSRF', $s === 419, (string) $s);
+[$s] = req('POST', '/api/push/subscribe', ['csrf' => 'x', 'endpoint' => 'https://127.0.0.1:59999/d', 'p256dh' => $p256, 'auth' => $authB64]);
+check('push subscribe requires auth', $s === 401, (string) $s);
+[$s, , $j] = req('POST', '/api/push/prefs', ['csrf' => $tPush, 'channels' => '0', 'dms' => '1', 'invites' => '1'], $cjA);
+check('push prefs save', $s === 200 && (jsonDecode($j)['prefs']['channels'] ?? 1) === 0, "$s $j");
+check('push prefs persisted', (string) $pdo->query("SELECT channels FROM user_push_prefs WHERE user_id = $aliceId")->fetchColumn() === '0');
+req('POST', '/api/push/prefs', ['csrf' => $tPush, 'channels' => '1', 'dms' => '1', 'invites' => '1'], $cjA);
+[$s, , $j] = req('POST', '/api/push/mute', ['csrf' => $tPush, 'user_id' => $bobId], $cjA);
+check('push mute ok', $s === 200, "$s $j");
+check('mute persisted', (string) $pdo->query("SELECT COUNT(*) FROM user_mutes WHERE user_id = $aliceId AND muted_user_id = $bobId")->fetchColumn() === '1');
+[$s, , $j] = req('POST', '/api/push/mute', ['csrf' => $tPush, 'user_id' => 999999], $cjA);
+check('push mute rejects unknown user', $s === 400, "$s $j");
+[$s, , $j] = req('POST', '/api/push/mute', ['csrf' => $tPush, 'user_id' => $aliceId], $cjA);
+check('push mute rejects self', $s === 400, "$s $j");
+[$s, , $j] = req('POST', '/api/push/unmute', ['csrf' => $tPush, 'user_id' => $bobId], $cjA);
+check('push unmute ok', $s === 200, "$s $j");
+check('unmute cleared', (string) $pdo->query("SELECT COUNT(*) FROM user_mutes WHERE user_id = $aliceId AND muted_user_id = $bobId")->fetchColumn() === '0');
+$page = req('GET', '/u/alice', [], $cjA)[2];
+check('profile page renders push settings', str_contains($page, 'Push notifications'), '');
+check('profile page embeds VAPID key', str_contains($page, 'VAPID_KEY'), '');
+[$s, , $j] = req('POST', '/api/push/unsubscribe', ['csrf' => $tPush], $cjA);
+check('push unsubscribe ok', $s === 200, "$s $j");
+check('subscriptions cleared', (string) $pdo->query("SELECT COUNT(*) FROM push_subscriptions WHERE user_id = $aliceId")->fetchColumn() === '0');
 
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);

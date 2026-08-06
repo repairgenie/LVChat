@@ -281,7 +281,8 @@ Upgrades are the same procedure as a fresh install:
   and creates missing tables automatically — `theme`, `avatar`, `status`,
   `age_verified_at`, `reactions`, `channel_notify`, `sound_alerts`, `webhooks`,
   `login_attempts`, `registration_invites`, `moderation_events`, `reports`,
-  `user_notes`, `support_tickets`, the `guests`/`guest_sessions` tables, the FTS
+  `user_notes`, `support_tickets`, `push_subscriptions`, `user_push_prefs`,
+  `user_mutes`, the `guests`/`guest_sessions` tables, the FTS
   search index, and more). Older installs whose guests lived in `users` are
   migrated into the dedicated `guests` table on boot, so DMs/memberships/history
   survive. The four default operator classes and three default sounds are seeded

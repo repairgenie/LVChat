@@ -38,6 +38,9 @@ final class UserController
             'themeCustomizationEnabled' => ThemeService::customizationEnabled(),
             'userThemeJson' => ThemeService::userTheme($user),
             'effectiveTheme' => ThemeService::effectiveForView($user),
+            'pushPrefs' => $isSelf && !(int) ($user['guest'] ?? 0) ? PushService::prefs($user) : ['channels' => 1, 'dms' => 1, 'invites' => 1],
+            'pushMutedUsers' => $isSelf && !(int) ($user['guest'] ?? 0) ? PushService::mutedList($user) : [],
+            'vapidPublicKey' => PushService::publicKey(),
         ]);
     }
 

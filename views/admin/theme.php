@@ -4,6 +4,7 @@ $ov = $gt['overrides'];
 $mode = $gt['mode'] !== '' ? $gt['mode'] : 'dark';
 $font = $ov['font'] ?? 'default';
 $fit = $ov['chat_bg_fit'] ?? 'contain';
+$overlay = isset($ov['chat_bg_overlay']) ? (int) $ov['chat_bg_overlay'] : ThemeService::CHAT_BG_OVERLAY_DEFAULT;
 $bgColor = $ov['chat_bg_color'] ?? '';
 $bgImage = $ov['chat_bg_image'] ?? '';
 ?>
@@ -111,6 +112,11 @@ $bgImage = $ov['chat_bg_image'] ?? '';
           </select>
         </div>
       </div>
+      <div class="mt-4 max-w-md">
+        <label class="label">Overlay opacity <span id="bg-overlay-label" class="text-discord-400 normal-case"><?= (int) $overlay ?>%</span></label>
+        <input type="range" id="theme-bg-overlay" min="0" max="100" step="5" value="<?= (int) $overlay ?>" class="w-full accent-blurple cursor-pointer">
+        <p class="text-xs text-discord-400 mt-1">A translucent layer between the text and the image — raise it when a busy image makes chat hard to read.</p>
+      </div>
       <?php if ($bgImage !== ''): ?>
       <div class="mt-3 flex items-center gap-3">
         <img src="<?= h(url($bgImage)) ?>" alt="Current chat background" class="h-16 w-32 object-cover rounded-lg border border-discord-600">
@@ -143,6 +149,7 @@ $bgImage = $ov['chat_bg_image'] ?? '';
     font: <?= json_encode($font) ?>,
     chat_bg_color: <?= json_encode($bgColor) ?>,
     chat_bg_fit: <?= json_encode($fit) ?>,
+    chat_bg_overlay: <?= (int) $overlay ?>,
     chat_bg_image: <?= json_encode($bgImage) ?>,
   };
   const emptyToNull = (v) => v === '' ? '' : v;
@@ -165,6 +172,7 @@ $bgImage = $ov['chat_bg_image'] ?? '';
       if (state.chat_bg_color) p.set('chat_bg_color', state.chat_bg_color);
       if (state.chat_bg_image) p.set('chat_bg_image', state.chat_bg_image);
       p.set('chat_bg_fit', state.chat_bg_fit);
+      p.set('chat_bg_overlay', state.chat_bg_overlay);
       fetch('/api/theme/css?' + p.toString(), { cache: 'no-store' })
         .then(r => r.text())
         .then(css => {
@@ -213,6 +221,11 @@ $bgImage = $ov['chat_bg_image'] ?? '';
   document.getElementById('theme-sidebar').addEventListener('input', (e) => { state.sidebar = e.target.value; renderPreview(); });
   document.getElementById('theme-bg-color').addEventListener('input', (e) => { state.chat_bg_color = e.target.value; renderPreview(); });
   document.getElementById('theme-bg-fit').addEventListener('change', (e) => { state.chat_bg_fit = e.target.value; renderPreview(); });
+  document.getElementById('theme-bg-overlay').addEventListener('input', (e) => {
+    state.chat_bg_overlay = parseInt(e.target.value, 10) || 0;
+    document.getElementById('bg-overlay-label').textContent = state.chat_bg_overlay + '%';
+    renderPreview();
+  });
 
   document.querySelectorAll('.clear-btn').forEach(el => {
     el.addEventListener('click', () => {
@@ -226,7 +239,7 @@ $bgImage = $ov['chat_bg_image'] ?? '';
   });
 
   // ── Save (single form, hidden inputs kept in sync) ─────────────────────────
-  const fields = ['preset', 'mode', 'accent', 'sidebar', 'font', 'chat_bg_color', 'chat_bg_fit', 'chat_bg_image'];
+  const fields = ['preset', 'mode', 'accent', 'sidebar', 'font', 'chat_bg_color', 'chat_bg_fit', 'chat_bg_overlay', 'chat_bg_image'];
   fields.forEach(k => {
     const h = document.createElement('input');
     h.type = 'hidden';

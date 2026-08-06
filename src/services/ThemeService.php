@@ -34,6 +34,10 @@ final class ThemeService
 
     public const CHAT_BG_FITS = ['contain', 'cover', 'repeat'];
 
+    /** Default overlay opacity (0–100) between chat text and a background image.
+     *  Dark mode overlays black, light mode overlays white. */
+    public const CHAT_BG_OVERLAY_DEFAULT = 55;
+
     private const CSS_VARS = [
         'blurple' => '--c-blurple', 'blurple_dark' => '--c-blurple-dark',
         'd_100' => '--c-d-100', 'd_200' => '--c-d-200', 'd_300' => '--c-d-300',
@@ -217,6 +221,10 @@ final class ThemeService
         if (in_array($overrides['chat_bg_fit'] ?? '', self::CHAT_BG_FITS, true)) {
             $o['chat_bg_fit'] = $overrides['chat_bg_fit'];
         }
+        $overlay = (int) ($overrides['chat_bg_overlay'] ?? -1);
+        if ($overlay >= 0 && $overlay <= 100) {
+            $o['chat_bg_overlay'] = $overlay;
+        }
         $mode = (string) ($theme['mode'] ?? '');
         if (!in_array($mode, ['light', 'dark'], true)) {
             $mode = '';
@@ -316,6 +324,9 @@ final class ThemeService
             'chat_bg_color' => self::hex((string) ($o['chat_bg_color'] ?? '')) ?: '',
             'chat_bg_image' => self::localPath((string) ($o['chat_bg_image'] ?? '')) ?: '',
             'chat_bg_fit' => in_array($o['chat_bg_fit'] ?? '', self::CHAT_BG_FITS, true) ? (string) $o['chat_bg_fit'] : 'contain',
+            'chat_bg_overlay' => isset($o['chat_bg_overlay']) && $o['chat_bg_overlay'] >= 0 && $o['chat_bg_overlay'] <= 100
+                ? (int) $o['chat_bg_overlay']
+                : self::CHAT_BG_OVERLAY_DEFAULT,
         ];
     }
 
@@ -350,6 +361,7 @@ final class ThemeService
         $color = $r['chat_bg_color'];
         $image = $r['chat_bg_image'];
         $fit = $r['chat_bg_fit'];
+        $overlay = $r['chat_bg_overlay'] ?? self::CHAT_BG_OVERLAY_DEFAULT;
         if ($channel) {
             $hasChannelBg = false;
             if ($hex = self::hex((string) ($channel['bg_color'] ?? ''))) {
@@ -361,11 +373,14 @@ final class ThemeService
                 $hasChannelBg = true;
             }
             if ($hasChannelBg) {
-                // A channel's own background defaults to "contain" regardless of
-                // the theme's fit, and is stored per-channel (channels.bg_fit).
+                // A channel's own background defaults to "contain" (and its own
+                // overlay opacity) regardless of the theme, stored per-channel.
                 $fit = in_array($channel['bg_fit'] ?? '', self::CHAT_BG_FITS, true)
                     ? (string) $channel['bg_fit']
                     : 'contain';
+                $overlay = isset($channel['bg_overlay']) && $channel['bg_overlay'] >= 0 && $channel['bg_overlay'] <= 100
+                    ? (int) $channel['bg_overlay']
+                    : self::CHAT_BG_OVERLAY_DEFAULT;
             }
         }
         $css = '#messages{';
@@ -376,11 +391,20 @@ final class ThemeService
         if ($image !== '') {
             $size = $fit === 'repeat' ? 'auto' : $fit;
             $pos = $fit === 'repeat' ? '' : 'background-position:center;';
-            $overlayDark = 'rgba(0,0,0,.55)';
-            $overlayLight = 'rgba(255,255,255,.4)';
-            $css .= "#messages.theme-bg-image{background-image:linear-gradient({$overlayDark},{$overlayDark}),url('{$image}');";
+            $a = number_format(max(0, min(100, $overlay)) / 100, 2, '.', '');
+            if ((int) $overlay > 0) {
+                // A translucent layer between the text and the image (black in
+                // dark mode, white in light mode) keeps text readable over busy
+                // images; opacity is user/admins/channel-owner adjustable.
+                $darkBg = "linear-gradient(rgba(0,0,0,{$a}),rgba(0,0,0,{$a})),url('{$image}')";
+                $lightBg = "linear-gradient(rgba(255,255,255,{$a}),rgba(255,255,255,{$a})),url('{$image}')";
+            } else {
+                $darkBg = "url('{$image}')";
+                $lightBg = "url('{$image}')";
+            }
+            $css .= "#messages.theme-bg-image{background-image:{$darkBg};";
             $css .= "background-size:{$size};{$pos}background-attachment:fixed;}";
-            $css .= "html.light #messages.theme-bg-image{background-image:linear-gradient({$overlayLight},{$overlayLight}),url('{$image}');}";
+            $css .= "html.light #messages.theme-bg-image{background-image:{$lightBg};}";
         }
         return $css;
     }
@@ -398,6 +422,7 @@ final class ThemeService
                 'chat_bg_color' => (string) ($params['chat_bg_color'] ?? ''),
                 'chat_bg_image' => (string) ($params['chat_bg_image'] ?? ''),
                 'chat_bg_fit' => (string) ($params['chat_bg_fit'] ?? ''),
+                'chat_bg_overlay' => (int) ($params['chat_bg_overlay'] ?? -1),
             ],
         ]);
         $rendered = self::render($theme);
@@ -417,6 +442,7 @@ final class ThemeService
                 'chat_bg_color' => (string) ($params['chat_bg_color'] ?? ''),
                 'chat_bg_image' => (string) ($params['chat_bg_image'] ?? ''),
                 'chat_bg_fit' => (string) ($params['chat_bg_fit'] ?? ''),
+                'chat_bg_overlay' => (int) ($params['chat_bg_overlay'] ?? -1),
             ],
         ]));
     }

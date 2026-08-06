@@ -205,6 +205,11 @@ final class SoundService
         foreach (self::overrides($user) as $uid => $o) {
             $overrides[$uid] = $o['sound_id'];
         }
+        // A per-user mute silences that person across every surface, so their
+        // sound override is forced off regardless of any custom sound choice.
+        foreach (PushService::mutedList($user) as $m) {
+            $overrides[(int) $m['muted_user_id']] = null;
+        }
         $prefs = self::prefsFor($user);
         return [
             'sounds' => $sounds,

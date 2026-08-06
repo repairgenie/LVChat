@@ -236,12 +236,131 @@ MessageService::send((int) $ch['id'], $alice, '@bob you are unmuted');
 $afterNotif2 = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
 check('unmuted user gets mention notification again', $afterNotif2 > $afterNotif);
 
+// --- Push notifications ---
+echo "== push notifications ==\n";
+$pk = PushService::publicKey();
+check('vapid public key provisioned (65-byte point)', strlen(PushService::b64uDecode($pk)) === 65);
+check('vapid keypair idempotent', PushService::publicKey() === $pk);
+check('base64url roundtrip', PushService::b64uDecode(PushService::b64uEncode("abc\x00\xff123")) === "abc\x00\xff123");
+check('base64url decodes unpadded', PushService::b64uDecode('YQ') === 'a');
+$point = "\x04" . str_repeat("\x01", 64); // 65-byte uncompressed point shape
+$auth = str_repeat("\xAB", 16);
+
+// RFC 8291 aes128gcm: encrypt then decrypt with the client's private key.
+$ua = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+$uaDet = openssl_pkey_get_details($ua);
+$uaRaw = (string) substr(base64_decode((string) preg_replace('/\s+/', '', (string) preg_replace('/-----[A-Z ]+-----/', '', $uaDet['key']))), -65);
+$enc = PushService::encryptPayload('{"type":"dm","title":"alice"}', $uaRaw, $auth);
+check('encryptPayload returns aes128gcm body', is_string($enc) && strlen($enc) > 86, strlen((string) $enc) . '');
+$serverPub = substr((string) $enc, 21, 65);
+$shared = openssl_pkey_derive(
+    "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode("\x30\x59\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07\x03\x42\x00" . $serverPub), 64) . "-----END PUBLIC KEY-----\n",
+    $ua
+);
+$prk = hash_hmac('sha256', $shared, $auth, true);
+$cek = PushService::hkdfExpand($prk, 'WebPush: info' . "\x00" . $uaRaw . $serverPub, 16);
+$nonce = PushService::hkdfExpand($prk, 'Content-Encoding: nonce' . "\x00", 12);
+$dec = openssl_decrypt(substr((string) $enc, 86, -16), 'aes-128-gcm', $cek, OPENSSL_RAW_DATA, $nonce, substr((string) $enc, -16), substr((string) $enc, 0, 86));
+check('RFC 8291 encrypt/decrypt roundtrip', $dec === '{"type":"dm","title":"alice"}' . "\x02", bin2hex((string) $dec));
+
+// Pure decision helpers.
+check('channelDecision all delivers', PushService::channelDecision(1, false, 'all', 'hi', 'bob') === true);
+check('channelDecision muted user blocks', PushService::channelDecision(1, true, 'all', 'hi', 'bob') === false);
+check('channelDecision pref off blocks', PushService::channelDecision(0, false, 'all', 'hi', 'bob') === false);
+check('channelDecision channel muted blocks', PushService::channelDecision(1, false, 'muted', 'hi', 'bob') === false);
+check('channelDecision mentions non-match blocks', PushService::channelDecision(1, false, 'mentions', 'hi everyone', 'bob') === false);
+check('channelDecision mentions match delivers', PushService::channelDecision(1, false, 'mentions', 'hi @Bob!', 'bob') === true);
+check('dmDecision', PushService::dmDecision(1, false) === true && PushService::dmDecision(1, true) === false && PushService::dmDecision(0, false) === false);
+check('inviteDecision', PushService::inviteDecision(1, false) === true && PushService::inviteDecision(0, false) === false && PushService::inviteDecision(1, true) === false);
+check('mentioned matches nick case-insensitively', PushService::mentioned('hi @BOB', 'bob') === true && PushService::mentioned('hi @carol', 'bob') === false);
+
+// Global per-context prefs (default all on).
+$prefs = PushService::prefs($bob);
+check('push prefs default all on', $prefs === ['channels' => 1, 'dms' => 1, 'invites' => 1]);
+PushService::savePrefs($bob, 0, 1, 1);
+check('push prefs channels off saved', PushService::prefs($bob)['channels'] === 0 && PushService::prefs($bob)['dms'] === 1);
+PushService::savePrefs($bob, 1, 1, 1);
+check('push prefs restored', PushService::prefs($bob) === ['channels' => 1, 'dms' => 1, 'invites' => 1]);
+
+// Subscriptions.
+check('subscribe ok', PushService::subscribe($bob, 'https://127.0.0.1:59999/a', PushService::b64uEncode($point), PushService::b64uEncode($auth)) === true);
+check('subscribe rejects non-https endpoint', is_string(PushService::subscribe($bob, 'http://127.0.0.1:59999/b', PushService::b64uEncode($point), PushService::b64uEncode($auth))));
+check('subscribe rejects bad p256dh', is_string(PushService::subscribe($bob, 'https://127.0.0.1:59999/c', 'not-a-key', PushService::b64uEncode($auth))));
+check('subscribe rejects bad auth', is_string(PushService::subscribe($bob, 'https://127.0.0.1:59999/d', PushService::b64uEncode($point), 'short')));
+PushService::subscribe($bob, 'https://127.0.0.1:59999/e', PushService::b64uEncode($point), PushService::b64uEncode($auth));
+check('second device subscribed', (int) Database::scalar('SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?', [$bob['id']]) === 2);
+PushService::subscribe($alice, 'https://127.0.0.1:59999/a', PushService::b64uEncode($point), PushService::b64uEncode($auth));
+check('endpoint re-registered to new user', (int) Database::scalar('SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?', [$bob['id']]) === 1);
+PushService::unsubscribe($bob);
+check('unsubscribe removes rows', (int) Database::scalar('SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?', [$bob['id']]) === 0);
+
+// Per-user mutes (all surfaces).
+PushService::addMute($bob, (int) $alice['id']);
+check('isMuted true after mute', PushService::isMuted((int) $bob['id'], (int) $alice['id']) === true);
+check('cannot mute self', is_string(PushService::addMute($bob, (int) $bob['id'])));
+check('cannot mute unknown user', is_string(PushService::addMute($bob, 999999)));
+$before = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+$pmMute = MessageService::insertPm($alice, $bob, 'muted dm');
+MessageService::notifyDm($bob, $alice, $pmMute);
+check('muted sender gets no DM bell notification', (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]) === $before);
+$before = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+MessageService::send((int) $ch['id'], $alice, '@bob muted mention');
+check('muted sender gets no mention notification', (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]) === $before);
+$sums = MessageService::dmSummaries($bob);
+$muteSum = null;
+foreach ($sums as $s) { if ((int) $s['user_id'] === (int) $alice['id']) $muteSum = $s; }
+check('dmSummaries flags muted partner', is_array($muteSum) && (int) $muteSum['muted'] === 1, json_encode($muteSum));
+$sfx = SoundService::soundsForClient($bob);
+check('muted user forced off in sound overrides', array_key_exists((int) $alice['id'], $sfx['overrides']) && $sfx['overrides'][(int) $alice['id']] === null);
+PushService::removeMute($bob, (int) $alice['id']);
+check('isMuted false after unmute', PushService::isMuted((int) $bob['id'], (int) $alice['id']) === false);
+$sums = MessageService::dmSummaries($bob);
+foreach ($sums as $s) { if ((int) $s['user_id'] === (int) $alice['id']) $muteSum = $s; }
+check('dmSummaries clears muted flag', is_array($muteSum) && (int) $muteSum['muted'] === 0);
+$sfx = SoundService::soundsForClient($bob);
+check('unmute restores sound overrides', !array_key_exists((int) $alice['id'], $sfx['overrides']));
+Database::query('DELETE FROM private_messages WHERE id = ?', [$pmMute]);
+
+// Invite notifications + mute gating.
+$before = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+$inv = CommandParser::run('/invite bob #test', $alice, $ch);
+check('/invite creates a bell notification', (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]) > $before, $inv['replies'][0] ?? '');
+PushService::addMute($bob, (int) $alice['id']);
+$before = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]);
+$inv = CommandParser::run('/invite bob #test', $alice, $ch);
+check('muted inviter gets no invite notification', (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ?', [$bob['id']]) === $before);
+PushService::removeMute($bob, (int) $alice['id']);
+
+// send() keeps working with the push hook wired in (no subscriptions = no-op).
+$m = MessageService::send((int) $ch['id'], $alice, 'push hook no-op');
+check('send works with push hook', is_array($m) && (int) $m['id'] > 0);
+
+// Guest senders still reach members' pushes (regression: a NULL sender_id used
+// to filter everyone out of the channelMessage query). We observe the dispatch
+// firing by the subscription's last_seen being bumped after a best-effort send.
+// A real on-curve point is needed so the RFC 8291 encryption succeeds.
+$realKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+$realPoint = (string) substr(base64_decode((string) preg_replace('/\s+/', '', (string) preg_replace('/-----[A-Z ]+-----/', '', openssl_pkey_get_details($realKey)['key']))), -65);
+check('real EC point for push test', strlen($realPoint) === 65);
+PushService::subscribe($bob, 'https://127.0.0.1:59999/g', PushService::b64uEncode($realPoint), PushService::b64uEncode($auth));
+Database::query('UPDATE push_subscriptions SET last_seen = NULL WHERE user_id = ?', [$bob['id']]);
+$guestP = Auth::loginGuest('guest_push', true);
+check('guest logs in for push test', $guestP !== null);
+ChannelService::join($ch, $guestP);
+$gm = MessageService::send((int) $ch['id'], $guestP, 'guest message reaches members');
+$seen = Database::scalar('SELECT last_seen FROM push_subscriptions WHERE user_id = ?', [$bob['id']]);
+check('guest message triggers push to a subscribed member', is_array($gm) && $seen !== null && $seen !== false, json_encode($seen));
+PushService::unsubscribe($bob);
+
 // --- Slash commands ---
 echo "== slash commands ==\n";
 $res = CommandParser::run('/help', $alice, $ch);
 check('/help returns lines', count($res['replies']) > 5);
 $res = CommandParser::run('/topic #test this is a topic', $alice, $ch);
 check('/topic set', $res['replies'][0] === 'Topic set to: this is a topic', $res['replies'][0] ?? '');
+check('/topic returns new topic for the header', ($res['topic_set'] ?? '') === 'this is a topic' && ($res['topic_channel'] ?? '') === 'test', json_encode($res));
+$res = CommandParser::run('/topic #test', $alice, $ch);
+check('/topic view has no header payload', !array_key_exists('topic_set', $res), json_encode($res));
 $res = CommandParser::run('/whois bob', $alice, $ch);
 check('/whois', count($res['replies']) >= 1);
 $res = CommandParser::run('/kick bob test reason', $alice, $ch);
@@ -1231,9 +1350,20 @@ check('customization re-enabled', ThemeService::customizationEnabled() === true)
 
 $bg = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'mode' => 'dark', 'overrides' => ['chat_bg_color' => '#123456', 'chat_bg_image' => '/assets/themes/x.webp', 'chat_bg_fit' => 'cover']]));
 check('chat bg css has color + image + overlay', str_contains($bg, '#123456') && str_contains($bg, 'theme-bg-image') && str_contains($bg, 'url(\'/assets/themes/x.webp\')'));
+check('overlay defaults to 55% black in dark', str_contains($bg, 'rgba(0,0,0,0.55)'));
+$bgLight = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'mode' => 'light', 'overrides' => ['chat_bg_image' => '/assets/themes/x.webp']]));
+check('overlay is white in light mode', str_contains($bgLight, 'rgba(255,255,255,0.55)'));
+$bgNone = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'overrides' => ['chat_bg_image' => '/assets/themes/x.webp', 'chat_bg_overlay' => 0]]));
+check('overlay 0 disables the layer', !str_contains($bgNone, 'linear-gradient') && str_contains($bgNone, "url('/assets/themes/x.webp')"));
+$bgMax = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'overrides' => ['chat_bg_image' => '/assets/themes/x.webp', 'chat_bg_overlay' => 100]]));
+check('overlay 100 is fully opaque', str_contains($bgMax, 'rgba(0,0,0,1.00)'));
+check('overlay >100 falls back to default', (int) ThemeService::render(['preset' => 'midnight', 'overrides' => ['chat_bg_overlay' => 500]])['chat_bg_overlay'] === ThemeService::CHAT_BG_OVERLAY_DEFAULT);
 $chan = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight']), ['bg_color' => '#abcdef', 'bg_image' => '/assets/themes/c.webp']);
 check('channel bg overrides theme bg', str_contains($chan, '#abcdef') && str_contains($chan, 'c.webp') && !str_contains($chan, '123456'));
 check('channel bg defaults to contain', str_contains($chan, 'background-size:contain;') && !str_contains($chan, 'background-size:cover;'));
+check('channel bg overlay defaults to 55', str_contains($chan, 'rgba(0,0,0,0.55)'));
+$chanOverlay = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight']), ['bg_color' => '#abcdef', 'bg_image' => '/assets/themes/c.webp', 'bg_overlay' => 25]);
+check('channel bg_overlay honoured', str_contains($chanOverlay, 'rgba(0,0,0,0.25)') && !str_contains($chanOverlay, '0.55'));
 $chanCover = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight']), ['bg_color' => '#abcdef', 'bg_image' => '/assets/themes/c.webp', 'bg_fit' => 'cover']);
 check('channel bg_fit cover honoured', str_contains($chanCover, 'background-size:cover;'));
 $themeFit = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight', 'overrides' => ['chat_bg_image' => '/assets/themes/t.webp']]));

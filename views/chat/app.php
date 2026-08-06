@@ -173,6 +173,7 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         . ' data-bg-color="' . h((string) ($c['bg_color'] ?? '')) . '"'
         . ' data-bg-image="' . h((string) ($c['bg_image'] ?? '')) . '"'
         . ' data-bg-fit="' . h((string) ($c['bg_fit'] ?? 'contain')) . '"'
+        . ' data-bg-overlay="' . (int) ($c['bg_overlay'] ?? ThemeService::CHAT_BG_OVERLAY_DEFAULT) . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
         . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis
         . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>'
@@ -218,6 +219,8 @@ function member_html(array $m, bool $online): string {
       data-channel="<?= h($channelSlug) ?>"
       data-dm="<?= h($dmName) ?>"
       data-my-id="<?= (int) $user['id'] ?>"
+      data-my-guest="<?= (int) ($user['guest'] ?? 0) ?>"
+      data-vapid-key="<?= h(PushService::publicKey()) ?>"
       data-my-level="<?= h($currentLevel) ?>"
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
@@ -227,6 +230,7 @@ function member_html(array $m, bool $online): string {
       data-chan-bg-color="<?= h($channel['bg_color'] ?? '') ?>"
       data-chan-bg-image="<?= h($channel['bg_image'] ?? '') ?>"
       data-chan-bg-fit="<?= h($channel['bg_fit'] ?? 'contain') ?>"
+      data-chan-bg-overlay="<?= (int) ($channel['bg_overlay'] ?? ThemeService::CHAT_BG_OVERLAY_DEFAULT) ?>"
       data-version="<?= LVC_VERSION ?>"
       data-poll-ms="<?= (int) ((config_get('poll_interval', '2') ?? 2) * 1000) ?>"
       data-rt="<?= config_get('realtime', 'poll') === 'sse' ? 'sse' : (config_get('realtime', 'poll') === 'ws' ? 'ws' : 'poll') ?>"
@@ -373,7 +377,7 @@ function member_html(array $m, bool $online): string {
       <button id="sidebar-toggle" class="btn-ghost !p-1.5 text-lg leading-none" title="Toggle channel list" aria-label="Toggle channel list">☰</button>
       <?php if ($channel): ?>
       <span class="font-bold text-white text-sm"><?= h($channel['name']) ?></span>
-      <span class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= $channel['topic'] !== '' ? chat_markup_plain($channel['topic']) : '' ?></span>
+      <span id="header-topic" class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= $channel['topic'] !== '' ? chat_markup_plain($channel['topic']) : '' ?></span>
       <div class="relative ml-auto flex items-center gap-2">
         <input id="search-input" type="search" placeholder="Search chat…" autocomplete="off"
                class="input w-40 md:w-56 !py-1 !text-xs hidden md:block" title="Search messages in your channels and DMs">
@@ -783,6 +787,10 @@ function member_html(array $m, bool $online): string {
       <span>Notifications</span>
       <button id="notif-clear" class="text-xs text-discord-400 hover:text-white cursor-pointer">Mark all read</button>
     </div>
+    <div id="push-row" class="hidden px-3 py-2 border-b border-discord-700 flex items-center justify-between gap-2 text-xs shrink-0">
+      <span class="text-discord-300">🔔 Browser push</span>
+      <button id="push-enable" class="btn-ghost !py-1 !text-xs">Enable</button>
+    </div>
     <div id="notif-list" class="flex-1 overflow-y-auto scrollbar-thin p-1.5 text-sm min-h-0"></div>
   </div>
 
@@ -838,7 +846,7 @@ function member_html(array $m, bool $online): string {
   <!-- Channel background modal (channel owner sets the chat background) -->
   <div id="chan-bg-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/70" data-chan-bg-close></div>
-    <div class="relative card p-6 w-[min(92vw,440px)] shadow-2xl">
+    <div class="relative card p-6 w-[min(92vw,440px)] shadow-2xl max-h-[85vh] overflow-y-auto scrollbar-thin">
       <button type="button" data-chan-bg-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
       <h2 class="text-lg font-bold text-white">Channel background</h2>
       <p class="text-xs text-discord-400 mt-1 mb-4">Everyone viewing this channel sees this behind the message list.</p>
@@ -860,6 +868,11 @@ function member_html(array $m, bool $online): string {
             <option value="<?= h($f) ?>" <?= ($channel['bg_fit'] ?? 'contain') === $f ? 'selected' : '' ?>><?= h(ucfirst($f)) ?></option>
             <?php endforeach; ?>
           </select>
+        </div>
+        <div>
+          <label class="label">Overlay opacity <span id="chan-bg-overlay-label" class="text-discord-400 normal-case"><?= (int) ($channel['bg_overlay'] ?? ThemeService::CHAT_BG_OVERLAY_DEFAULT) ?>%</span></label>
+          <input type="range" id="chan-bg-overlay" min="0" max="100" step="5" value="<?= (int) ($channel['bg_overlay'] ?? ThemeService::CHAT_BG_OVERLAY_DEFAULT) ?>" class="w-full accent-blurple cursor-pointer">
+          <p class="text-xs text-discord-400 mt-1">A translucent layer between the text and the image — raise it when a busy image makes chat hard to read.</p>
         </div>
         <div class="flex gap-2">
           <button id="chan-bg-save" class="btn-primary flex-1 justify-center">Save background</button>
@@ -972,6 +985,9 @@ function member_html(array $m, bool $online): string {
   </div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
+  <!-- Live realtime transport badge; filled in by app.js so silent poll/SSE
+       fallbacks are visible instead of looking like healthy WebSockets. -->
+  <div id="rt-badge" class="hidden fixed bottom-3 left-3 z-50 px-2 py-1 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wide pointer-events-none select-none" hidden></div>
   <script src="/assets/vendor/ai/marked.min.js"></script>
   <script src="/assets/vendor/ai/purify.min.js"></script>
   <script src="/assets/vendor/ai/highlight.min.js"></script>

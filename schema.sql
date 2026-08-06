@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS channels (
   bg_image TEXT,
   bg_color TEXT,
   bg_fit TEXT NOT NULL DEFAULT 'contain',
+  bg_overlay INTEGER NOT NULL DEFAULT 55,
   successor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registered_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -552,3 +553,49 @@ CREATE TABLE IF NOT EXISTS ws_tickets (
 );
 CREATE INDEX IF NOT EXISTS idx_ws_tickets_token ON ws_tickets(token);
 CREATE INDEX IF NOT EXISTS idx_ws_tickets_expires ON ws_tickets(expires_at);
+
+-- Browser push (Web Push) subscriptions: one row per user per device/browser.
+-- endpoint/p256dh/auth come from the PushSubscription the browser hands us.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
+
+-- Per-user push notification toggles. Absence of a row = everything on.
+-- These gate push delivery only (the in-app bell and sounds are separate).
+CREATE TABLE IF NOT EXISTS user_push_prefs (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  channels INTEGER NOT NULL DEFAULT 1,
+  dms INTEGER NOT NULL DEFAULT 1,
+  invites INTEGER NOT NULL DEFAULT 1
+);
+
+-- Per-user mute list: mutes a person across every notification surface —
+-- push, the in-app bell, sounds, and DM toasts. Distinct from Block: a
+-- muted user can still message you; you just aren't alerted.
+CREATE TABLE IF NOT EXISTS user_mutes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  muted_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, muted_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_mutes_user ON user_mutes(user_id);
+
+-- Realtime transport report: each browser records which realtime transport it
+-- actually uses (ws/sse/poll) so the admin UI can surface silent fallbacks
+-- instead of showing a phantom WebSocket connection count.
+CREATE TABLE IF NOT EXISTS rt_transports (
+  actor_id INTEGER NOT NULL,
+  guest INTEGER NOT NULL DEFAULT 0,
+  transport TEXT NOT NULL DEFAULT 'poll',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (actor_id, guest)
+);
+CREATE INDEX IF NOT EXISTS idx_rt_transports_updated ON rt_transports(updated_at);

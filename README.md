@@ -46,6 +46,16 @@ services from Anope.
   (custom sound or mute) all configurable from your profile. Admins upload the
   alert sounds (**Admin → Sounds**); three defaults ship built-in and every
   sound is available to all users
+- **Push notifications** — real OS/browser notifications (Web Push via the
+  service worker, no external library: hand-rolled VAPID + RFC 8291 encryption
+  on the built-in openssl/curl) for channel messages, DMs, and channel invites,
+  delivered even when the chat is in the background or closed. Per-channel
+  muting (the 🔔 button), per-user muting (mutes someone across push, the bell,
+  sounds, and DM toasts — distinct from blocking), and per-context off-switches
+  (channel messages / DMs / invites) all live in your profile; a one-click
+  **Enable notifications** button sits in the chat's bell panel. Requires HTTPS.
+  Notifications collapse per channel/sender and are suppressed when you're
+  already looking at that conversation
 - **Themes & appearance** — a server-wide theme with a library of **75 preset
   colour schemes** (curated anchors + generated sidebar/accent combinations),
   custom accent/sidebar colours, a font choice, and a chat background colour or

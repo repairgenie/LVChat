@@ -8,6 +8,8 @@
   const DM = body.dataset.dm || '';
   const MY_ID = parseInt(body.dataset.myId || '0', 10);
   const MY_NICK = (body.dataset.myNick || '').toLowerCase();
+  const IS_GUEST = body.dataset.myGuest === '1';
+  const VAPID_KEY = body.dataset.vapidKey || '';
   const MY_LEVEL = body.dataset.myLevel || 'normal';
   const CAN_OP = body.dataset.canOp === '1';
   const CAN_ADMIN = body.dataset.canAdmin === '1';
@@ -357,6 +359,15 @@
     maybeScroll();
     scrollBottomWhenImagesLoad(msgsEl.lastElementChild);
     bindMessageActions();
+    // A "… set the topic to: X" system message updates the header topic too,
+    // so every viewer sees the change without a refresh.
+    if (m.kind === 'topic' && m.content) {
+      const match = /set the topic to: (.+)$/.exec(String(m.content));
+      if (match) {
+        const hdr = document.getElementById('header-topic');
+        if (hdr) hdr.innerHTML = match[1] ? linkifyInline(match[1]) : '';
+      }
+    }
     if ((m.kind === 'ai_response' || m.bot === 1) && typeof hljs !== 'undefined') {
       const el = msgsEl.lastElementChild;
       if (el) el.querySelectorAll('pre code').forEach((block) => { try { hljs.highlightElement(block); } catch (e) {} });
@@ -799,7 +810,7 @@
     } else {
       list.forEach((d) => {
         const prev = dmSeen[d.user_id] || 0;
-        if (d.last_id > prev && d.unread > 0 && DM !== d.username) {
+        if (d.last_id > prev && d.unread > 0 && DM !== d.username && !d.muted) {
           showDmToast(d);
           const sid = resolveSound(parseInt(d.user_id, 10) || null, SOUND_DATA.dm);
           if (sid) playSound(sid);
@@ -1240,6 +1251,92 @@
     });
   });
 
+  // ── Push notifications (Web Push) ──────────────────────────────────────────
+  // Real OS/browser notifications delivered by the service worker. Only
+  // registered users can subscribe (guests have no account), and the browser
+  // must be a secure context with PushManager support.
+  const pushSupported = !IS_GUEST && !!VAPID_KEY && ('serviceWorker' in navigator)
+    && ('PushManager' in window) && ('Notification' in window) && window.isSecureContext;
+
+  function b64uToBytes(b64) {
+    const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  function b64uFromBytes(bytes) {
+    let bin = '';
+    bytes.forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function pushSubPayload(sub) {
+    const p256 = sub.getKey ? sub.getKey('p256dh') : null;
+    const auth = sub.getKey ? sub.getKey('auth') : null;
+    if (!p256 || !auth) return null;
+    return { endpoint: sub.endpoint, p256dh: b64uFromBytes(new Uint8Array(p256)), auth: b64uFromBytes(new Uint8Array(auth)) };
+  }
+  function subscribePush() {
+    return Notification.requestPermission().then((perm) => {
+      if (perm !== 'granted') return false;
+      return navigator.serviceWorker.ready
+        .then((reg) => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(VAPID_KEY) }))
+        .then((sub) => {
+          const payload = pushSubPayload(sub);
+          if (!payload) return false;
+          return new Promise((resolve) => {
+            post('/api/push/subscribe', payload, () => resolve(true), () => resolve(false));
+          });
+        })
+        .catch(() => false);
+    });
+  }
+  function unsubscribePush() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => { if (sub) return sub.unsubscribe(); })
+      .catch(() => {})
+      .then(() => post('/api/push/unsubscribe', {}, () => {}));
+  }
+  // If the browser holds a subscription the server doesn't know about (a fresh
+  // DB, or cleared rows), re-register it so pushes keep flowing.
+  function syncPush() {
+    if (!pushSupported || Notification.permission !== 'granted') return;
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => {
+        const payload = sub ? pushSubPayload(sub) : null;
+        if (payload) post('/api/push/subscribe', payload, () => {});
+      })
+      .catch(() => {});
+  }
+  const pushRow = document.getElementById('push-row');
+  const pushEnable = document.getElementById('push-enable');
+  function renderPushRow() {
+    if (!pushRow) return;
+    if (!pushSupported) { pushRow.classList.add('hidden'); return; }
+    if (Notification.permission === 'granted') {
+      navigator.serviceWorker.ready
+        .then((reg) => reg.pushManager.getSubscription())
+        .then((sub) => {
+          if (sub) pushRow.classList.add('hidden');
+          else { pushRow.classList.remove('hidden'); pushEnable.textContent = 'Enable'; pushEnable.disabled = false; }
+        })
+        .catch(() => pushRow.classList.add('hidden'));
+    } else {
+      pushRow.classList.remove('hidden');
+      const denied = Notification.permission === 'denied';
+      pushEnable.textContent = denied ? 'Blocked' : 'Enable';
+      pushEnable.disabled = denied;
+      pushEnable.title = denied ? 'Push is blocked in your browser settings' : 'Get OS notifications for new messages, DMs, and invites';
+    }
+  }
+  if (pushEnable) pushEnable.addEventListener('click', () => {
+    subscribePush().then((ok) => { if (ok) { showReply('🔔 Push notifications enabled.'); renderPushRow(); } });
+  });
+  syncPush();
+  renderPushRow();
+
   // ── Sending / commands ─────────────────────────────────────────────────────
   if (form) form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1254,6 +1351,7 @@
         if (j.action === 'browse') { openBrowse(); (j.replies || []).forEach((r) => showReply(r)); return; }
         if (j.copy) copyText(j.copy);
         (j.replies || []).forEach((r) => showReply(r));
+        refreshHeaderTopic(j);
       });
     } else if (CHANNEL || DM) {
       const payload = DM
@@ -1888,10 +1986,20 @@
     return ok;
   }
 
+  // After a command that changed the topic, update the header line next to the
+  // channel name right away (only for the channel currently being viewed).
+  function refreshHeaderTopic(j) {
+    if (j.topic_set === undefined || j.topic_channel !== CHANNEL) return;
+    const hdr = document.getElementById('header-topic');
+    if (!hdr) return;
+    hdr.innerHTML = j.topic_set ? linkifyInline(j.topic_set) : '';
+  }
+
   function runCommand(text) {
     post('/api/command', { channel: CHANNEL, text }, (j) => {
       if (j.redirect) { window.location = j.redirect; return; }
       if (j.replies) j.replies.forEach((r) => showReply(r));
+      refreshHeaderTopic(j);
     });
   }
 
@@ -1995,7 +2103,7 @@
       items.push({ label: 'Mute ' + nick, onClick: () => {
         const uid = el.dataset.userId || el.closest('[data-user-id]')?.dataset.userId || '';
         if (uid && parseInt(uid, 10) > 0) {
-          post('/api/sound/override', { target_user_id: uid, sound: '0' }, () => showReply('Muted ' + nick + '.'));
+          post('/api/push/mute', { user_id: uid }, () => showReply('Muted ' + nick + ' — no notifications from them.'));
         } else {
           runCommand('/ignore ' + nick);
         }
@@ -2128,6 +2236,8 @@
   const chanBgFile = document.getElementById('chan-bg-file');
   const chanBgCurrent = document.getElementById('chan-bg-current');
   const chanBgFit = document.getElementById('chan-bg-fit');
+  const chanBgOverlay = document.getElementById('chan-bg-overlay');
+  const chanBgOverlayLabel = document.getElementById('chan-bg-overlay-label');
   const chanBgMsg = document.getElementById('chan-bg-msg');
   let chanBgSlug = '';
   function openChanBg(slug, el) {
@@ -2139,8 +2249,11 @@
     const bgColor = (el && el.dataset.bgColor) || body.dataset.chanBgColor || '';
     const bgImage = (el && el.dataset.bgImage) || body.dataset.chanBgImage || '';
     const bgFit = (el && el.dataset.bgFit) || body.dataset.chanBgFit || 'contain';
+    const bgOverlay = parseInt((el && el.dataset.bgOverlay) || body.dataset.chanBgOverlay || '55', 10) || 55;
     if (chanBgColor) chanBgColor.value = bgColor || '#2b2d31';
     if (chanBgFit) chanBgFit.value = bgFit;
+    if (chanBgOverlay) chanBgOverlay.value = bgOverlay;
+    if (chanBgOverlayLabel) chanBgOverlayLabel.textContent = bgOverlay + '%';
     if (chanBgCurrent) {
       chanBgCurrent.classList.toggle('hidden', !bgImage);
       chanBgCurrent.innerHTML = bgImage
@@ -2157,6 +2270,9 @@
   }
   const chanBgClear = document.getElementById('chan-bg-color-clear');
   if (chanBgClear) chanBgClear.addEventListener('click', () => { if (chanBgColor) chanBgColor.value = '#000000'; });
+  if (chanBgOverlay) chanBgOverlay.addEventListener('input', () => {
+    if (chanBgOverlayLabel) chanBgOverlayLabel.textContent = chanBgOverlay.value + '%';
+  });
   const chanBgSave = document.getElementById('chan-bg-save');
   if (chanBgSave) chanBgSave.addEventListener('click', () => {
     if (!chanBgSlug) return;
@@ -2165,6 +2281,7 @@
     fd.append('channel', chanBgSlug);
     fd.append('bg_color', chanBgColor ? chanBgColor.value : '');
     fd.append('bg_fit', chanBgFit ? chanBgFit.value : 'contain');
+    fd.append('bg_overlay', chanBgOverlay ? chanBgOverlay.value : '55');
     if (chanBgFile && chanBgFile.files && chanBgFile.files[0]) fd.append('file', chanBgFile.files[0]);
     fetch('/api/channel/bg', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
       .then((r) => r.json().catch(() => ({ error: 'Server error (' + r.status + ')' })))
@@ -2400,7 +2517,7 @@
   if (dmMuteBtn) dmMuteBtn.addEventListener('click', () => {
     const uid = parseInt(dmMuteBtn.dataset.userId || '0', 10);
     if (!uid) return;
-    post('/api/sound/override', { target_user_id: uid, sound: '0' }, () => showReply('Muted.'));
+    post('/api/push/mute', { user_id: uid }, () => showReply('Muted — no notifications from them.'));
   });
   const dmBlockBtn = document.getElementById('dm-block-btn');
   if (dmBlockBtn) dmBlockBtn.addEventListener('click', () => {
@@ -2615,7 +2732,30 @@
   // the sidebar summaries (DM list, unread badges, presence counts, friends,
   // bell) stay fresh without a per-event push for each of them.
   const rtMode = body.dataset.rt || 'poll';
+
+  // Tell the server — and show the user — which transport actually won. This
+  // surfaces silent fallbacks: "websockets configured but everyone is on
+  // polling" becomes visible instead of a phantom 0 in the gateway counter.
+  let liveTransport = '';
+  const RT_BADGE_STYLES = { ws: 'bg-green-600/80 text-white', sse: 'bg-sky-600/80 text-white', poll: 'bg-amber-600/80 text-white' };
+  function showTransport(t) {
+    if (t === liveTransport) return;
+    liveTransport = t;
+    const badge = document.getElementById('rt-badge');
+    if (badge) {
+      badge.textContent = t === 'ws' ? 'websocket' : (t === 'sse' ? 'sse' : 'polling');
+      badge.className = 'fixed bottom-3 left-3 z-50 px-2 py-1 rounded-md text-[10px] font-mono font-semibold uppercase tracking-wide pointer-events-none select-none ' + (RT_BADGE_STYLES[t] || RT_BADGE_STYLES.poll);
+      badge.hidden = false;
+    }
+    fetch('/api/rt/report', {
+      method: 'POST',
+      headers: { 'X-CSRF': CSRF },
+      body: new URLSearchParams({ transport: t }),
+    }).catch(() => {});
+  }
+
   function startPolling() {
+    showTransport('poll');
     setTimeout(poll, Math.floor(Math.random() * pollMs));
     schedulePoll();
   }
@@ -2625,6 +2765,7 @@
     let wsFails = 0;
     let wsGone = false;
     let reconcileTimer = null;
+    let wsRetryTimer = null;
     let wsBase = body.dataset.wsUrl || '';
     let wsTicket = body.dataset.rtTicket;
 
@@ -2646,7 +2787,19 @@
     }
     function fallbackToPoll() {
       if (reconcileTimer) { clearInterval(reconcileTimer); reconcileTimer = null; }
+      showTransport('poll');
       startPolling();
+      scheduleWsRetry();
+    }
+    // A failed handshake used to fall back to polling forever. Re-probe quietly
+    // every few minutes so a later proxy fix/daemon restart re-enables realtime.
+    function scheduleWsRetry() {
+      if (wsRetryTimer) return;
+      wsRetryTimer = setInterval(() => {
+        if (wsGone || ws || document.hidden) return;
+        wsFails = 0;
+        refreshTicket(() => { if (!ws) openWs(); });
+      }, 5 * 60 * 1000);
     }
     function openWs() {
       if (wsGone) return;
@@ -2654,7 +2807,7 @@
       try { ws = new WebSocket(wsBase + sep + 'ticket=' + encodeURIComponent(wsTicket)); }
       catch (e) { ws = null; }
       if (!ws) { fallbackToPoll(); return; }
-      ws.onopen = () => { wsFails = 0; wsSubscribe(); };
+      ws.onopen = () => { wsFails = 0; showTransport('ws'); wsSubscribe(); };
       ws.onmessage = (ev) => {
         let j = null;
         try { j = JSON.parse(ev.data); } catch (err) { return; }
@@ -2686,6 +2839,7 @@
       if (DM) q.set('dm', DM);
       q.set('bg_since', bgLast);
       es = new EventSource('/api/stream?' + q.toString());
+      es.onopen = () => showTransport('sse');
       es.onmessage = (e) => {
         if (e.data === ': keepalive') return;
         try { handleRealtime(JSON.parse(e.data)); } catch (err) {}

@@ -115,7 +115,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Realtime mode</div>
-      <div class="text-xs text-discord-400">Polling is the shared-hosting default. SSE streams live updates but holds a PHP worker per client. WebSocket needs the realtime gateway daemon running.</div>
+      <div class="text-xs text-discord-400">Polling is the shared-hosting default. SSE streams live updates but holds a PHP worker per client. WebSocket needs the realtime gateway daemon running. Open chat tabs report which transport they actually landed on, so the gateway status below shows real WebSocket usage — a browser that falls back to polling (bad proxy/mixed content) is visible instead of looking like a healthy connection.</div>
     </div>
     <select name="realtime" class="input w-36 !py-1.5">
       <option value="poll" <?= ($settings['realtime'] ?? 'poll') === 'poll' ? 'selected' : '' ?>>Polling</option>
@@ -317,8 +317,22 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     function renderStatus(j) {
       if (!j || typeof j.running !== 'boolean') { statusEl.textContent = 'Unknown'; return; }
       if (j.running) {
-        statusEl.innerHTML = '<span class="text-green-400 font-semibold">● Running</span> — '
-          + (j.connections || 0) + ' connection' + (j.connections === 1 ? '' : 's')
+        var s = '<span class="text-green-400 font-semibold">● Running</span> — '
+          + (j.connections || 0) + ' connection' + (j.connections === 1 ? '' : 's');
+        // Flag a stale daemon: the port it actually bound differs from the
+        // ws_port config, so every browser connects to the wrong port and
+        // silently falls back to polling (the classic "0 connections" trap).
+        var cfgPort = parseInt(document.querySelector('input[name="ws_port"]').value, 10) || 0;
+        if (j.ws_port && cfgPort && j.ws_port !== cfgPort) {
+          s += '<span class="text-amber-400"> — ⚠ daemon is on port ' + j.ws_port + ' but config says ' + cfgPort + '. Restart the gateway to apply, or a WS_PORT env override is winning.</span>';
+        }
+        var tr = j.transports || {};
+        var parts = [];
+        if (tr.ws) parts.push(tr.ws + ' on websocket');
+        if (tr.sse) parts.push(tr.sse + ' on sse');
+        if (tr.poll) parts.push(tr.poll + ' on polling');
+        if (parts.length) s += ' — clients: ' + parts.join(', ');
+        statusEl.innerHTML = s
           + (j.pid ? ' (pid ' + j.pid + ')' : '');
         startBtn.disabled = true;
         stopBtn.disabled = false;

@@ -243,7 +243,9 @@ final class ChannelController
         $fit = in_array($_POST['bg_fit'] ?? '', ThemeService::CHAT_BG_FITS, true)
             ? (string) $_POST['bg_fit']
             : 'contain';
-        $fields = ['bg_color' => $color !== '' ? $color : null, 'bg_fit' => $fit];
+        $overlay = (int) ($_POST['bg_overlay'] ?? -1);
+        $overlay = $overlay >= 0 && $overlay <= 100 ? $overlay : ThemeService::CHAT_BG_OVERLAY_DEFAULT;
+        $fields = ['bg_color' => $color !== '' ? $color : null, 'bg_fit' => $fit, 'bg_overlay' => $overlay];
 
         $hasFile = isset($_FILES['file'])
             && !empty($_FILES['file']['tmp_name'])
@@ -265,6 +267,7 @@ final class ChannelController
             'ok' => true,
             'bg_color' => $fields['bg_color'] ?? null,
             'bg_fit' => $fit,
+            'bg_overlay' => $overlay,
             'bg_image' => $fields['bg_image'] ?? (isset($channel['bg_image']) ? (string) $channel['bg_image'] : null),
         ]);
     }
@@ -284,7 +287,7 @@ final class ChannelController
         if (!empty($channel['bg_image'])) {
             UploadService::remove((string) $channel['bg_image']);
         }
-        ChannelService::update((string) $channel['id'], ['bg_image' => null, 'bg_color' => null, 'bg_fit' => 'contain']);
+        ChannelService::update((string) $channel['id'], ['bg_image' => null, 'bg_color' => null, 'bg_fit' => 'contain', 'bg_overlay' => ThemeService::CHAT_BG_OVERLAY_DEFAULT]);
         log_audit('channel_bg_remove', $channel['name']);
         json_out(['ok' => true]);
     }
