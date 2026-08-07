@@ -359,21 +359,27 @@ The client automatically falls back to polling if the stream drops.
 
 ---
 
-## 9. Optional: desktop launcher
+## 9. Optional: desktop client
 
-The `desktop/` folder contains an **Electron multi-site chat launcher** for
-Windows/macOS/Linux. It manages several chat sites (name + URL), opens each in
-its own isolated window, and keeps running in the system tray.
+The `desktop/` folder contains the **LVChat Desktop client** for
+Windows/macOS/Linux. It is strictly a client: it connects to LVChat servers over
+HTTP(S) and contains no server-side code. A **profile manager** window stores
+multiple server profiles (name + URL, verified via `GET /api/version`), and each
+server opens in its own isolated window with a persistent session — so you stay
+logged in across restarts. Optionally save a username/password per server
+(encrypted in the OS keychain via Electron `safeStorage`) for one-click
+auto-login; accounts that require TOTP still enter the code manually.
 
 ```bash
 cd desktop
 npm install
 npm run start          # run from source
+npm test               # e2e tests against a local mock LVChat server
 npm run dist:linux     # or dist:win / dist:mac — packages an installer
 ```
 
-This is purely a client convenience — the web app works fully in a normal
-browser and nothing on the server depends on it.
+The web app itself works fully in a normal browser and nothing on the server
+depends on the desktop client.
 
 ---
 

@@ -163,6 +163,17 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
         <p class="text-xs text-discord-400 mt-1">Type any port, or pick from the list. Free in 8080–8089: <?= $wsFree ? implode(', ', $wsFree) : 'none' ?>.</p>
       </div>
     </div>
+    <div class="grid grid-cols-2 gap-4 mt-3">
+      <div>
+        <label class="label">TLS certificate path</label>
+        <input class="input font-mono" name="ws_ssl_cert" value="<?= h($settings['ws_ssl_cert'] ?? '') ?>" placeholder="/etc/letsencrypt/live/chat.example.com/fullchain.pem" autocomplete="off" spellcheck="false">
+      </div>
+      <div>
+        <label class="label">TLS private key path</label>
+        <input class="input font-mono" name="ws_ssl_key" value="<?= h($settings['ws_ssl_key'] ?? '') ?>" placeholder="/etc/letsencrypt/live/chat.example.com/privkey.pem" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <p class="text-xs text-discord-400 mt-1">To serve <code class="font-mono">wss://</code> directly, give absolute paths to a TLS certificate + key valid for this hostname (e.g. Let's Encrypt); leave both blank for plain <code class="font-mono">ws://</code>. Clients are told to use <code class="font-mono">wss://</code> automatically, and saving restarts the gateway. Alternative: terminate TLS on a reverse proxy and set <code class="font-mono">ws_url</code> to the proxied <code class="font-mono">wss://…</code> URL instead.</p>
     <div class="border-t border-discord-700 mt-3 pt-3">
       <div class="flex items-center justify-between">
         <div>

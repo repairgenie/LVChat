@@ -933,9 +933,9 @@ function member_html(array $m, bool $online): string {
         <div>
           <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">Windows · Mac · Linux</div>
           <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
-            <li><strong class="text-white">Chrome or Edge</strong> — click the <span class="text-discord-400">⭣ install</span> icon in the address bar, or open the <span class="text-discord-400">⋮</span> menu → <em>Install <?= h($site) ?></em>.</li>
+            <li><strong class="text-white">Chrome, Edge or Brave</strong> — click the <span class="text-discord-400">⭣ install</span> icon in the address bar, or open the <span class="text-discord-400">⋮</span> menu → <em>Install <?= h($site) ?></em>.</li>
             <li>The app opens in its own window and shows up in your Start menu / dock / app launcher, just like a native app.</li>
-            <li><strong class="text-white">Firefox</strong> — desktop install support is limited; use Chrome or Edge for the one-click install.</li>
+            <li><strong class="text-white">Firefox</strong> — desktop install support is limited; use Chrome, Edge, or Brave for the one-click install.</li>
             <li><strong class="text-white">Safari (Mac)</strong> — use <em>File → Add to Dock</em> to pin it like an app.</li>
           </ul>
         </div>
@@ -976,10 +976,10 @@ function member_html(array $m, bool $online): string {
       <div class="px-6 py-4 overflow-y-auto scrollbar-thin space-y-4 text-sm">
         <p class="text-discord-200">Your current browser doesn't support installing this chat as an app. To get the standalone app experience, use one of these instead:</p>
         <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
-          <li><strong class="text-white">Chrome or Edge</strong> (Windows · Mac · Linux) — click the <span class="text-discord-400">⭣ install</span> icon in the address bar, or the <span class="text-discord-400">⋮</span> menu → <em>Install <?= h($site) ?></em>.</li>
+          <li><strong class="text-white">Chrome, Edge or Brave</strong> (and other Chromium browsers · Windows · Mac · Linux) — click the <span class="text-discord-400">⭣ install</span> icon in the address bar, or the <span class="text-discord-400">⋮</span> menu → <em>Install <?= h($site) ?></em>.</li>
           <li><strong class="text-white">Chrome</strong> (Android) — <span class="text-discord-400">⋮</span> menu → <em>Install app</em>.</li>
           <li><strong class="text-white">Safari</strong> (iPhone · iPad) — <em>Share</em> → <em>Add to Home Screen</em>.</li>
-          <li><strong class="text-white">Firefox</strong> (desktop) — install support is limited, so Chrome or Edge is recommended.</li>
+          <li><strong class="text-white">Firefox</strong> (desktop) — install support is limited, so Chrome, Edge, or Brave is recommended.</li>
         </ul>
         <div class="rounded-lg bg-discord-850 border border-discord-700 px-3 py-2.5 text-xs text-discord-400">
           The chat works fine right here in your browser either way — installing just gives you its own window and offline support.

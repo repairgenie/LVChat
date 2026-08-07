@@ -394,7 +394,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -894,6 +894,8 @@ final class AdminController
                 // can restart the daemon when the bind actually changed.
                 $oldWsPort = (int) (config_get('ws_port', '8080') ?? 8080);
                 $oldWsIp = (string) (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0');
+                $oldWsCert = (string) (config_get('ws_ssl_cert', '') ?? '');
+                $oldWsKey = (string) (config_get('ws_ssl_key', '') ?? '');
                 config_set('site_name', trim((string) ($_POST['site_name'] ?? 'LVChat')));
                 config_set('site_tagline', trim((string) ($_POST['site_tagline'] ?? 'IRC-style web chat')));
                 config_set('logo_url', trim((string) ($_POST['logo_url'] ?? '')));
@@ -917,6 +919,8 @@ final class AdminController
                 }
                 config_set('ws_ip', $wsIp === '' ? '0.0.0.0' : $wsIp);
                 config_set('ws_port', (string) max(1, min(65535, (int) ($_POST['ws_port'] ?? 8080))));
+                config_set('ws_ssl_cert', trim((string) ($_POST['ws_ssl_cert'] ?? '')));
+                config_set('ws_ssl_key', trim((string) ($_POST['ws_ssl_key'] ?? '')));
                 $tz = trim((string) ($_POST['timezone'] ?? 'UTC'));
                 if (!in_array($tz, DateTimeZone::listIdentifiers(), true)) {
                     $tz = 'UTC';
@@ -944,7 +948,9 @@ final class AdminController
                 $message = 'Settings saved.';
                 $newWsPort = (int) (config_get('ws_port', '8080') ?? 8080);
                 $newWsIp = (string) (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0');
-                if (($newWsPort !== $oldWsPort || $newWsIp !== $oldWsIp)
+                $newWsCert = (string) (config_get('ws_ssl_cert', '') ?? '');
+                $newWsKey = (string) (config_get('ws_ssl_key', '') ?? '');
+                if (($newWsPort !== $oldWsPort || $newWsIp !== $oldWsIp || $newWsCert !== $oldWsCert || $newWsKey !== $oldWsKey)
                     && (string) (config_get('realtime', 'poll') ?? 'poll') === 'ws') {
                     // Restart the daemon so it re-reads the new bind address.
                     // Without this the running daemon keeps the old port and
@@ -1197,18 +1203,108 @@ final class AdminController
         if (!in_array($action, ['start', 'stop', 'restart'], true)) {
             json_out(['error' => 'Unknown action.'], 400);
         }
-        $cmd = escapeshellarg(self::cliPhp()) . ' ' . escapeshellarg(ROOT . '/bin/ws-server.php') . ' ' . $action;
-        if (in_array($action, ['start', 'restart'], true)) {
-            $cmd .= ' -d';
+        $cli = escapeshellarg(self::cliPhp()) . ' ' . escapeshellarg(ROOT . '/bin/ws-server.php');
+        $wsPort = (int) (config_get('ws_port', '8080') ?? 8080);
+        $pushParts = parse_url((string) Realtime::pushUrl());
+        $pushPort = (int) ($pushParts['port'] ?? 9001);
+        $notes = [];
+
+        // Workerman's stop/restart signals the master PID read from the pid file.
+        // A stale pid file or an orphaned instance makes that a no-op while the
+        // old daemon keeps the ports — so also sweep the daemon ports directly.
+        $killStale = function () use ($wsPort, $pushPort, &$notes): void {
+            foreach ([$wsPort, $pushPort] as $p) {
+                $pids = self::gatewayPidsOnPort($p);
+                if (!$pids) {
+                    continue;
+                }
+                foreach ($pids as $pid) {
+                    CommandRunner::run('kill -TERM ' . (int) $pid . ' 2>/dev/null', 5);
+                }
+                usleep(500000);
+                foreach ($pids as $pid) {
+                    CommandRunner::run('kill -9 ' . (int) $pid . ' 2>/dev/null', 5);
+                }
+                $notes[] = 'Force-stopped stale gateway process(es) on port ' . $p . ' (pid ' . implode(',', $pids) . ').';
+            }
+        };
+
+        if ($action === 'stop') {
+            CommandRunner::run($cli . ' stop', 20);
+            $killStale();
+            log_audit('ws_daemon_stop', '', $notes ? implode(' ', $notes) : null);
+            json_out(['ok' => true, 'action' => 'stop', 'output' => $notes ? implode("\n", $notes) : 'Gateway stopped.', 'status' => Realtime::daemonStatus()]);
         }
-        [$code, $output] = CommandRunner::run($cmd, 20);
+
+        // start / restart: bring down anything stale, then start fresh.
+        if ($action === 'restart') {
+            CommandRunner::run($cli . ' stop', 20);
+        }
+        $killStale();
+        [$code, $output] = CommandRunner::run($cli . ' start -d', 20);
+        if ($code !== 0 && self::gatewayPidsOnPort($wsPort)) {
+            // Something reclaimed the port mid-start — clear it and retry once.
+            $killStale();
+            [$code, $output] = CommandRunner::run($cli . ' start -d', 20);
+        }
         log_audit('ws_daemon_' . $action, '', trim($output) !== '' ? trim($output) : null);
         json_out([
             'ok' => $code === 0,
             'action' => $action,
-            'output' => $output,
+            'output' => ($notes ? implode("\n", $notes) . "\n" : '') . $output,
             'status' => Realtime::daemonStatus(),
         ]);
+    }
+
+    /**
+     * PIDs of LVChat gateway processes (cmdline contains ws-server.php) that are
+     * currently listening on a TCP port. Reads /proc on Linux; empty elsewhere.
+     */
+    private static function gatewayPidsOnPort(int $port): array
+    {
+        $hex = strtoupper(dechex($port));
+        $inodes = [];
+        foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $f) {
+            $lines = @file($f);
+            if (!$lines) {
+                continue;
+            }
+            foreach ($lines as $line) {
+                $parts = preg_split('/\s+/', trim($line));
+                if (count($parts) < 10 || ($parts[3] ?? '') !== '0A') {
+                    continue; // not a LISTEN socket
+                }
+                $local = (string) ($parts[1] ?? '');
+                $colon = strrpos($local, ':');
+                if ($colon !== false && strtoupper(substr($local, $colon + 1)) === $hex) {
+                    $inodes[(int) ($parts[9] ?? 0)] = true;
+                }
+            }
+        }
+        if (!$inodes) {
+            return [];
+        }
+        $pids = [];
+        foreach (glob('/proc/[0-9]*') ?: [] as $dir) {
+            $pid = (int) basename($dir);
+            $cmd = @file_get_contents($dir . '/cmdline');
+            // Workerman replaces the worker's cmdline with its process title
+            // ("WorkerMan: worker process …"); the master keeps the start file
+            // (…/ws-server.php). Match both so the worker holding the push
+            // socket is found too.
+            if ($cmd === false
+                || (stripos($cmd, 'ws-server.php') === false && stripos($cmd, 'WorkerMan') === false)) {
+                continue;
+            }
+            foreach (@glob($dir . '/fd/*') ?: [] as $fd) {
+                $target = @readlink($fd);
+                if ($target !== false && preg_match('/socket:\[(\d+)\]/', $target, $m) && isset($inodes[(int) $m[1]])) {
+                    $pids[$pid] = true;
+                    break;
+                }
+            }
+        }
+        return array_keys($pids);
     }
 
     /**

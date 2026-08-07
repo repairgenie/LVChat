@@ -1074,7 +1074,13 @@ $page = req('GET', '/app', [], $cjA)[2];
 check('chat page exposes data-rt-force', str_contains($page, 'data-rt="ws"') && str_contains($page, 'data-rt-force="1"'), '');
 $forcePage = req('GET', '/admin/settings', [], $cjA)[2];
 check('force checkbox reflects saved state', preg_match('/name="realtime_force"[^>]*checked/', $forcePage) === 1, '');
-[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'realtime' => 'poll', 'realtime_force' => '0', 'ws_port' => '8080', 'ws_ip' => '0.0.0.0', 'back' => '/admin/settings'], $cjA);
+// WSS config: pointing the gateway at a cert+key flips the client URL to wss://.
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'realtime' => 'ws', 'realtime_force' => '0', 'ws_port' => '8080', 'ws_ip' => '0.0.0.0', 'ws_ssl_cert' => '/etc/ssl/chat.pem', 'ws_ssl_key' => '/etc/ssl/chat.key', 'back' => '/admin/settings'], $cjA);
+check('settings_save accepts ws_ssl_*', $s === 302, (string) $s);
+check('ws_ssl_cert persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'ws_ssl_cert'")->fetchColumn() === '/etc/ssl/chat.pem');
+$page = req('GET', '/app', [], $cjA)[2];
+check('chat page uses wss when TLS configured', str_contains($page, 'data-ws-url="wss://'), '');
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'realtime' => 'poll', 'realtime_force' => '0', 'ws_port' => '8080', 'ws_ip' => '0.0.0.0', 'ws_ssl_cert' => '', 'ws_ssl_key' => '', 'back' => '/admin/settings'], $cjA);
 check('settings restore poll', $s === 302, (string) $s);
 
 // Realtime transport report accepts the forced-offline ('none') state.

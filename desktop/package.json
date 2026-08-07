@@ -1,7 +1,7 @@
 {
   "name": "lvchat-desktop",
-  "version": "1.0.0",
-  "description": "LVChat Desktop - multi-site chat launcher",
+  "version": "1.1.0",
+  "description": "LVChat Desktop client — connect to your LVChat servers",
   "main": "src/main.js",
   "author": {
     "name": "LVChat",
@@ -16,6 +16,7 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
+    "dist:mac:zip": "electron-builder --mac zip",
     "dist:linux": "electron-builder --linux",
     "icon": "node build/generate-icon.js"
   },

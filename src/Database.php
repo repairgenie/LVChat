@@ -518,6 +518,8 @@ final class Database
             'ws_ip' => '0.0.0.0',
             'ws_url' => '',
             'ws_port' => '8080',
+            'ws_ssl_cert' => '',
+            'ws_ssl_key' => '',
             'ws_push_url' => 'http://127.0.0.1:9001/push',
             'ws_push_secret' => bin2hex(random_bytes(16)),
             'peak_online' => '0',

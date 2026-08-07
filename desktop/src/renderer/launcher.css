@@ -7,6 +7,7 @@
   --muted: #9aa0b0;
   --accent: #5865f2;
   --accent-hover: #6b75f5;
+  --green: #3ba55d;
   --danger: #ed4245;
   --danger-hover: #f04747;
   --radius: 10px;
@@ -46,7 +47,7 @@ html, body {
 }
 
 h1 { margin: 0; font-size: 20px; font-weight: 700; }
-.tagline { margin: 2px 0 0; color: var(--muted); }
+.tagline { margin: 2px 0 0; color: var(--muted); max-width: 46ch; }
 
 main { max-width: 720px; margin: 0 auto; padding: 20px 24px 40px; }
 
@@ -63,10 +64,10 @@ main { max-width: 720px; margin: 0 auto; padding: 20px 24px 40px; }
 h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
 
 .hint { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+.hint.ok { color: var(--green); }
+.hint.bad { color: var(--danger); }
 
-form#quick-form { display: flex; gap: 8px; }
-
-input[type="text"] {
+input[type="text"], input[type="password"] {
   flex: 1;
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -76,8 +77,8 @@ input[type="text"] {
   font-size: 14px;
   outline: none;
 }
-input[type="text"]:focus { border-color: var(--accent); }
-input[type="text"]::placeholder { color: #5d6271; }
+input[type="text"]:focus, input[type="password"]:focus { border-color: var(--accent); }
+input[type="text"]::placeholder, input[type="password"]::placeholder { color: #5d6271; }
 
 button {
   border: none;
@@ -87,16 +88,30 @@ button {
   font-weight: 600;
   cursor: pointer;
 }
+button:disabled { opacity: 0.45; cursor: default; }
 button.primary { background: var(--accent); color: #fff; }
-button.primary:hover { background: var(--accent-hover); }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-button.ghost:hover { color: var(--text); border-color: #4a4f60; }
+button.ghost:hover:not(:disabled) { color: var(--text); border-color: #4a4f60; }
 button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
-button.danger:hover { background: var(--danger-hover); color: #fff; }
+button.danger:hover:not(:disabled) { background: var(--danger-hover); color: #fff; }
 
 .site-form { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
-.site-form input[type="text"] { flex: 1 1 200px; }
+.site-form input[type="text"], .site-form input[type="password"] { flex: 1 1 200px; }
 .row-actions { display: flex; gap: 8px; }
+.field { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 13px; color: var(--muted); }
+
+.check {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.check input[type="checkbox"] { accent-color: var(--accent); }
 
 .site-list { list-style: none; margin: 12px 0 0; padding: 0; }
 .site-list li {
@@ -108,11 +123,22 @@ button.danger:hover { background: var(--danger-hover); color: #fff; }
   border-radius: 8px;
   margin-bottom: 8px;
 }
+.site-list .row { display: flex; align-items: center; gap: 8px; }
 .site-list .site-name { font-weight: 600; }
 .site-list .site-url { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .site-list .grow { flex: 1; min-width: 0; }
 .site-list .actions { display: flex; gap: 6px; }
 .site-list button { padding: 5px 10px; font-size: 12px; }
+
+.badge {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.badge.on { color: var(--green); border-color: var(--green); }
 
 .empty { color: var(--muted); margin: 12px 0 0; font-size: 13px; }
 .error { color: var(--danger); font-size: 13px; margin: 10px 0 0; }
@@ -123,5 +149,3 @@ button.danger:hover { background: var(--danger-hover); color: #fff; }
   font-size: 12px;
   padding-bottom: 24px;
 }
-
-.badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }

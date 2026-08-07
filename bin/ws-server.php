@@ -52,6 +52,8 @@ Worker::$pidFile = ROOT . '/data/ws-server.pid';
 
 $wsIp = (string) (getenv('WS_IP') ?: (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0'));
 $wsPort = (int) (getenv('WS_PORT') ?: (config_get('ws_port', '8080') ?? 8080));
+$wsSslCert = (string) (getenv('WS_SSL_CERT') ?: (config_get('ws_ssl_cert', '') ?? ''));
+$wsSslKey = (string) (getenv('WS_SSL_KEY') ?: (config_get('ws_ssl_key', '') ?? ''));
 $pushUrl = (string) (getenv('WS_PUSH_URL') ?: (config_get('ws_push_url', 'http://127.0.0.1:9001/push') ?? 'http://127.0.0.1:9001/push'));
 $pushHost = '127.0.0.1';
 $pushPort = 9001;
@@ -82,7 +84,21 @@ $writePresence = function (array $actor, string $offset = 'now') use ($presenceT
     }
 };
 
-$ws = new Worker('websocket://' . $wsIp . ':' . $wsPort);
+// Optional WSS: when a TLS cert/key pair is configured the gateway serves
+// encrypted websocket on the same port, so the browser can use wss://.
+$wsSsl = $wsSslCert !== '' && $wsSslKey !== '';
+$wsContext = $wsSsl ? [
+    'ssl' => [
+        'local_cert' => $wsSslCert,
+        'local_pk' => $wsSslKey,
+        'verify_peer' => false,
+        'allow_self_signed' => true,
+    ],
+] : [];
+$ws = new Worker('websocket://' . $wsIp . ':' . $wsPort, $wsContext);
+if ($wsSsl) {
+    $ws->transport = 'ssl';
+}
 $ws->name = 'lvchat-ws';
 $ws->count = 1;
 

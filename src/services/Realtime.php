@@ -79,7 +79,16 @@ final class Realtime
         // would connect to the config port while the daemon listens on the env
         // port — refused, silent fallback to polling, phantom 0 connections.
         $port = (int) (getenv('WS_PORT') ?: (config_get('ws_port', '8080') ?? 8080));
-        return (self::requestSecure() ? 'wss' : 'ws') . '://' . $host . ':' . $port . '/';
+        $secure = self::requestSecure() || self::sslConfigured();
+        return ($secure ? 'wss' : 'ws') . '://' . $host . ':' . $port . '/';
+    }
+
+    /** True when the gateway daemon is configured to serve TLS (WSS). */
+    public static function sslConfigured(): bool
+    {
+        $cert = (string) (getenv('WS_SSL_CERT') ?: (config_get('ws_ssl_cert', '') ?? ''));
+        $key = (string) (getenv('WS_SSL_KEY') ?: (config_get('ws_ssl_key', '') ?? ''));
+        return $cert !== '' && $key !== '';
     }
 
     /**

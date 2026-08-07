@@ -2391,6 +2391,18 @@
   let deferredInstall = null;
   const isStandalone = () => navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // Chromium-based browsers (Chrome, Edge, Brave, Opera, Vivaldi, …) can install
+  // the PWA. Brave is Chromium but does NOT reliably fire `beforeinstallprompt`
+  // (Shields / engagement heuristics), so relying on that event alone would
+  // wrongly flag Brave as unable to install.
+  const isChromium = () => {
+    try {
+      if (navigator.userAgentData && navigator.userAgentData.brands) {
+        if (navigator.userAgentData.brands.some((b) => String(b.brand || '').toLowerCase().includes('chromium'))) return true;
+      }
+    } catch (e) {}
+    return /Chrome\/|Chromium|CriOS|Edg\/|EdgA|OPR\/|Opera|Vivaldi|Brave/i.test(navigator.userAgent);
+  };
   const installBtns = () => document.querySelectorAll('#install-btn, #install-btn-m');
   const hideInstallButtons = () => installBtns().forEach((el) => { el.style.display = 'none'; });
   const labelInstallButtons = (unsupported) => installBtns().forEach((el) => {
@@ -2422,9 +2434,10 @@
 
   installBtns().forEach((el) => el.addEventListener('click', () => {
     if (isStandalone()) return;
-    // No beforeinstallprompt (and not iOS, where "Add to Home Screen" works):
-    // the browser can't install the app, so explain which ones can.
-    if (deferredInstall === null && !isIOS()) {
+    // No beforeinstallprompt (and not iOS where "Add to Home Screen" works,
+    // and not a Chromium browser that may simply fire the event later): the
+    // browser can't install the app, so explain which ones can.
+    if (deferredInstall === null && !isIOS() && !isChromium()) {
       labelInstallButtons(true);
       if (unsupportedModal) unsupportedModal.classList.remove('hidden');
       return;
@@ -2443,9 +2456,10 @@
 
   if (isStandalone()) {
     hideInstallButtons();
-  } else if (!isIOS()) {
+  } else if (!isIOS() && !isChromium()) {
     // No `beforeinstallprompt` by now usually means the browser can't install
-    // the app. Rather than leave a dead "How to install" link, relabel it.
+    // the app. Chromium browsers (including Brave) are never relabelled here —
+    // the event may simply fire later once the user engages with the page.
     window.setTimeout(() => {
       if (deferredInstall === null && !isStandalone()) labelInstallButtons(true);
     }, 5000);
@@ -2807,6 +2821,16 @@
     let wsRetryTimer = null;
     let wsBase = body.dataset.wsUrl || '';
     let wsTicket = body.dataset.rtTicket || '';
+    // Keep a plain ws:// variant of the configured wss:// URL to try once if the
+    // secure handshake fails. It only stands a chance on a non-secure page
+    // (http://) — on an https page the browser hard-blocks ws:// as mixed
+    // content, so the offline state is the honest outcome there. Re-prefer
+    // wss:// on each retry cycle.
+    let plainTried = false;
+    const pageSecure = typeof window.isSecureContext === 'boolean' ? window.isSecureContext : true;
+    function plainBase() {
+      return wsBase.indexOf('wss://') === 0 ? 'ws://' + wsBase.slice(6) : '';
+    }
 
     function wsSend(obj) {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -2836,13 +2860,15 @@
       wsRetryTimer = setInterval(() => {
         if (wsGone || ws || document.hidden) return;
         wsFails = 0;
+        plainTried = false; // prefer the secure URL again next cycle
         refreshTicket(() => { if (!ws) openWs(); });
       }, 5 * 60 * 1000);
     }
     function openWs() {
       if (wsGone) return;
-      const sep = wsBase.indexOf('?') >= 0 ? '&' : '?';
-      try { ws = new WebSocket(wsBase + sep + 'ticket=' + encodeURIComponent(wsTicket)); }
+      const base = (plainTried && plainBase()) ? plainBase() : wsBase;
+      const sep = base.indexOf('?') >= 0 ? '&' : '?';
+      try { ws = new WebSocket(base + sep + 'ticket=' + encodeURIComponent(wsTicket)); }
       catch (e) { ws = null; }
       if (!ws) { giveUp(); return; }
       ws.onopen = () => { wsFails = 0; showTransport('ws'); wsSubscribe(); };
@@ -2860,6 +2886,14 @@
         if (wsGone) return;
         if (RT_FORCE) showTransport('none');
         wsFails++;
+        // Secure failed three times: on a non-secure page try the plain ws://
+        // variant once (it's blocked as mixed content on https, so skip there).
+        if (wsFails >= 3 && !plainTried && !pageSecure && plainBase()) {
+          wsFails = 0;
+          plainTried = true;
+          refreshTicket(() => setTimeout(openWs, pollMs));
+          return;
+        }
         if (wsFails >= 3) { giveUp(); return; }
         // A ticket only lives 60s; mint a fresh one before reconnecting.
         refreshTicket(() => setTimeout(openWs, pollMs * (wsFails + 1)));

@@ -7,7 +7,7 @@ const http = require('http')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lvchat-desktop-test-'))
 app.setPath('userData', tmp)
 
-const { chatWindows, sameSite } = require('../src/main')
+const { chatWindows, sameSite, connectProfile } = require('../src/main')
 
 let failures = 0
 function check (name, cond, extra) {
@@ -38,71 +38,195 @@ function js (win, code) {
   ])
 }
 
-async function main () {
-  const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'content-type': 'text/html' })
-    res.end('<title>test page</title><h1>ok</h1>')
-  })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const port = server.address().port
-  const urlA = `http://127.0.0.1:${port}/a`
-  const urlB = `http://127.0.0.1:${port}/b`
-
-  const win = await waitLauncher()
-  check('launcher window created', !!win)
-
-  const info = await js(win, 'window.siteAPI.listSites()')
-  check('default site seeded', info.sites.length === 1 && info.sites[0].url.includes('lasvegasbestinternet.com'), JSON.stringify(info))
-  check('defaultUrl exposed', info.defaultUrl.replace(/\/$/, '') === 'https://chat.lasvegasbestinternet.com')
-
-  const add = await js(win, `window.siteAPI.addSite({ name: 'Example', url: 'example.com' })`)
-  check('add site (bare domain normalised)', add.ok && add.site.url === 'https://example.com/', JSON.stringify(add))
-
-  const bad = await js(win, `window.siteAPI.addSite({ name: 'Bad', url: 'ftp://x.com' })`)
-  check('reject non-http scheme', bad.ok === false, JSON.stringify(bad))
-
-  const upd = await js(win, `window.siteAPI.updateSite({ id: '${add.site.id}', name: 'Example 2', url: 'https://example.org' })`)
-  check('update site', upd.ok && upd.site.name === 'Example 2' && upd.site.url === 'https://example.org/')
-
-  const open1 = await js(win, `window.siteAPI.openSite({ url: '${urlA}', name: 'Window A' })`)
-  const open2 = await js(win, `window.siteAPI.openSite({ url: '${urlB}', name: 'Window B' })`)
-  check('open first chat window', open1.ok)
-  check('open second chat window (concurrent profile)', open2.ok)
-  check('two windows tracked', chatWindows.size === 2, String(chatWindows.size))
-
-  const parts = [...chatWindows.values()].map((r) => r.partition)
-  check('windows use distinct isolated sessions', parts.length === 2 && new Set(parts).size === 2, JSON.stringify(parts))
-
-  const dup = await js(win, `window.siteAPI.openSite({ url: '${urlA}', name: 'Window A copy' })`)
-  check('same site can open a second isolated window', dup.ok && chatWindows.size === 3, String(chatWindows.size))
-
-  const loaded = await new Promise((resolve) => {
-    let tries = 0
+function waitFor (cond, ms) {
+  const timeout = ms || 20000
+  const start = Date.now()
+  return new Promise((resolve) => {
     const tick = () => {
-      tries++
-      const allLoaded = [...chatWindows.values()].every((r) => !r.win.isDestroyed() && !r.win.webContents.isLoading())
-      if (allLoaded || tries > 200) resolve(allLoaded)
+      let result
+      try { result = cond() } catch (err) { result = false }
+      if (result) resolve(true)
+      else if (Date.now() - start > timeout) resolve(false)
       else setTimeout(tick, 50)
     }
     tick()
   })
-  check('chat windows finish loading', loaded)
+}
 
-  const wlist = await js(win, 'window.siteAPI.listWindows()')
-  check('windows:list returns running windows', Array.isArray(wlist) && wlist.length === 3, JSON.stringify(wlist))
+function mockLvchatServer () {
+  const csrf = 'test-csrf-token'
+  const sessions = new Set()
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1')
+    const cookie = req.headers.cookie || ''
+    const hasSession = /session=abc123/.test(cookie)
 
-  const close = await js(win, 'window.siteAPI.closeWindow({ id: 99999 })')
+    if (url.pathname === '/api/version') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ version: '1.0.0-test', site: 'Test Chat' }))
+      return
+    }
+
+    if (url.pathname === '/login' && req.method === 'GET') {
+      if (hasSession) {
+        res.writeHead(302, { location: '/app?channel=general' })
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end(`<html><body><form action="/login" method="post"><input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="next" value=""><input name="username"><input name="password"></form></body></html>`)
+      return
+    }
+
+    if (url.pathname === '/login' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const params = new URLSearchParams(body)
+        if (params.get('csrf') !== csrf) {
+          res.writeHead(302, { location: '/login' })
+          res.end()
+          return
+        }
+        if (params.get('username') === 'alice' && params.get('password') === 'secret') {
+          sessions.add('abc123')
+          res.writeHead(302, { location: params.get('next') || '/app?channel=general', 'set-cookie': 'session=abc123; Path=/' })
+          res.end()
+          return
+        }
+        res.writeHead(302, { location: '/login' })
+        res.end()
+      })
+      return
+    }
+
+    if (url.pathname === '/app') {
+      if (hasSession) {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end('<title>app</title><h1>logged in</h1>')
+        return
+      }
+      res.writeHead(302, { location: '/login?next=' + encodeURIComponent(url.search || '?channel=general') })
+      res.end()
+      return
+    }
+
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<title>whatever</title><p>plain page</p>')
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server))
+  })
+}
+
+function plainServer () {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<html><body><h1>a normal website</h1></body></html>')
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server))
+  })
+}
+
+async function main () {
+  const lvchat = await mockLvchatServer()
+  const plain = await plainServer()
+  const base = `http://127.0.0.1:${lvchat.address().port}`
+  const plainBase = `http://127.0.0.1:${plain.address().port}`
+
+  const win = await waitLauncher()
+  check('launcher window created', !!win)
+
+  const info = await js(win, 'window.lvchat.listProfiles()')
+  check('profiles:list exposes metadata', info && Array.isArray(info.profiles) && typeof info.storageAvailable === 'boolean', JSON.stringify(info))
+  check('defaultUrl exposed', info.defaultUrl.replace(/\/$/, '') === 'https://chat.lasvegasbestinternet.com')
+  const storageAvailable = info.storageAvailable
+  console.log('  (keychain storage available: ' + storageAvailable + ')')
+
+  const probeOk = await js(win, `window.lvchat.probeServer({ url: '${base}' })`)
+  check('probe accepts an LVChat server', probeOk.ok && probeOk.site === 'Test Chat' && probeOk.version === '1.0.0-test', JSON.stringify(probeOk))
+
+  const probeBad = await js(win, `window.lvchat.probeServer({ url: '${plainBase}' })`)
+  check('probe rejects a plain website', probeBad.ok === false, JSON.stringify(probeBad))
+
+  const probeFtp = await js(win, `window.lvchat.probeServer({ url: 'ftp://x.com' })`)
+  check('probe rejects non-http scheme', probeFtp.ok === false, JSON.stringify(probeFtp))
+
+  const add = await js(win, `window.lvchat.addProfile({ name: 'Test Chat', url: '${base}', username: 'alice' })`)
+  check('add profile', add.ok && add.profile.url === base + '/', JSON.stringify(add))
+
+  const dup = await js(win, `window.lvchat.addProfile({ name: 'Dupe', url: '${base}' })`)
+  check('reject duplicate server URL', dup.ok === false, JSON.stringify(dup))
+
+  const upd = await js(win, `window.lvchat.updateProfile({ id: '${add.profile.id}', name: 'Test Chat 2', username: 'bob', autoConnect: true })`)
+  check('update profile', upd.ok && upd.profile.name === 'Test Chat 2' && upd.profile.username === 'bob' && upd.profile.autoConnect === true, JSON.stringify(upd))
+
+  const cred = await js(win, `window.lvchat.saveCredentials({ id: '${add.profile.id}', username: 'alice', password: 'secret' })`)
+  check('save credentials accepted', cred.ok === true, JSON.stringify(cred))
+
+  if (storageAvailable) {
+    const has = await js(win, `window.lvchat.hasCredentials({ id: '${add.profile.id}' })`)
+    check('saved password is retrievable', has === true, JSON.stringify(has))
+  }
+
+  const conn = await js(win, `window.lvchat.connectProfile({ id: '${add.profile.id}' })`)
+  check('connect profile opens a window', conn.ok === true, JSON.stringify(conn))
+
+  const record = [...chatWindows.values()].find((r) => r.profileId === add.profile.id)
+  check('connection uses a stable per-profile partition',
+    record && record.partition === 'persist:lvchat-profile-' + add.profile.id,
+    record ? record.partition : 'no record')
+
+  const connAgain = await js(win, `window.lvchat.connectProfile({ id: '${add.profile.id}' })`)
+  check('reconnecting reuses the existing window', connAgain.ok && connAgain.reused === true && chatWindows.size === 1, JSON.stringify(connAgain))
+
+  const add2 = await js(win, `window.lvchat.addProfile({ name: 'Second', url: '${base}/second' })`)
+  const conn2 = await js(win, `window.lvchat.connectProfile({ id: '${add2.profile.id}' })`)
+  check('second profile connects', conn2.ok === true, JSON.stringify(conn2))
+  check('profiles use distinct partitions',
+    [...chatWindows.values()].map((r) => r.partition).length === 2 &&
+    new Set([...chatWindows.values()].map((r) => r.partition)).size === 2,
+    JSON.stringify([...chatWindows.values()].map((r) => r.partition)))
+
+  const wlist = await js(win, 'window.lvchat.listWindows()')
+  check('windows:list returns running windows', Array.isArray(wlist) && wlist.length === 2, JSON.stringify(wlist))
+
+  const close = await js(win, 'window.lvchat.closeWindow({ id: 99999 })')
   check('windows:close responds for unknown id', close.ok && !close.__timeout)
-  const closeA = await js(win, `window.siteAPI.closeWindow({ id: ${open1.id} })`)
+  const closeA = await js(win, `window.lvchat.closeWindow({ id: ${conn.id} })`)
   check('windows:close accepts a real window id', closeA.ok && !closeA.__timeout)
+  await waitFor(() => chatWindows.size === 1)
 
-  const rem = await js(win, `window.siteAPI.removeSite({ id: '${add.site.id}' })`)
-  check('remove site', rem.ok && rem.removed)
+  const rem = await js(win, `window.lvchat.removeProfile({ id: '${add.profile.id}' })`)
+  check('remove profile', rem.ok && rem.removed)
+
+  if (storageAvailable) {
+    const autoAdd = await js(win, `window.lvchat.addProfile({ name: 'Auto', url: '${base}', username: 'alice' })`)
+    const creds = await js(win, `window.lvchat.saveCredentials({ id: '${autoAdd.profile.id}', username: 'alice', password: 'secret' })`)
+    check('save credentials for auto-login profile', creds.ok === true, JSON.stringify(creds))
+
+    const connAuto = await js(win, `window.lvchat.connectProfile({ id: '${autoAdd.profile.id}' })`)
+    check('auto-login profile connects', connAuto.ok === true, JSON.stringify(connAuto))
+
+    const autoLoggedIn = await waitFor(() => {
+      const r = chatWindows.get(connAuto.id)
+      if (!r || r.win.isDestroyed() || r.win.webContents.isLoading()) return false
+      const url = r.win.webContents.getURL()
+      return url.includes('/app') && !url.includes('/login')
+    })
+    check('auto-login lands on /app (not /login)', autoLoggedIn)
+    const appUrl = chatWindows.get(connAuto.id).win.webContents.getURL()
+    check('auto-login URL is the app page', appUrl.includes('/app'), appUrl)
+  } else {
+    console.log('  (skipping auto-login checks: keychain unavailable)')
+  }
 
   check('sameSite helper (subdomains)', sameSite('https://chat.lasvegasbestinternet.com', 'https://lasvegasbestinternet.com'))
   check('sameSite helper (foreign rejected)', !sameSite('https://chat.lasvegasbestinternet.com', 'https://evil.com'))
 
-  server.close()
+  lvchat.close()
+  plain.close()
 
   console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`)
   app.exit(failures === 0 ? 0 : 1)
@@ -113,4 +237,4 @@ app.whenReady().then(main)
 setTimeout(() => {
   console.log(`\nTIMEOUT with ${failures} failure(s) — aborting`)
   app.exit(2)
-}, 45000)
+}, 60000)
