@@ -149,13 +149,27 @@ button.icon-btn:hover { background: var(--hover); color: var(--text); }
 /* ── Main layout ───────────────────────────────────────────── */
 #view-main { display: flex; }
 #sidebar {
-  width: 260px;
-  min-width: 220px;
+  width: var(--sidebar-width, 320px);
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border-right: 1px solid var(--border);
+  container-type: inline-size;
 }
+
+/* Drag handle to resize the list (Advanced view). */
+#sidebar-resizer {
+  width: 5px;
+  flex: none;
+  cursor: col-resize;
+  background: transparent;
+  margin-left: -1px;
+}
+#sidebar-resizer:hover { background: var(--accent); }
+body.resizing #sidebar-resizer { background: var(--accent); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing img { pointer-events: none; }
 #chat {
   flex: 1;
   display: flex;
@@ -173,12 +187,39 @@ button.icon-btn:hover { background: var(--hover); color: var(--text); }
   color: var(--head-fg);
 }
 
-/* Compact view: the main window is a Pidgin-style buddy/room list only. */
+/* Compact view: the window is sized to the list width and the sidebar fills
+ * the whole window horizontally — Compact is just the left pane of the
+ * Advanced view. Any frame sliver blends with the panel colour. */
 body.compact #chat { display: none; }
+body.compact #sidebar-resizer { display: none; }
 body.compact #sidebar { width: 100%; border-right: none; }
+body.compact #view-main { background: var(--panel); }
 
 /* Dedicated conversation windows: sidebar hidden, chat fills the window. */
 body.chat-window #sidebar { display: none; }
+body.chat-window #sidebar-resizer { display: none; }
+
+/* When the list is too narrow to fit the header icons beside the username,
+ * collapse the icons into the hamburger menu. */
+.head-menu-anchor { position: relative; }
+#menu-btn { display: none; }
+@container (max-width: 400px) {
+  #menu-btn { display: inline-flex; align-items: center; justify-content: center; }
+  #view-mode-btn, #theme-toggle, #profile-manager, #logout-btn { display: none; }
+}
+.head-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1100;
+  min-width: 200px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 5px;
+}
+.head-menu[hidden] { display: none; }
 .me { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .avatar {
   width: 32px; height: 32px;
@@ -527,7 +568,3 @@ body.chat-window #sidebar { display: none; }
 }
 #modal-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-
-@media (max-width: 720px) {
-  #sidebar { width: 200px; }
-}

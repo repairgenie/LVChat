@@ -611,6 +611,26 @@ async function main () {
   const savedMode = await waitJs(win, `window.msg.prefsGet('viewMode')`)
   check('viewMode pref persisted', savedMode === 'advanced', String(savedMode))
 
+  // Sidebar is resizable via the drag handle and the width persists.
+  await js(win, `(() => { const h = document.getElementById('sidebar-resizer'); h.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 260 })); document.dispatchEvent(new MouseEvent('mousemove', { clientX: 380 })); document.dispatchEvent(new MouseEvent('mouseup', { clientX: 380 })); return 'ok' })()`)
+  check('sidebar resizes via drag handle', await waitJs(win, `getComputedStyle(document.getElementById('sidebar')).width === '380px' && 'ok'`))
+  check('sidebar width persisted', await waitJs(win, `window.msg.prefsGet('sidebarWidth')`).then((v) => v === 380, String))
+
+  // Compact keeps the list width; the window narrows to fit it (no gray area).
+  await js(win, `document.getElementById('view-mode-btn').click()`)
+  check('compact list fills the window horizontally', await waitJs(win, `(() => { const s = document.getElementById('sidebar').getBoundingClientRect(); return Math.round(s.width) === window.innerWidth && 'ok' })()`))
+  check('compact narrows the window to the list width', await waitJs(win, `Math.abs(window.innerWidth - 380) <= 8 && 'ok'`))
+  await js(win, `document.getElementById('view-mode-btn').click()`)
+  check('advanced opens the chat pane wide', await waitJs(win, `window.innerWidth >= 900 && getComputedStyle(document.getElementById('sidebar')).width === '380px' && 'ok'`))
+
+  // Narrow sidebar → the header icons collapse into the hamburger menu.
+  await js(win, `(() => { const h = document.getElementById('sidebar-resizer'); h.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 200 })); document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200 })); document.dispatchEvent(new MouseEvent('mouseup', { clientX: 200 })); return 'ok' })()`)
+  check('hamburger appears when the list is narrow', await waitJs(win, `getComputedStyle(document.getElementById('menu-btn')).display !== 'none' && getComputedStyle(document.getElementById('logout-btn')).display === 'none' && 'ok'`))
+  await js(win, `document.getElementById('menu-btn').click()`)
+  check('hamburger menu lists the header actions', await waitJs(win, `!document.getElementById('head-menu').hidden && document.getElementById('head-menu').textContent.includes('Profile manager') && document.getElementById('head-menu').textContent.includes('Sign out') && 'ok'`))
+  await js(win, `(() => { const m = document.getElementById('head-menu'); const b = [...m.querySelectorAll('button')].find((x) => x.textContent.includes('light')); if (b) b.click(); return 'ok' })()`)
+  check('hamburger theme item works', await waitJs(win, `document.body.className.includes('theme-') && 'ok'`))
+
   // Open DM with bob (in-pane, advanced).
   await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (c) c.click() })()`)
   check('DM with bob opens', await waitJs(win, `document.getElementById('chat-title').textContent === 'bob' && 'ok'`))
@@ -656,7 +676,7 @@ async function main () {
   await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((c) => c.textContent.includes('gaming')); if (c) c.click() })()`)
   check('room opens with #gaming title', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
   await js(win, `document.getElementById('members-toggle').click()`)
-  check('active members list shows bob', await waitJs(win, `!document.getElementById('members').hidden && document.getElementById('members').textContent.includes('bob') && 'ok'`))
+  check('active members list shows only online members', await waitJs(win, `!document.getElementById('members').hidden && document.getElementById('members').textContent.includes('bob') && !document.getElementById('members').textContent.includes('carol') && 'ok'`))
 
   // Room context menu: leave + share link.
   await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((c) => c.textContent.includes('gaming')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)

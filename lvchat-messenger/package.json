@@ -1,6 +1,6 @@
 {
   "name": "lvchat-messenger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "LVChat Messenger — IM-first desktop client for LVChat",
   "main": "src/main.js",
   "author": {

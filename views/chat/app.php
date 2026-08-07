@@ -13,6 +13,33 @@ foreach ($messages as $m) {
     }
 }
 
+// Desktop app download config (Admin → Settings → Desktop apps & downloads).
+// Each platform button is rendered only when a URL is configured.
+$downloadPlatforms = [
+    'win' => 'Windows',
+    'mac' => 'macOS',
+    'linux_rpm' => 'Linux (RPM)',
+    'linux_deb' => 'Linux (DEB)',
+    'linux_appimage' => 'Linux (AppImage)',
+];
+$downloadUpdateUrl = trim((string) (config_get('download_update_url', '') ?? ''));
+function download_buttons_html(string $app, array $platforms): string
+{
+    $html = '';
+    foreach ($platforms as $plat => $label) {
+        $url = trim((string) (config_get("download_{$app}_{$plat}_url", '') ?? ''));
+        if ($url === '') {
+            continue;
+        }
+        $ver = trim((string) (config_get("download_{$app}_{$plat}_version", '') ?? ''));
+        $html .= '<a href="' . h($url) . '" target="_blank" rel="noopener noreferrer" class="btn-ghost w-full justify-between !text-sm">'
+            . '<span>' . h($label) . '</span>'
+            . '<span class="font-mono text-xs ' . ($ver !== '' ? 'text-discord-400' : 'text-discord-500') . '">' . ($ver !== '' ? 'v' . h($ver) : 'Download') . '</span>'
+            . '</a>';
+    }
+    return $html;
+}
+
 // Channel mode flags shown in the GUI bar (with tooltips).
 $modeDefs = [
     'i' => ['short' => 'invite', 'title' => 'Invite-only (+i): only users you invite may join.'],
@@ -521,7 +548,7 @@ function member_html(array $m, bool $online): string {
         <input type="hidden" id="reply-to-input" name="reply_to" value="">
         <textarea id="chat-input" name="content" rows="1" autocomplete="off" spellcheck="false"
                class="input pr-48 py-2.5 resize-none bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow align-middle max-h-40 overflow-y-auto"
-               placeholder="<?= h($channel ? "Message #" . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
+               placeholder="<?= h($channel ? "Message " . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
                <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
         <button type="button" id="upload-btn" class="absolute right-36 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
         <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
@@ -786,6 +813,77 @@ function member_html(array $m, bool $online): string {
     </div>
   </div>
 
+  <!-- Create channel modal -->
+  <div id="create-channel-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-create-close></div>
+    <div class="relative card p-6 w-[min(92vw,480px)] shadow-2xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-lg font-bold text-white">Create a channel</h2>
+        <button type="button" data-create-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+      </div>
+      <p class="text-xs text-discord-400 mb-4">Give your channel a name, set the topic, and choose who can find it.</p>
+      <form id="create-form" class="space-y-4">
+        <div>
+          <label for="create-name" class="block text-xs font-bold uppercase tracking-wide text-discord-400 mb-1">Channel name</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-blurple font-bold select-none" aria-hidden="true">#</span>
+            <input id="create-name" type="text" maxlength="64" autocomplete="off" spellcheck="false" required
+                   class="input !pl-8" placeholder="e.g. gaming">
+          </div>
+          <p class="text-[11px] text-discord-500 mt-1">No <span class="text-discord-300">#</span> needed — it's added for you.</p>
+        </div>
+        <div>
+          <label for="create-topic" class="block text-xs font-bold uppercase tracking-wide text-discord-400 mb-1">Topic <span class="font-normal normal-case">(optional)</span></label>
+          <input id="create-topic" type="text" maxlength="500" autocomplete="off" spellcheck="false"
+                 class="input" placeholder="What is this channel about?">
+        </div>
+        <div class="space-y-2.5">
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400">Privacy</div>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="radio" name="visibility" value="public" checked class="mt-0.5 accent-blurple">
+            <span class="text-sm text-discord-200">
+              <span class="font-medium text-white">Public</span>
+              <span class="block text-[11px] text-discord-500">Visible in the channel browser — anyone can join.</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="radio" name="visibility" value="private" class="mt-0.5 accent-blurple">
+            <span class="text-sm text-discord-200">
+              <span class="font-medium text-white">Private</span>
+              <span class="block text-[11px] text-discord-500">Hidden from the browser; join via the share link.</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="radio" name="visibility" value="secret" class="mt-0.5 accent-blurple">
+            <span class="text-sm text-discord-200">
+              <span class="font-medium text-white">Secret</span>
+              <span class="block text-[11px] text-discord-500">Hidden entirely; members must be invited.</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" id="create-invite" class="mt-0.5 accent-blurple">
+            <span class="text-sm text-discord-200">
+              <span class="font-medium text-white">Invite only</span>
+              <span class="block text-[11px] text-discord-500">Only people you invite can join.</span>
+            </span>
+          </label>
+        </div>
+        <label class="flex items-start gap-2.5 cursor-pointer">
+          <input type="checkbox" id="create-register" checked class="mt-0.5 accent-blurple">
+          <span class="text-sm text-discord-200">
+            <span class="font-medium text-white">Register this channel to me</span>
+            <span class="block text-[11px] text-discord-500">Keeps the channel even when it's empty; you become the founder.</span>
+          </span>
+        </label>
+        <div id="create-error" class="hidden text-xs text-red-400"></div>
+        <div class="flex gap-2 pt-1">
+          <button type="submit" id="create-submit" class="btn-primary flex-1 justify-center">Create channel</button>
+          <button type="button" data-create-close class="btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Notifications panel -->
   <div id="notif-panel" class="hidden fixed w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 flex flex-col" style="max-height:70vh" data-pos="auto">
     <div class="px-3 py-2 border-b border-discord-700 text-sm font-semibold flex items-center justify-between shrink-0">
@@ -931,6 +1029,12 @@ function member_html(array $m, bool $online): string {
       <div id="install-body" class="px-6 py-4 overflow-y-auto scrollbar-thin space-y-5 text-sm">
         <button id="install-now" class="hidden btn-primary w-full justify-center">⬇ Install now</button>
 
+        <div class="pt-1 border-t border-discord-700">
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">Desktop apps</div>
+          <p class="text-discord-200 mb-2.5">Prefer a native app? LVChat also ships desktop clients for Windows, macOS and Linux.</p>
+          <button id="download-open-btn" type="button" class="btn-ghost w-full justify-center">⬇ Download the desktop app</button>
+        </div>
+
         <div>
           <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">Windows · Mac · Linux</div>
           <ul class="text-discord-200 space-y-1.5 list-disc pl-4">
@@ -962,6 +1066,53 @@ function member_html(array $m, bool $online): string {
         <div class="rounded-lg bg-discord-850 border border-discord-700 px-3 py-2.5 text-xs text-discord-400">
           <strong class="text-discord-200">Works offline:</strong> the app opens instantly and keeps the messages you've already viewed available without a connection. Anything you send while offline is queued and delivered automatically when you reconnect.
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Download the desktop app modal (native desktop clients) -->
+  <div id="download-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-download-close></div>
+    <div class="relative card shadow-2xl w-[min(92vw,600px)] flex flex-col max-h-[80vh]">
+      <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
+        <h2 class="text-lg font-bold text-white">Download <?= h($site) ?></h2>
+        <button type="button" data-download-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+      </div>
+      <div class="px-6 py-4 overflow-y-auto scrollbar-thin">
+        <p class="text-sm text-discord-200">Two desktop apps are available — pick the one that fits how you work:</p>
+
+        <div class="flex gap-1 mt-3 mb-4 rounded-lg bg-discord-850 p-1" role="tablist">
+          <button type="button" data-download-tab="desktop" class="download-tab flex-1 text-sm font-semibold py-1.5 px-3 rounded-md text-white bg-blurple" role="tab" aria-selected="true">LVChat Desktop</button>
+          <button type="button" data-download-tab="messenger" class="download-tab flex-1 text-sm font-semibold py-1.5 px-3 rounded-md text-discord-300" role="tab" aria-selected="false">LVChat Messenger</button>
+        </div>
+
+        <div data-download-panel="desktop" class="download-panel space-y-4">
+          <div>
+            <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">LVChat Desktop</div>
+            <p class="text-sm text-discord-200">A desktop-based version of the normal <?= h($site) ?> experience — the full web chat in its own window, with native notifications and offline support. Choose this for the complete feature set.</p>
+          </div>
+          <div class="grid gap-2">
+            <?= download_buttons_html('desktop', $downloadPlatforms) ?>
+          </div>
+        </div>
+
+        <div data-download-panel="messenger" class="download-panel hidden space-y-4">
+          <div>
+            <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">LVChat Messenger</div>
+            <p class="text-sm text-discord-200">A more streamlined, instant-messaging-first experience. The layout is simplified around conversations, making it quicker to use day-to-day — which may appeal more to business settings. It's a separate, more focused desktop client rather than a web app.</p>
+          </div>
+          <div class="grid gap-2">
+            <?= download_buttons_html('messenger', $downloadPlatforms) ?>
+          </div>
+        </div>
+
+        <?php if ($downloadUpdateUrl !== ''): ?>
+        <div class="mt-5 rounded-lg bg-discord-850 border border-discord-700 px-3 py-2.5 text-xs text-discord-400 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <strong class="text-discord-200">Already installed?</strong>
+          <span>Fetch the latest version from the</span>
+          <a href="<?= h($downloadUpdateUrl) ?>" target="_blank" rel="noopener noreferrer" class="text-blurple hover:text-blurple-dark font-medium underline decoration-dotted underline-offset-2">update link</a>.
+        </div>
+        <?php endif; ?>
       </div>
     </div>
   </div>

@@ -110,7 +110,16 @@ final class ChannelController
             json_out(['error' => $restriction], 403);
         }
         $name = trim((string) ($_POST['name'] ?? ''));
-        $result = ChannelService::create($user, $name);
+        $visibility = (string) ($_POST['visibility'] ?? 'public');
+        if (!in_array($visibility, ['public', 'private', 'secret'], true)) {
+            json_out(['error' => 'Visibility must be public, private or secret.'], 400);
+        }
+        $result = ChannelService::create($user, $name, [
+            'topic' => (string) ($_POST['topic'] ?? ''),
+            'register' => !empty($_POST['register']) && in_array((string) $_POST['register'], ['1', 'on', 'true', 'yes'], true),
+            'visibility' => $visibility,
+            'invite_only' => !empty($_POST['invite_only']) && in_array((string) $_POST['invite_only'], ['1', 'on', 'true', 'yes'], true),
+        ]);
         if (is_string($result)) {
             json_out(['error' => $result], 400);
         }

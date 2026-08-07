@@ -31,10 +31,16 @@ final class ChannelService
         return true;
     }
 
-    public static function create(array $user, string $name): array|string
+    public static function create(array $user, string $name, array $opts = []): array|string
     {
         if (Auth::isGuest($user)) {
             return 'Guests can only join existing channels. Create an account to make new channels.';
+        }
+        // Users don't have to type the # themselves (the create-channel modal
+        // collects a bare name); prepend it unless an explicit local (&) prefix
+        // was given.
+        if (!preg_match('/^[#&]/', $name)) {
+            $name = '#' . $name;
         }
         $err = self::validateName($name);
         if ($err !== true) {
@@ -49,8 +55,9 @@ final class ChannelService
             return "You have reached the channel limit ($max).";
         }
         $slug = self::nameToSlug($name);
-        // Channels start as temporary: registered_at is NULL until /register is used.
-        // An empty, unregistered channel is deleted automatically (see afterMemberRemoval).
+        // Channels start as temporary: registered_at is NULL until /register is
+        // used (or register is requested at creation). An empty, unregistered
+        // channel is deleted automatically (see afterMemberRemoval).
         Database::query(
             'INSERT INTO channels (name, slug, owner_id) VALUES (?, ?, ?)',
             [$name, $slug, $user['id']]
@@ -61,6 +68,24 @@ final class ChannelService
             [$id, $user['id']]
         );
         log_audit('channel_create', $name);
+
+        $fields = [];
+        $topic = trim((string) ($opts['topic'] ?? ''));
+        if ($topic !== '') {
+            $fields['topic'] = mb_substr($topic, 0, 500);
+        }
+        $visibility = (string) ($opts['visibility'] ?? '');
+        if (in_array($visibility, ['public', 'private', 'secret'], true)) {
+            $fields['visibility'] = $visibility;
+        }
+        $fields['invite_only'] = !empty($opts['invite_only']) ? 1 : 0;
+        if ($fields) {
+            self::update($id, $fields);
+        }
+        if (!empty($opts['register'])) {
+            Database::query('UPDATE channels SET registered_at = datetime("now") WHERE id = ?', [$id]);
+            log_audit('channel_register', $name);
+        }
         return Database::row('SELECT * FROM channels WHERE id = ?', [$id]);
     }
 

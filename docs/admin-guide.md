@@ -620,6 +620,9 @@ DESC LIMIT 100;"`).
 | `legal_terms` / `legal_privacy` | — | Sanitized HTML for `/terms` and `/privacy` |
 | `theme` | — | Server-wide theme JSON (`preset`, `mode`, `overrides` incl. accent/sidebar/font/chat background) — set via **Admin → Appearance** |
 | `theme_user_customization` | `1` | `0` forces everyone onto the server theme (personal themes ignored) |
+| `download_{desktop\|messenger}_{win\|mac\|linux_rpm\|linux_deb\|linux_appimage}_url` | — | Download URL for a desktop-client platform (empty hides that button in the chat's "Download the desktop app" modal) |
+| `download_{desktop\|messenger}_{win\|mac\|linux_rpm\|linux_deb\|linux_appimage}_version` | — | Version label shown next to that download |
+| `download_update_url` | — | Where existing desktop-client users fetch the latest version (shown in the download modal) |
 | `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |
 | `max_channels_per_user` | `100` | Owned-channel cap |
 | `smtp_enabled` | `0` | Master switch for email sending |

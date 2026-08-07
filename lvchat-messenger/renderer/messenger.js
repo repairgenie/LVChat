@@ -144,6 +144,7 @@ async function boot () {
   $('#login-target').hidden = false
 
   await Promise.all([applyTheme(), applyViewMode()])
+  initSidebarResize()
 
   // Resume an existing session if the messenger API is reachable. Never let a
   // fetch/CORS failure abort boot: always land on the login view.
@@ -1167,15 +1168,18 @@ function renderMembers () {
   const open = state.open
   if (!open || open.type !== 'room') { panel.hidden = true; return }
   panel.replaceChildren()
+  // Only members currently in the channel (online) belong in the Active list;
+  // offline members are not present and are omitted, matching the web app.
+  const members = (open.members || []).filter((m) => m.is_online)
   const t = document.createElement('div')
   t.className = 'members-title'
-  t.textContent = 'Active members — ' + (open.members ? open.members.length : 0)
+  t.textContent = 'Active members — ' + members.length
   panel.appendChild(t)
-  for (const m of open.members || []) {
+  for (const m of members) {
     const row = document.createElement('div')
     row.className = 'contact'
     const dot = document.createElement('div')
-    dot.className = 'dot ' + (m.is_online ? 'online' : 'offline')
+    dot.className = 'dot online'
     const avatar = avatarEl(m.username, m.avatar, '28px')
     const name = document.createElement('div')
     name.className = 'contact-name'
@@ -1184,7 +1188,7 @@ function renderMembers () {
     row.addEventListener('click', () => openConversationOrWindow('dm', m.username))
     panel.appendChild(row)
   }
-  if (!(open.members || []).length) {
+  if (!members.length) {
     const e = document.createElement('div')
     e.className = 'empty'
     e.textContent = 'No members online right now.'
@@ -1557,6 +1561,64 @@ async function toggleViewMode () {
   renderAll()
 }
 
+/* ── Hamburger menu (narrow sidebar) ──────────────────────── */
+
+function toggleHeadMenu (force) {
+  const menu = $('#head-menu')
+  const willShow = force !== undefined ? !!force : menu.hidden
+  if (!willShow) { menu.hidden = true; return }
+  menu.replaceChildren()
+  const add = (text, onClick, danger) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'ctx-item' + (danger ? ' danger' : '')
+    b.textContent = text
+    b.addEventListener('click', () => { menu.hidden = true; onClick() })
+    menu.appendChild(b)
+  }
+  add(state.viewMode === 'compact' ? 'Switch to Advanced view' : 'Switch to Compact view', toggleViewMode)
+  add('Toggle light / dark theme', toggleTheme)
+  add('Profile manager', () => window.msg.showLauncher())
+  add('Sign out', doLogout, true)
+  menu.hidden = false
+}
+
+/* ── Resizable sidebar ────────────────────────────────────── */
+
+/* Clamp + apply the list width via a CSS variable. */
+function applySidebarWidth (w) {
+  const windowW = window.innerWidth
+  const clamped = Math.max(180, Math.min(560, Math.round(w), windowW - 40))
+  document.body.style.setProperty('--sidebar-width', clamped + 'px')
+  return clamped
+}
+
+async function initSidebarResize () {
+  const saved = await window.msg.prefsGet('sidebarWidth')
+  if (typeof saved === 'number' && saved > 0) applySidebarWidth(saved)
+
+  const handle = $('#sidebar-resizer')
+  if (!handle) return
+  let dragging = false
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault()
+    dragging = true
+    document.body.classList.add('resizing')
+  })
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return
+    const rect = $('#sidebar').getBoundingClientRect()
+    applySidebarWidth(e.clientX - rect.left)
+  })
+  document.addEventListener('mouseup', async () => {
+    if (!dragging) return
+    dragging = false
+    document.body.classList.remove('resizing')
+    const width = parseFloat(getComputedStyle($('#sidebar')).width)
+    if (Number.isFinite(width)) await window.msg.prefsSet('sidebarWidth', Math.round(width))
+  })
+}
+
 /* ── Theme ────────────────────────────────────────────────── */
 
 async function applyTheme () {
@@ -1639,6 +1701,10 @@ function wireEvents () {
   $('#view-mode-btn').addEventListener('click', toggleViewMode)
   $('#profile-manager').addEventListener('click', () => window.msg.showLauncher())
   $('#logout-btn').addEventListener('click', doLogout)
+  $('#menu-btn').addEventListener('click', (e) => {
+    e.stopPropagation()
+    toggleHeadMenu()
+  })
 
   $('#tab-buddy').addEventListener('click', () => setTab('buddy'))
   $('#tab-rooms').addEventListener('click', () => setTab('rooms'))
@@ -1737,6 +1803,7 @@ function wireEvents () {
 
   document.addEventListener('click', (e) => {
     if (ctxMenu && !e.target.closest('.ctx-menu')) closeContextMenu()
+    if (!e.target.closest('#head-menu') && !e.target.closest('#menu-btn')) $('#head-menu').hidden = true
     if (!e.target.closest('#emoji-panel') && !e.target.closest('#btn-emoji')) $('#emoji-panel').hidden = true
     if (!e.target.closest('#gif-panel') && !e.target.closest('#btn-gif') && !e.target.closest('#gif-search-input')) $('#gif-panel').hidden = true
     if (!e.target.closest('#mention-ac') && !e.target.closest('#composer-input')) hideMentionAc()

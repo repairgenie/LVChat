@@ -100,7 +100,9 @@ $ch = ChannelService::create($alice, '#test');
 check('create #test', is_array($ch), is_string($ch) ? $ch : '');
 check('creator is founder', (AccessService::effectiveLevel($ch['id'], (int) $alice['id'])) === 'founder');
 $bad = ChannelService::create($alice, 'no-hash');
-check('invalid name rejected', is_string($bad));
+check('bare name auto-prefixed', is_array($bad) && ($bad['name'] ?? '') === '#no-hash', is_string($bad) ? $bad : '');
+$bad2 = ChannelService::create($alice, '#has space');
+check('invalid name rejected', is_string($bad2), is_array($bad2) ? 'created' : '');
 check('duplicate channel rejected', is_string(ChannelService::create($alice, '#test')));
 
 $st = ChannelService::joinStatus($ch, $bob);

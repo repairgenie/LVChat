@@ -1995,15 +1995,77 @@
       });
     });
   }
-  function createChannel() {
-    const name = prompt('Channel name (e.g. #gaming):');
-    if (!name) return;
-    post('/api/channels', { name }, () => {});
+  // ── Create channel modal ───────────────────────────────────────────────────
+  // A real modal instead of window.prompt(): prompt() is unsupported in the
+  // desktop client (it silently returns null), so the create box never showed
+  // there. The modal also collects the topic, registration and privacy options.
+  const createModal = document.getElementById('create-channel-modal');
+  const createForm = document.getElementById('create-form');
+  const createName = document.getElementById('create-name');
+  const createTopic = document.getElementById('create-topic');
+  const createInvite = document.getElementById('create-invite');
+  const createRegister = document.getElementById('create-register');
+  const createError = document.getElementById('create-error');
+  const createSubmit = document.getElementById('create-submit');
+
+  function openCreateChannel() {
+    if (!createModal) return;
+    createModal.classList.remove('hidden');
+    if (createName) { createName.value = ''; createName.focus(); }
+    if (createTopic) createTopic.value = '';
+    if (createInvite) createInvite.checked = false;
+    if (createRegister) createRegister.checked = true;
+    document.querySelectorAll('#create-form input[name="visibility"]').forEach((r) => { r.checked = r.value === 'public'; });
+    if (createError) { createError.textContent = ''; createError.classList.add('hidden'); }
+    if (createSubmit) createSubmit.disabled = false;
   }
+  function closeCreateChannel() { if (createModal) createModal.classList.add('hidden'); }
+  if (createModal) {
+    createModal.querySelectorAll('[data-create-close]').forEach((el) => el.addEventListener('click', closeCreateChannel));
+    createModal.addEventListener('click', (e) => { if (e.target === createModal) closeCreateChannel(); });
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && createModal && !createModal.classList.contains('hidden')) closeCreateChannel(); });
+  if (createForm) createForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (createError) createError.classList.add('hidden');
+    let name = createName ? createName.value.trim() : '';
+    if (!name) { if (createError) { createError.textContent = 'Please enter a channel name.'; createError.classList.remove('hidden'); } createName.focus(); return; }
+    // A bare name gets the normal # prefix; an explicit local (&) prefix is kept.
+    const local = /^&/.test(name);
+    name = name.replace(/^[#&!]+/, '');
+    const visibility = (document.querySelector('#create-form input[name="visibility"]:checked') || {}).value || 'public';
+    const payload = {
+      name: (local ? '&' : '#') + name,
+      topic: createTopic ? createTopic.value.trim() : '',
+      register: (createRegister && createRegister.checked) ? '1' : '0',
+      visibility,
+      invite_only: (createInvite && createInvite.checked) ? '1' : '0',
+    };
+    if (createSubmit) createSubmit.disabled = true;
+    const fd = new FormData();
+    fd.append('csrf', CSRF);
+    fd.append('ajax', '1');
+    Object.keys(payload).forEach((k) => fd.append(k, payload[k]));
+    fetch('/api/channels', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
+      .then((r) => r.json().catch(() => ({ error: 'Server error' })))
+      .then((j) => {
+        if (j.redirect) { window.location = j.redirect; return; }
+        if (j.error) {
+          if (createSubmit) createSubmit.disabled = false;
+          if (createError) { createError.textContent = j.error; createError.classList.remove('hidden'); }
+          return;
+        }
+        if (createSubmit) createSubmit.disabled = false;
+      })
+      .catch(() => {
+        if (createSubmit) createSubmit.disabled = false;
+        if (createError) { createError.textContent = 'Unable to create the channel. Please try again.'; createError.classList.remove('hidden'); }
+      });
+  });
   const cc1 = document.getElementById('create-channel');
   const cc2 = document.getElementById('create-channel-2');
-  if (cc1) cc1.addEventListener('click', createChannel);
-  if (cc2) cc2.addEventListener('click', createChannel);
+  if (cc1) cc1.addEventListener('click', openCreateChannel);
+  if (cc2) cc2.addEventListener('click', openCreateChannel);
 
   // ── User menu / away ───────────────────────────────────────────────────────
   const menuBtn = document.getElementById('user-menu-btn');
@@ -2488,6 +2550,32 @@
     installModal.addEventListener('click', (e) => { if (e.target === installModal) installModal.classList.add('hidden'); });
   }
 
+  // ── Download the desktop app modal (native clients) ────────────────────────
+  // Reached from the "Download the desktop app" button inside the install modal.
+  // Tabs (Desktop / Messenger) swap the visible panel; the download links are
+  // server-rendered from Admin → Settings → Desktop apps & downloads.
+  const downloadModal = document.getElementById('download-modal');
+  const downloadOpenBtn = document.getElementById('download-open-btn');
+  if (downloadOpenBtn) downloadOpenBtn.addEventListener('click', () => {
+    if (installModal) installModal.classList.add('hidden');
+    if (downloadModal) downloadModal.classList.remove('hidden');
+  });
+  if (downloadModal) {
+    downloadModal.querySelectorAll('[data-download-close]').forEach((el) => el.addEventListener('click', () => downloadModal.classList.add('hidden')));
+    downloadModal.addEventListener('click', (e) => { if (e.target === downloadModal) downloadModal.classList.add('hidden'); });
+    const panels = [...downloadModal.querySelectorAll('[data-download-panel]')];
+    downloadModal.querySelectorAll('[data-download-tab]').forEach((tab) => tab.addEventListener('click', () => {
+      const app = tab.dataset.downloadTab;
+      downloadModal.querySelectorAll('[data-download-tab]').forEach((t) => {
+        t.classList.toggle('bg-blurple', t === tab);
+        t.classList.toggle('text-white', t === tab);
+        t.classList.toggle('text-discord-300', t !== tab);
+        t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+      });
+      panels.forEach((p) => p.classList.toggle('hidden', p.dataset.downloadPanel !== app));
+    }));
+  }
+
   if (isStandalone()) {
     hideInstallButtons();
   } else if (!isIOS() && !isChromium()) {
@@ -2752,6 +2840,7 @@
   // so that only the most relevant open panel is dismissed per keypress:
   //   1. search-results dropdown  →  2. header dropdown  →  3. lightbox
   //   4. right panel  →  5. sidebar backdrop  →  6. context menu  →  7. install modal
+  //   8. download modal
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (searchResults && !searchResults.classList.contains('hidden')) {
@@ -2773,6 +2862,8 @@
       ctxHide();
     } else if (installModal && !installModal.classList.contains('hidden')) {
       installModal.classList.add('hidden');
+    } else if (downloadModal && !downloadModal.classList.contains('hidden')) {
+      downloadModal.classList.add('hidden');
     }
   });
 

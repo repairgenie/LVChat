@@ -182,8 +182,11 @@ $t = csrf($page);
 [$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjA);
 check('register alice 302', $s === 302, (string) $s);
 check('first user redirected to next', ($h['location'] ?? '') === '/');
-[$s] = req('GET', '/app', [], $cjA);
+[$s, , $appBody] = req('GET', '/app', [], $cjA);
 check('alice can open /app', $s === 200, (string) $s);
+check('chat has desktop download button', str_contains($appBody, 'id="download-open-btn"'), '');
+check('chat has desktop download modal', str_contains($appBody, 'id="download-modal"'), '');
+check('chat download modal explains Desktop vs Messenger', str_contains($appBody, 'LVChat Messenger') && str_contains($appBody, 'streamlined'), '');
 
 // share link: logged-in user auto-joins via /c/slug
 [$s, $h] = req('GET', '/c/general', [], $cjA);
@@ -274,6 +277,22 @@ check('rt report requires auth', $s === 401, (string) $s);
 check('create #gaming', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 [$s] = req('GET', '/app?channel=gaming', [], $cjA);
 check('/app?channel=gaming 200', $s === 200, (string) $s);
+
+// ── Create channel options (modal) ───────────────────────────────────────────
+// A bare name (no #) is auto-prefixed; topic / register / privacy are applied.
+[$s, , $b] = req('POST', '/api/channels', ['csrf' => $t, 'name' => 'secretlab', 'topic' => 'top secret tests', 'register' => '1', 'visibility' => 'secret', 'invite_only' => '1'], $cjA);
+check('create channel without # prefix', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+$sl = dbq("SELECT name, topic, registered_at, visibility, invite_only FROM channels WHERE slug = 'secretlab'")[0] ?? null;
+check('bare name auto-prefixed with #', ($sl['name'] ?? '') === '#secretlab', json_encode($sl));
+check('topic persisted', ($sl['topic'] ?? '') === 'top secret tests', json_encode($sl));
+check('register=1 sets registered_at', !empty($sl['registered_at']), json_encode($sl));
+check('visibility=secret persisted', ($sl['visibility'] ?? '') === 'secret', json_encode($sl));
+check('invite_only=1 persisted', (int) ($sl['invite_only'] ?? 0) === 1, json_encode($sl));
+// The earlier #gaming was created without register → still temporary.
+$gm = dbq("SELECT registered_at FROM channels WHERE slug = 'gaming'")[0] ?? null;
+check('default create stays unregistered', empty($gm['registered_at']), json_encode($gm));
+[$s, , $b] = req('POST', '/api/channels', ['csrf' => $t, 'name' => '#badvis', 'visibility' => 'bogus'], $cjA);
+check('invalid visibility rejected (400)', $s === 400 && strpos($b, 'public, private or secret') !== false, "$s $b");
 
 [$s, , $b] = req('POST', '/api/send', ['csrf' => $t, 'channel' => 'gaming', 'content' => 'hello world'], $cjA);
 $j = jsonDecode($b);
@@ -469,6 +488,7 @@ foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/adm
 $adminSettingsPage = req('GET', '/admin/settings', [], $cjA)[2];
 check('settings page has force-websocket checkbox', str_contains($adminSettingsPage, 'name="realtime_force"'), '');
 check('settings page has reconnect-clients button', str_contains($adminSettingsPage, 'id="ws-btn-reconnect"'), '');
+check('settings page has desktop download fields', str_contains($adminSettingsPage, 'name="download_desktop_win_url"') && str_contains($adminSettingsPage, 'name="download_desktop_win_version"') && str_contains($adminSettingsPage, 'name="download_messenger_linux_appimage_url"') && str_contains($adminSettingsPage, 'name="download_update_url"'), '');
 [$s] = req('GET', '/admin', [], $cjB);
 check('non-admin denied /admin', $s === 403, (string) $s);
 
@@ -1213,6 +1233,19 @@ $page = req('GET', '/app', [], $cjA)[2];
 check('chat page uses wss when TLS configured', str_contains($page, 'data-ws-url="wss://'), '');
 [$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'realtime' => 'poll', 'realtime_force' => '0', 'ws_port' => '8080', 'ws_ip' => '0.0.0.0', 'ws_ssl_cert' => '', 'ws_ssl_key' => '', 'back' => '/admin/settings'], $cjA);
 check('settings restore poll', $s === 302, (string) $s);
+
+// Desktop app download config: persist + render into the chat's download modal.
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'registration_enabled' => '1', 'download_desktop_win_url' => 'https://example.com/LVChatSetup.exe', 'download_desktop_win_version' => '1.1.0', 'download_messenger_linux_deb_url' => 'https://example.com/messenger.deb', 'download_update_url' => 'https://example.com/downloads', 'back' => '/admin/settings'], $cjA);
+check('settings_save accepts download links', $s === 302, (string) $s);
+check('download win url persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'download_desktop_win_url'")->fetchColumn() === 'https://example.com/LVChatSetup.exe');
+check('download win version persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'download_desktop_win_version'")->fetchColumn() === '1.1.0');
+check('download update url persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'download_update_url'")->fetchColumn() === 'https://example.com/downloads');
+$dlPage = req('GET', '/app', [], $cjA)[2];
+check('chat download modal renders configured links', str_contains($dlPage, 'https://example.com/LVChatSetup.exe') && str_contains($dlPage, 'v1.1.0') && str_contains($dlPage, 'https://example.com/messenger.deb') && str_contains($dlPage, 'https://example.com/downloads'), '');
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'registration_enabled' => '1', 'download_desktop_win_url' => '', 'download_desktop_win_version' => '', 'download_messenger_linux_deb_url' => '', 'download_update_url' => '', 'back' => '/admin/settings'], $cjA);
+check('settings clears download links', $s === 302, (string) $s);
+$dlPage = req('GET', '/app', [], $cjA)[2];
+check('chat download modal hides cleared links', !str_contains($dlPage, 'https://example.com/LVChatSetup.exe'), '');
 
 // Realtime transport report accepts the forced-offline ('none') state.
 [$s, , $j] = req('POST', '/api/rt/report', ['transport' => 'none'], $cjA, ['X-CSRF: ' . $tPush]);

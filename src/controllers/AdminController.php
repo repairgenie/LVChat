@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 final class AdminController
 {
+    /** Native desktop apps available for download (config key prefix). */
+    public const DOWNLOAD_APPS = ['desktop', 'messenger'];
+
+    /** Per-app platforms, each with a URL + version config key pair. */
+    public const DOWNLOAD_PLATFORMS = ['win', 'mac', 'linux_rpm', 'linux_deb', 'linux_appimage'];
+
     private static function require(): array
     {
         return Auth::requireAdmin();
@@ -394,7 +400,13 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'registration_rate_limit', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'registration_rate_limit', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user', 'download_update_url'];
+        foreach (self::DOWNLOAD_APPS as $dlApp) {
+            foreach (self::DOWNLOAD_PLATFORMS as $dlPlat) {
+                $keys[] = "download_{$dlApp}_{$dlPlat}_url";
+                $keys[] = "download_{$dlApp}_{$dlPlat}_version";
+            }
+        }
         $settings = [];
         foreach ($keys as $k) {
             $settings[$k] = (string) config_get($k, '');
@@ -945,6 +957,15 @@ final class AdminController
                 config_set('mfa_require_admin', ($_POST['mfa_require_admin'] ?? '0') === '1' ? '1' : '0');
                 config_set('mfa_require_staff', ($_POST['mfa_require_staff'] ?? '0') === '1' ? '1' : '0');
                 config_set('mfa_require_user', ($_POST['mfa_require_user'] ?? '0') === '1' ? '1' : '0');
+                // Desktop app download links + versions (Admin → Settings →
+                // Desktop apps & downloads). Empty URLs just hide that button.
+                config_set('download_update_url', trim((string) ($_POST['download_update_url'] ?? '')));
+                foreach (self::DOWNLOAD_APPS as $dlApp) {
+                    foreach (self::DOWNLOAD_PLATFORMS as $dlPlat) {
+                        config_set("download_{$dlApp}_{$dlPlat}_url", trim((string) ($_POST["download_{$dlApp}_{$dlPlat}_url"] ?? '')));
+                        config_set("download_{$dlApp}_{$dlPlat}_version", trim((string) ($_POST["download_{$dlApp}_{$dlPlat}_version"] ?? '')));
+                    }
+                }
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 $newWsPort = (int) (config_get('ws_port', '8080') ?? 8080);

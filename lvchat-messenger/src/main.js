@@ -35,6 +35,33 @@ function savePrefs (prefs) {
   }
 }
 
+function debounce (fn, ms) {
+  let t
+  return (...args) => {
+    clearTimeout(t)
+    t = setTimeout(() => fn(...args), ms)
+  }
+}
+
+/* Last window size/location, so the user's layout survives restarts. */
+function savedBounds () {
+  const b = loadPrefs().windowBounds
+  if (b && Number.isFinite(b.width) && Number.isFinite(b.height) && b.width > 0 && b.height > 0) return b
+  return null
+}
+
+/* Remember the window's bounds (debounced) when the user moves/resizes it. */
+function rememberBounds (win) {
+  const save = () => {
+    if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return
+    const prefs = loadPrefs()
+    prefs.windowBounds = win.getBounds()
+    savePrefs(prefs)
+  }
+  win.on('resize', debounce(save, 400))
+  win.on('move', debounce(save, 400))
+}
+
 function allowPermissions (ses) {
   ses.setPermissionRequestHandler((wc, permission, callback) => {
     const allowed = ['notifications', 'fullscreen', 'media', 'clipboard-sanitized-write']
@@ -89,10 +116,10 @@ function connectProfile (profile) {
   }
 
   const win = new BrowserWindow({
-    width: 1120,
-    height: 760,
-    minWidth: 800,
-    minHeight: 560,
+    width: (savedBounds() || {}).width || 1120,
+    height: (savedBounds() || {}).height || 760,
+    minWidth: 260,
+    minHeight: 420,
     title: profile.name || normalized,
     icon: APP_ICON,
     show: false,
@@ -111,6 +138,7 @@ function connectProfile (profile) {
   const drop = () => { messengerWindows.delete(webContentsId) }
   win.on('closed', drop)
   win.on('destroyed', drop)
+  rememberBounds(win)
 
   const record = { id: webContentsId, win, profileId: profile.id, url: normalized, name: profile.name || normalized, partition, kind: 'main' }
   messengerWindows.set(webContentsId, record)
@@ -273,23 +301,29 @@ function registerIpc () {
     return openChatWindow(profile, type, id)
   })
 
-  // Shrink/widen the main messenger window between Compact and Advanced layouts.
-  ipcMain.handle('window:setCompact', (event, compact) => {
-    const r = messengerWindows.get(event.sender.id)
-    if (r && r.kind === 'main' && !r.win.isDestroyed()) {
-      if (compact) {
-        r.win.setMinimumSize(300, 420)
-        r.win.setSize(360, 700)
-      } else {
-        r.win.setMinimumSize(800, 560)
-        r.win.setSize(1120, 760)
-      }
-    }
+  ipcMain.handle('clipboard:write', (_e, text) => {
+    clipboard.writeText(String(text == null ? '' : text))
     return { ok: true }
   })
 
-  ipcMain.handle('clipboard:write', (_e, text) => {
-    clipboard.writeText(String(text == null ? '' : text))
+  // Size the main messenger window for the active layout. Compact matches the
+  // (user-resizable) sidebar width; Advanced opens the chat pane wide. The
+  // sidebar's own width is never touched, so the list never shrinks.
+  ipcMain.handle('window:setCompact', (event, compact) => {
+    const r = messengerWindows.get(event.sender.id)
+    if (!r || r.kind !== 'main' || r.win.isDestroyed()) return { ok: false }
+    const win = r.win
+    if (win.isMaximized()) win.unmaximize()
+    if (compact) {
+      const sidebarWidth = Number(loadPrefs().sidebarWidth) || 320
+      win.setMinimumSize(260, 420)
+      // Size the window to exactly the list width so Compact is just the left
+      // pane (no dead space to its right).
+      win.setSize(Math.max(260, Math.round(sidebarWidth)), 700)
+    } else {
+      win.setMinimumSize(800, 560)
+      win.setSize(1120, 760)
+    }
     return { ok: true }
   })
 

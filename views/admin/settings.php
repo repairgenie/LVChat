@@ -26,6 +26,45 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     <input class="input" name="logo_url" value="<?= h($settings['logo_url']) ?>" placeholder="https://example.com/logo.png">
     <p class="text-xs text-discord-400 mt-1">Shown in place of the site name in the header and login pages. Leave empty to use the default mark.</p>
   </div>
+  <div class="pt-4 border-t border-discord-700">
+    <div class="text-sm font-medium text-white mb-1">Desktop apps &amp; downloads</div>
+    <p class="text-xs text-discord-400 mb-3">Download links shown in the chat's "Download the desktop app" modal. Leave a URL empty to hide that platform's button; the version is displayed next to each download.</p>
+    <?php
+    $dlApps = [
+        'desktop' => ['name' => 'LVChat Desktop', 'desc' => 'A full desktop version of the regular LVChat experience — the whole web chat in its own window with native notifications.'],
+        'messenger' => ['name' => 'LVChat Messenger', 'desc' => 'A streamlined, instant-messaging-first client with a simpler layout, designed for fast everyday use — a good fit for business settings.'],
+    ];
+    $dlPlatforms = [
+        'win' => ['label' => 'Windows', 'ext' => '.exe'],
+        'mac' => ['label' => 'macOS', 'ext' => '.dmg'],
+        'linux_rpm' => ['label' => 'Linux (RPM)', 'ext' => '.rpm'],
+        'linux_deb' => ['label' => 'Linux (DEB)', 'ext' => '.deb'],
+        'linux_appimage' => ['label' => 'Linux (AppImage)', 'ext' => '.AppImage'],
+    ];
+    foreach ($dlApps as $dlApp => $dlInfo):
+    ?>
+    <div class="card p-4 mb-4">
+      <div class="text-sm font-medium text-white mb-1"><?= h($dlInfo['name']) ?></div>
+      <p class="text-xs text-discord-400 mb-3"><?= h($dlInfo['desc']) ?></p>
+      <div class="space-y-3">
+        <?php foreach ($dlPlatforms as $dlPlat => $dlPlatInfo): ?>
+        <div>
+          <div class="text-xs font-medium text-discord-300 mb-1"><?= h($dlPlatInfo['label']) ?></div>
+          <div class="flex gap-3">
+            <input class="input font-mono text-xs flex-1 min-w-0" name="download_<?= $dlApp ?>_<?= $dlPlat ?>_url" value="<?= h($settings["download_{$dlApp}_{$dlPlat}_url"] ?? '') ?>" placeholder="https://example.com/…<?= h($dlPlatInfo['ext']) ?>" autocomplete="off" spellcheck="false">
+            <input class="input font-mono text-xs w-28 shrink-0" name="download_<?= $dlApp ?>_<?= $dlPlat ?>_version" value="<?= h($settings["download_{$dlApp}_{$dlPlat}_version"] ?? '') ?>" placeholder="1.0.0" autocomplete="off" spellcheck="false" title="Version">
+          </div>
+        </div>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php endforeach; ?>
+    <div>
+      <label class="label">Update link</label>
+      <input class="input" name="download_update_url" value="<?= h($settings['download_update_url'] ?? '') ?>" placeholder="https://example.com/downloads" autocomplete="off" spellcheck="false">
+      <p class="text-xs text-discord-400 mt-1">Where existing users are pointed to fetch the latest version — shown at the bottom of the download modal.</p>
+    </div>
+  </div>
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Registration</div>

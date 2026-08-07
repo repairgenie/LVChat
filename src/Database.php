@@ -328,6 +328,13 @@ final class Database
         // New defaults added after the app shipped need a row on upgrade (seed()
         // only runs on fresh installs). Use OR IGNORE so an admin's value survives.
         $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('registration_rate_limit', '20')");
+        foreach (['desktop', 'messenger'] as $dlApp) {
+            foreach (['win', 'mac', 'linux_rpm', 'linux_deb', 'linux_appimage'] as $dlPlat) {
+                $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('download_{$dlApp}_{$dlPlat}_url', '')");
+                $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('download_{$dlApp}_{$dlPlat}_version', '')");
+            }
+        }
+        $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('download_update_url', '')");
 
         $pdo->exec("INSERT OR REPLACE INTO server_config (key, value) VALUES ('schema_version', '" . self::SCHEMA_VERSION . "')");
 
@@ -537,6 +544,13 @@ final class Database
             'mfa_require_user' => '0',
             'theme_user_customization' => '1',
         ];
+        foreach (['desktop', 'messenger'] as $dlApp) {
+            foreach (['win', 'mac', 'linux_rpm', 'linux_deb', 'linux_appimage'] as $dlPlat) {
+                $config["download_{$dlApp}_{$dlPlat}_url"] = '';
+                $config["download_{$dlApp}_{$dlPlat}_version"] = '';
+            }
+        }
+        $config['download_update_url'] = '';
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');
         foreach ($config as $k => $v) {
             $ins->execute([$k, $v]);
