@@ -23,6 +23,24 @@ const serverEmpty = document.getElementById('server-empty')
 const connectionList = document.getElementById('connection-list')
 const connectionEmpty = document.getElementById('connection-empty')
 const connectionsRefresh = document.getElementById('connections-refresh')
+const testNotificationBtn = document.getElementById('test-notification')
+const notifyCountEl = document.getElementById('notify-count')
+
+testNotificationBtn.addEventListener('click', async () => {
+  await api.testNotification()
+})
+
+async function refreshNotifyCount () {
+  try {
+    const stats = await api.notifyStats()
+    if (stats && typeof stats.count === 'number') {
+      notifyCountEl.textContent = 'OS notifications shown: ' + stats.count
+      notifyCountEl.hidden = false
+    }
+  } catch (err) {}
+}
+setInterval(refreshNotifyCount, 2000)
+refreshNotifyCount()
 
 let editingId = null
 let originalUrl = null

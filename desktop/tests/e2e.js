@@ -7,7 +7,7 @@ const http = require('http')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lvchat-desktop-test-'))
 app.setPath('userData', tmp)
 
-const { chatWindows, sameSite, connectProfile } = require('../src/main')
+const { chatWindows, sameSite, connectProfile, getNotifyCount } = require('../src/main')
 
 let failures = 0
 function check (name, cond, extra) {
@@ -56,6 +56,7 @@ function waitFor (cond, ms) {
 function mockLvchatServer () {
   const csrf = 'test-csrf-token'
   const sessions = new Set()
+  const notifications = []
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     const cookie = req.headers.cookie || ''
@@ -64,6 +65,12 @@ function mockLvchatServer () {
     if (url.pathname === '/api/version') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ version: '1.0.0-test', site: 'Test Chat' }))
+      return
+    }
+
+    if (url.pathname === '/api/notifications') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, notifications }))
       return
     }
 
@@ -103,10 +110,10 @@ function mockLvchatServer () {
     if (url.pathname === '/app') {
       if (hasSession) {
         res.writeHead(200, { 'content-type': 'text/html' })
-        res.end('<title>app</title><h1>logged in</h1>')
+        res.end('<title>app</title><h1>logged in</h1><div id="notif-list"></div>')
         return
       }
-      res.writeHead(302, { location: '/login?next=' + encodeURIComponent(url.search || '?channel=general') })
+      res.writeHead(302, { location: '/login?next=' + encodeURIComponent('/app?channel=general') })
       res.end()
       return
     }
@@ -115,7 +122,10 @@ function mockLvchatServer () {
     res.end('<title>whatever</title><p>plain page</p>')
   })
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve(server))
+    server.listen(0, '127.0.0.1', () => resolve({
+      server,
+      addNotification: (n) => notifications.push(n)
+    }))
   })
 }
 
@@ -132,7 +142,7 @@ function plainServer () {
 async function main () {
   const lvchat = await mockLvchatServer()
   const plain = await plainServer()
-  const base = `http://127.0.0.1:${lvchat.address().port}`
+  const base = `http://127.0.0.1:${lvchat.server.address().port}`
   const plainBase = `http://127.0.0.1:${plain.address().port}`
 
   const win = await waitLauncher()
@@ -218,14 +228,51 @@ async function main () {
     check('auto-login lands on /app (not /login)', autoLoggedIn)
     const appUrl = chatWindows.get(connAuto.id).win.webContents.getURL()
     check('auto-login URL is the app page', appUrl.includes('/app'), appUrl)
+
+    // The native-notification bridge: the chat page's lvchat:notify event must
+    // reach the main process through the preload bridge.
+    const bridgePresent = await js(chatWindows.get(connAuto.id).win,
+      `typeof window.lvchatNative !== 'undefined' && typeof window.lvchatNative.notify === 'function'`)
+    check('chat window exposes the native notify bridge', bridgePresent === true, String(bridgePresent))
+    const beforeNotify = getNotifyCount()
+    await js(chatWindows.get(connAuto.id).win,
+      `window.dispatchEvent(new CustomEvent('lvchat:notify', { detail: { title: 'T', body: 'B' } }))`)
+    const notified = await waitFor(() => getNotifyCount() > beforeNotify)
+    check('lvchat:notify event reaches the main process', notified)
+
+    // Feed-notification polling: a new item in the server's /api/notifications
+    // feed must be picked up by the bridge and shown as an OS notification
+    // (the bridge polls it directly — the web app only loads the feed on click).
+    const beforeFeed = getNotifyCount()
+    lvchat.addNotification({ id: 1001, kind: 'dm', sender: 'alice', content: 'hello there' })
+    const feedObserved = await waitFor(() => getNotifyCount() > beforeFeed)
+    check('bridge polls the notifications API and shows alerts', feedObserved)
+
+    // Admin dashboard links pop out into a separate window (same session).
+    const chatWin = chatWindows.get(connAuto.id).win
+    await js(chatWin, `window.location.href = '${base}/admin'`)
+    const adminOpened = await waitFor(() => {
+      const a = [...chatWindows.values()].find((r) => r.kind === 'admin' && !r.win.isDestroyed())
+      return a && a.win.webContents.getURL().includes('/admin')
+    })
+    check('admin link pops out into its own window', adminOpened)
+    const adminRec = [...chatWindows.values()].find((r) => r.kind === 'admin' && !r.win.isDestroyed())
+    const chatRec = chatWindows.get(connAuto.id)
+    check('admin window shares the profile session', adminRec && chatRec && adminRec.partition === chatRec.partition)
+    const adminName = adminRec ? adminRec.name : ''
+    check('admin window is labelled as admin', adminName.startsWith('Admin —'), adminName)
+    if (adminRec) {
+      await js(win, `window.lvchat.closeWindow({ id: ${adminRec.id} })`)
+      await waitFor(() => ![...chatWindows.values()].some((r) => r.id === adminRec.id))
+    }
   } else {
-    console.log('  (skipping auto-login checks: keychain unavailable)')
+    console.log('  (skipping auto-login + admin pop-out checks: keychain unavailable)')
   }
 
   check('sameSite helper (subdomains)', sameSite('https://chat.lasvegasbestinternet.com', 'https://lasvegasbestinternet.com'))
   check('sameSite helper (foreign rejected)', !sameSite('https://chat.lasvegasbestinternet.com', 'https://evil.com'))
 
-  lvchat.close()
+  lvchat.server.close()
   plain.close()
 
   console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} TEST(S) FAILED`)

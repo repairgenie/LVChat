@@ -610,6 +610,35 @@
     SOUND_DATA.overrides = JSON.parse(body.dataset.soundOverrides || '{}');
   } catch (e) {}
 
+  // ── Native OS notifications (Electron desktop client) ──────────────────────
+  // The web app's OS notifications normally ride Web Push, which Electron can't
+  // receive, so the desktop app listens for `lvchat:notify` events and shows a
+  // real OS notification itself. Browsers have no listener, so these events are
+  // no-ops there. The decision below mirrors the user's per-context push
+  // preferences (Profile → Push notifications) and their mutes, so opting out
+  // works the same on every platform.
+  const PUSH_PREFS = (() => {
+    try {
+      const p = JSON.parse(body.dataset.pushPrefs || '{}');
+      return {
+        channels: p.channels === 0 ? 0 : 1,
+        dms: p.dms === 0 ? 0 : 1,
+        invites: p.invites === 0 ? 0 : 1
+      };
+    } catch (e) { return { channels: 1, dms: 1, invites: 1 }; }
+  })();
+  function stripHtml(s) {
+    return String(s || '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+  }
+  function notifyOS(title, body) {
+    try {
+      window.dispatchEvent(new CustomEvent('lvchat:notify', { detail: { title, body } }));
+    } catch (e) {}
+  }
+
   const audioCache = {};
   // Sounds play through the Web Audio API: HTMLMediaElement output is
   // throttled/suspended in background tabs, while AudioContext keeps playing
@@ -702,6 +731,9 @@
       if (m.username && m.username.toLowerCase() === MY_NICK) return;
       const sid = resolveSound(parseInt(m.sender_id, 10) || null, SOUND_DATA.channel);
       if (sid) playSound(sid);
+      if (PUSH_PREFS.channels) {
+        notifyOS(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + stripHtml(m.content));
+      }
     });
     if (maxId > bgLast) bgLast = maxId;
     bgSeeded = true;

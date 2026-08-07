@@ -222,6 +222,7 @@ function member_html(array $m, bool $online): string {
       data-my-guest="<?= (int) ($user['guest'] ?? 0) ?>"
       data-vapid-key="<?= h(PushService::publicKey()) ?>"
       data-push-all-off="<?= (int) (!(int) ($user['guest'] ?? 0) && (int) $pushPrefs['channels'] === 0 && (int) $pushPrefs['dms'] === 0 && (int) $pushPrefs['invites'] === 0) ?>"
+      data-push-prefs="<?= h(json_encode(['channels' => (int) $pushPrefs['channels'], 'dms' => (int) $pushPrefs['dms'], 'invites' => (int) $pushPrefs['invites']])) ?>"
       data-my-level="<?= h($currentLevel) ?>"
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"

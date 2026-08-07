@@ -369,6 +369,13 @@ server opens in its own isolated window with a persistent session — so you sta
 logged in across restarts. Optionally save a username/password per server
 (encrypted in the OS keychain via Electron `safeStorage`) for one-click
 auto-login; accounts that require TOTP still enter the code manually.
+Auto-login shows a "Logging in…" splash instead of flashing the web login page.
+
+Desktop OS notifications work without Web Push (which Electron can't receive):
+the client listens to the same events the web app already gates, so the
+per-context toggles and per-channel/per-user mutes in **your profile → Push
+notifications** also control desktop notifications — the opt-out is identical
+on every platform. The chat's Admin links open in their own window.
 
 ```bash
 cd desktop

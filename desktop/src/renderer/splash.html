@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+  <title>Logging in — LVChat Desktop</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #1e1f29;
+      color: #e8e9ef;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+    }
+    .box { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+    .spinner {
+      width: 42px;
+      height: 42px;
+      border: 4px solid #363946;
+      border-top-color: #5865f2;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .label { font-size: 15px; font-weight: 600; color: #9aa0b0; letter-spacing: 0.02em; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner" aria-hidden="true"></div>
+    <div class="label">Logging in…</div>
+  </div>
+</body>
+</html>

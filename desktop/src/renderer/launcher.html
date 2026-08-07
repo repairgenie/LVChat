@@ -35,21 +35,23 @@
         </div>
         <p id="server-check-result" class="hint" hidden></p>
 
-        <div class="field">
-          <label for="server-username">Username</label>
-          <input id="server-username" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="Your account name on this server" aria-label="Username" />
+        <div class="field-row">
+          <div class="field">
+            <label for="server-username">Username</label>
+            <input id="server-username" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Your account name on this server" aria-label="Username" />
+          </div>
+          <div class="field" id="password-field" hidden>
+            <label for="server-password">Password</label>
+            <input id="server-password" type="password" autocomplete="off"
+                   placeholder="Saved in your system keychain" aria-label="Password" />
+          </div>
         </div>
-        <div class="field" id="password-field" hidden>
-          <label for="server-password">Password</label>
-          <input id="server-password" type="password" autocomplete="off"
-                 placeholder="Saved in your system keychain" aria-label="Password" />
-          <label class="check" id="save-password-wrap" hidden>
-            <input type="checkbox" id="save-password" checked />
-            <span>Save password for one-click login</span>
-          </label>
-          <p class="hint" id="keychain-warning" hidden>System keychain unavailable — password won't be saved.</p>
-        </div>
+        <label class="check" id="save-password-wrap" hidden>
+          <input type="checkbox" id="save-password" checked />
+          <span>Save password for one-click login</span>
+        </label>
+        <p class="hint" id="keychain-warning" hidden>System keychain unavailable — password won't be saved.</p>
 
         <label class="check">
           <input type="checkbox" id="server-auto-connect" />
@@ -73,7 +75,11 @@
     </section>
   </main>
 
-  <footer class="footer">LVChat Desktop <span id="version"></span></footer>
+  <footer class="footer">
+    <span>LVChat Desktop <span id="version"></span></span>
+    <span id="notify-count" class="badge" hidden></span>
+    <button id="test-notification" class="ghost" title="Verify OS notifications work on this machine">Test notification</button>
+  </footer>
 
   <script src="launcher.js"></script>
 </body>
