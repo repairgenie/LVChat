@@ -7,7 +7,7 @@ const http = require('http')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lvchat-desktop-test-'))
 app.setPath('userData', tmp)
 
-const { chatWindows, sameSite, connectProfile, getNotifyCount } = require('../src/main')
+const { chatWindows, sameSite, createLauncherWindow, getNotifyCount } = require('../src/main')
 
 let failures = 0
 function check (name, cond, extra) {
@@ -29,6 +29,13 @@ function waitLauncher () {
     }
     tryGet()
   })
+}
+
+// The profile manager closes after a successful connect, so the tests reopen it
+// before the next round of renderer calls.
+async function relaunchLauncher () {
+  createLauncherWindow()
+  return waitLauncher()
 }
 
 function js (win, code) {
@@ -145,7 +152,7 @@ async function main () {
   const base = `http://127.0.0.1:${lvchat.server.address().port}`
   const plainBase = `http://127.0.0.1:${plain.address().port}`
 
-  const win = await waitLauncher()
+  let win = await waitLauncher()
   check('launcher window created', !!win)
 
   const info = await js(win, 'window.lvchat.listProfiles()')
@@ -210,6 +217,36 @@ async function main () {
 
   const rem = await js(win, `window.lvchat.removeProfile({ id: '${add.profile.id}' })`)
   check('remove profile', rem.ok && rem.removed)
+
+  // The profile manager closes itself after a successful connect (UI flow):
+  // click the Connect button for a fresh server and expect the window to close.
+  const fresh = await js(win, `window.lvchat.addProfile({ name: 'Fresh', url: '${base}/fresh' })`)
+  await js(win, 'window.location.reload()')
+  win = await waitLauncher()
+  let clicked = false
+  for (let i = 0; i < 120 && !clicked; i++) {
+    const r = await js(win, `(() => {
+      const lis = document.querySelectorAll('#server-list li');
+      for (const li of lis) {
+        const nameEl = li.querySelector('.site-name');
+        if (nameEl && nameEl.textContent.trim() === 'Fresh') {
+          const btn = li.querySelector('button.primary');
+          if (!btn) return false;
+          btn.click();
+          return true;
+        }
+      }
+      return false;
+    })()`)
+    if (r === true) clicked = true
+    else await new Promise((res) => setTimeout(res, 50))
+  }
+  check('connect button is clickable in the UI', clicked === true, String(clicked))
+  const uiClosed = await waitFor(() => !launcher())
+  check('profile manager closes after connect', uiClosed)
+  const freshRec = [...chatWindows.values()].find((r) => r.profileId === fresh.profile.id)
+  check('UI connect opened a chat window', !!freshRec)
+  win = await relaunchLauncher()
 
   if (storageAvailable) {
     const autoAdd = await js(win, `window.lvchat.addProfile({ name: 'Auto', url: '${base}', username: 'alice' })`)

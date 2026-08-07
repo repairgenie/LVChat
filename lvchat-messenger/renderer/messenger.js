@@ -262,6 +262,9 @@ async function startMain (me) {
   $('#me-avatar').replaceChildren(avatarEl(me.username, me.avatar))
   $('#me-status').textContent = 'online'
 
+  // Session is live — close the profile manager window.
+  window.msg.loginComplete()
+
   showView('main')
   try {
     await refreshBuddyData()
@@ -1050,19 +1053,22 @@ function contentEl (kind, content) {
     return div
   }
 
-  // Plain text with autolinked URLs.
+  // Plain text with @mention highlighting + autolinked URLs.
   const text = document.createElement('span')
   text.textContent = lines.join('\n')
-  text.innerHTML = linkify(text.textContent)
+  text.innerHTML = renderMarkup(text.textContent)
   div.appendChild(text)
   return div
 }
 
-function linkify (text) {
-  const escaped = esc(text)
-  return escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+/* Escape → highlight @mentions → autolink URLs (order matches the web app). */
+function renderMarkup (text) {
+  let html = esc(text)
+  html = html.replace(/@([A-Za-z0-9_\-\[\]\\`^{}|]+)/g, '<span class="mention">@$1</span>')
+  html = html.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
     return '<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>'
   })
+  return html
 }
 
 function scrollStream () {
@@ -1084,6 +1090,104 @@ function formatDate (ts) {
   const today = new Date()
   if (d.toDateString() === today.toDateString()) return 'Today'
   return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+/* ── @mention autocomplete ────────────────────────────────── */
+
+const MENTION_RE = /(?:^|\s)@([^\s]*)$/
+
+let mentionIndex = 0
+
+/* Pool of taggable users: friends + grouped contacts + open room members +
+ * recent DM partners + me, deduped by username (online first). */
+function mentionPool () {
+  const seen = new Set()
+  const out = []
+  const add = (user) => {
+    const name = user && user.username
+    const key = name ? String(name).toLowerCase() : ''
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    out.push({ username: String(name), is_online: user.is_online ? 1 : 0, avatar: user.avatar || null })
+  }
+  for (const f of state.friends) add(f)
+  for (const g of state.groups) for (const m of (g.members || [])) add(m)
+  if (state.open && state.open.members) for (const m of state.open.members) add(m)
+  for (const d of state.dmList) add(d)
+  if (state.me) add(Object.assign({ username: state.me.username, is_online: 1 }, state.me))
+  return out.sort((a, b) => b.is_online - a.is_online || String(a.username).localeCompare(String(b.username)))
+}
+
+function showMentionAc (query) {
+  const ac = $('#mention-ac')
+  const q = String(query || '').toLowerCase()
+  const matches = mentionPool().filter((u) => !q || String(u.username).toLowerCase().startsWith(q)).slice(0, 25)
+  ac.replaceChildren()
+  if (!matches.length) {
+    const empty = document.createElement('div')
+    empty.className = 'ma-empty'
+    empty.textContent = 'No matching users'
+    ac.appendChild(empty)
+    ac.hidden = false
+    mentionIndex = 0
+    return
+  }
+  mentionIndex = 0
+  matches.forEach((u, i) => {
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = 'ma-item' + (i === 0 ? ' selected' : '')
+    const dot = document.createElement('span')
+    dot.className = 'dot ' + (u.is_online ? 'online' : 'offline')
+    const name = document.createElement('span')
+    name.className = 'ma-name'
+    name.textContent = '@' + u.username
+    item.append(dot, name)
+    item.addEventListener('click', () => insertMention(u.username))
+    ac.appendChild(item)
+  })
+  ac.hidden = false
+  markMentionSelected()
+}
+
+function markMentionSelected () {
+  const ac = $('#mention-ac')
+  const items = ac.querySelectorAll('.ma-item')
+  items.forEach((el, i) => el.classList.toggle('selected', i === mentionIndex))
+}
+
+function moveMentionAc (d) {
+  const items = $('#mention-ac').querySelectorAll('.ma-item')
+  if (!items.length) return
+  mentionIndex = (mentionIndex + d + items.length) % items.length
+  markMentionSelected()
+  const sel = items[mentionIndex]
+  if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' })
+}
+
+function hideMentionAc () {
+  $('#mention-ac').hidden = true
+  $('#mention-ac').replaceChildren()
+}
+
+function insertMention (name) {
+  const input = $('#composer-input')
+  const v = input.value
+  const sel = input.selectionStart
+  const before = v.slice(0, sel)
+  const m = before.match(MENTION_RE)
+  if (m) {
+    const atPos = sel - m[1].length - 1
+    input.value = v.slice(0, atPos) + '@' + name + ' ' + v.slice(sel)
+    const pos = atPos + name.length + 2
+    input.setSelectionRange(pos, pos)
+  }
+  hideMentionAc()
+  input.focus()
+}
+
+function mentionAcOpen () {
+  return !$('#mention-ac').hidden
 }
 
 /* ── Composer ─────────────────────────────────────────────── */
@@ -1277,17 +1381,36 @@ function wireEvents () {
 
   // Composer
   const input = $('#composer-input')
+  input.addEventListener('input', () => {
+    const sel = input.selectionStart
+    const m = input.value.slice(0, sel).match(MENTION_RE)
+    if (m) showMentionAc(m[1])
+    else hideMentionAc()
+  })
   input.addEventListener('keydown', (e) => {
+    if (mentionAcOpen()) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveMentionAc(1); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveMentionAc(-1); return }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        const items = $('#mention-ac').querySelectorAll('.ma-item')
+        if (items[mentionIndex]) items[mentionIndex].click()
+        return
+      }
+      if (e.key === 'Escape') { hideMentionAc(); return }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const content = input.value
       input.value = ''
+      hideMentionAc()
       sendMessage(content)
     }
   })
   $('#composer-send').addEventListener('click', () => {
     const content = input.value
     input.value = ''
+    hideMentionAc()
     sendMessage(content)
   })
 
@@ -1338,6 +1461,7 @@ function wireEvents () {
     if (ctxMenu && !e.target.closest('.ctx-menu')) closeContextMenu()
     if (!e.target.closest('#emoji-panel') && !e.target.closest('#btn-emoji')) $('#emoji-panel').hidden = true
     if (!e.target.closest('#gif-panel') && !e.target.closest('#btn-gif') && !e.target.closest('#gif-search-input')) $('#gif-panel').hidden = true
+    if (!e.target.closest('#mention-ac') && !e.target.closest('#composer-input')) hideMentionAc()
   })
 }
 

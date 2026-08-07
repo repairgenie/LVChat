@@ -166,7 +166,7 @@ async function connectProfile (profile) {
     setError(serverError, res.error || 'Could not connect to that server.')
     return
   }
-  await loadConnections()
+  api.closeLauncher()
 }
 
 async function focusProfile (profileId) {

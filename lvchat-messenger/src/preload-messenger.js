@@ -13,5 +13,6 @@ contextBridge.exposeInMainWorld('msg', {
   prefsGet: (key) => ipcRenderer.invoke('prefs:get', key),
   prefsSet: (key, value) => ipcRenderer.invoke('prefs:set', { key, value }),
   showLauncher: () => ipcRenderer.invoke('launcher:show'),
+  loginComplete: () => ipcRenderer.send('msg:loginComplete'),
   notify: (payload) => ipcRenderer.send('msg:notify', payload)
 })

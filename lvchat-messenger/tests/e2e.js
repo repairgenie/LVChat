@@ -42,6 +42,18 @@ function waitLauncher () {
   })
 }
 
+function waitForNoLauncher () {
+  return new Promise((resolve) => {
+    const start = Date.now()
+    const tryGet = () => {
+      if (!launcher()) resolve(true)
+      else if (Date.now() - start > 15000) resolve(false)
+      else setTimeout(tryGet, 50)
+    }
+    tryGet()
+  })
+}
+
 function waitMessenger () {
   return new Promise((resolve) => {
     const tryGet = () => {
@@ -447,6 +459,10 @@ async function main () {
   await js(win, `document.getElementById('mfa-code').value = '123456'; document.getElementById('mfa-form').requestSubmit()`)
   check('main view shown after MFA', await waitJs(win, `!document.getElementById('view-main').hidden`))
 
+  // The profile manager window closes once a session is live.
+  await waitForNoLauncher()
+  check('profile window closes after login', launcher() === undefined)
+
   check('me name is alice', await waitJs(win, `document.getElementById('me-name').textContent === 'alice' && 'ok'`))
 
   // Friends list + groups render.
@@ -477,6 +493,16 @@ async function main () {
   // Send a text message.
   await js(win, `document.getElementById('composer-input').value = 'hello from messenger'; document.getElementById('composer-send').click()`)
   check('text message sends + appears', await waitJs(win, `document.getElementById('stream').textContent.includes('hello from messenger') && 'ok'`))
+
+  // @mention autocomplete: typing @bo suggests bob; Enter inserts @bob and the
+  // sent message renders the mention highlighted.
+  await js(win, `(() => { const i = document.getElementById('composer-input'); i.value = '@bo'; i.setSelectionRange(3, 3); i.dispatchEvent(new Event('input')) })()`)
+  check('mention autocomplete shows for @bo', await waitJs(win, `!document.getElementById('mention-ac').hidden && document.getElementById('mention-ac').textContent.includes('bob') && 'ok'`))
+  await js(win, `document.getElementById('composer-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`)
+  check('Enter picks the mention', await waitJs(win, `document.getElementById('composer-input').value.startsWith('@bob ') && 'ok'`))
+  await js(win, `(() => { const i = document.getElementById('composer-input'); i.value += 'check this'; const e = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }); i.dispatchEvent(e) })()`)
+  check('mention message sends', await waitJs(win, `document.getElementById('stream').textContent.includes('check this') && 'ok'`))
+  check('mention renders highlighted', await waitJs(win, `document.querySelector('#stream .mention') !== null && document.querySelector('#stream .mention').textContent.includes('@bob') && 'ok'`))
 
   // GIF search + send.
   await js(win, `document.getElementById('btn-gif').click()`)

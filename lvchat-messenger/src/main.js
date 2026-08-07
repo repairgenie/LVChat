@@ -210,6 +210,14 @@ function registerIpc () {
     })
   })
 
+  // A session is live (the user logged in) — tuck the profile manager away.
+  // It stays reopenable from File → Profile Manager (Cmd/Ctrl+M).
+  ipcMain.on('msg:loginComplete', (event) => {
+    const record = messengerWindows.get(event.sender.id)
+    if (!record || !launcherWindow || launcherWindow.isDestroyed()) return
+    launcherWindow.close()
+  })
+
   ipcMain.handle('msg:openExternal', (_e, url) => {
     if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url)
     return { ok: true }

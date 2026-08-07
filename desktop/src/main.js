@@ -207,6 +207,10 @@ function createLauncherWindow () {
   return launcherWindow
 }
 
+function closeLauncherWindow () {
+  if (launcherWindow && !launcherWindow.isDestroyed()) launcherWindow.close()
+}
+
 function allowPermissions (ses) {
   ses.setPermissionRequestHandler((wc, permission, callback) => {
     const allowed = ['notifications', 'fullscreen', 'media', 'clipboard-sanitized-write']
@@ -487,7 +491,7 @@ function rebuildTrayMenu () {
             record.win.focus()
           } }]
           : []),
-        { label: record ? 'Open another window' : 'Connect', click: () => connectProfile(p) },
+        { label: record ? 'Open another window' : 'Connect', click: () => { connectProfile(p); closeLauncherWindow() } },
         ...(record ? [{ label: 'Disconnect', click: () => disconnectProfile(p.id) }] : [])
       ]
     })
@@ -540,6 +544,13 @@ function registerIpc () {
     return { ok: true }
   })
   ipcMain.handle('launcher:show', () => { createLauncherWindow(); return { ok: true } })
+
+  // The renderer closes the profile manager itself after a successful connect;
+  // a short delay lets the invoke reply flush to the (about-to-close) window.
+  ipcMain.handle('launcher:close', () => {
+    setTimeout(closeLauncherWindow, 30)
+    return { ok: true }
+  })
 
   // Lets the user verify the OS notification pipeline independent of any server.
   ipcMain.handle('notify:test', () => {
@@ -630,7 +641,10 @@ app.whenReady().then(() => {
   buildTray()
 
   for (const p of profiles.list()) {
-    if (p.autoConnect) connectProfile(p)
+    if (p.autoConnect) {
+      connectProfile(p)
+      closeLauncherWindow()
+    }
   }
 
   app.on('activate', () => {
