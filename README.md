@@ -461,6 +461,20 @@ to a comma-separated list, e.g. `CHAT_CORS_ORIGINS=https://app.example.com`. COR
 are only emitted when an allowlisted `Origin` header is present — normal web-app traffic is
 untouched.
 
+The messenger has two layouts, toggled from the sidebar header and persisted in the app's
+local settings (`viewMode`, default **Compact**):
+
+- **Compact** — a Pidgin-style buddy/room list window with tabs. Double-click a friend or
+  room to open that conversation in its **own dedicated window** (each chat is a separate
+  window, deduped). Right-click a friend, room, group header, or message for actions
+  (open in new window, message, view profile, add-to-group, copy share link, leave room,
+  rename/delete group, copy message).
+- **Advanced** — the single-window layout with the chat pane beside the buddy list;
+  single-click a contact or room to switch the pane.
+
+The **Profile Manager** (add/edit server) offers a **Register account** action that opens
+that LVChat server's `/register` page in your browser.
+
 Messenger-specific API (additive, auth + CSRF enforced):
 
 | Endpoint | Purpose |

@@ -5,6 +5,7 @@ const serverForm = document.getElementById('server-form')
 const serverName = document.getElementById('server-name')
 const serverUrl = document.getElementById('server-url')
 const serverCheck = document.getElementById('server-check')
+const serverRegister = document.getElementById('server-register')
 const serverCheckResult = document.getElementById('server-check-result')
 const serverSave = document.getElementById('server-save')
 const serverCancel = document.getElementById('server-cancel')
@@ -44,6 +45,31 @@ function el (tag, className, text) {
   if (className) node.className = className
   if (text !== undefined) node.textContent = text
   return node
+}
+
+/* Parse the URL field like profiles.js: default to https, return the origin. */
+function serverOriginFromUrl (raw) {
+  let url = String(raw || '').trim()
+  if (!url) return null
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    if (!parsed.hostname) return null
+    return parsed.origin
+  } catch (err) {
+    return null
+  }
+}
+
+/* Register on the server in the URL field: opens /register in the browser. */
+function openRegistration (baseUrl) {
+  const origin = serverOriginFromUrl(baseUrl)
+  if (origin) api.openExternal(origin + '/register')
+}
+
+function updateRegisterState () {
+  serverRegister.disabled = !serverOriginFromUrl(serverUrl.value)
 }
 
 function renderServers () {
@@ -90,6 +116,10 @@ function renderServers () {
       ? focusProfile(profile.id)
       : connectProfile(profile))
 
+    const register = el('button', 'ghost', 'Register')
+    register.title = 'Create an account on this server'
+    register.addEventListener('click', () => openRegistration(profile.url))
+
     const disconnect = el('button', 'ghost', 'Disconnect')
     disconnect.disabled = !connectedIds.has(profile.id)
     disconnect.addEventListener('click', () => api.disconnectProfile({ id: profile.id }).then(loadAll))
@@ -100,7 +130,7 @@ function renderServers () {
     const del = el('button', 'danger', 'Delete')
     del.addEventListener('click', () => removeProfile(profile))
 
-    actions.append(connect, disconnect, edit, del)
+    actions.append(register, connect, disconnect, edit, del)
     li.append(grow, actions)
     serverList.appendChild(li)
   }
@@ -169,6 +199,7 @@ function startEdit (profile) {
   show(serverCheckResult, false)
   setError(serverError, '')
   openForm('Save')
+  updateRegisterState()
   api.hasCredentials({ id: profile.id }).then((has) => {
     if (!has) {
       savePassword.checked = true
@@ -199,6 +230,7 @@ function resetForm () {
   show(addToggle, true)
   serverSave.textContent = 'Save'
   setError(serverError, '')
+  updateRegisterState()
 }
 
 async function removeProfile (profile) {
@@ -241,7 +273,11 @@ addToggle.addEventListener('click', () => {
   resetForm()
   openForm('Save')
   serverName.value = ''
+  updateRegisterState()
 })
+
+serverRegister.addEventListener('click', () => openRegistration(serverUrl.value))
+serverUrl.addEventListener('input', updateRegisterState)
 
 serverCancel.addEventListener('click', resetForm)
 

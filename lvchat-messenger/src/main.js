@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell, session } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, shell, session, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const profiles = require('./profiles')
@@ -81,7 +81,7 @@ function connectProfile (profile) {
   const partition = profiles.partitionFor(profile.id)
   allowPermissions(session.fromPartition(partition))
 
-  const existing = [...messengerWindows.values()].find((r) => r.profileId === profile.id)
+  const existing = [...messengerWindows.values()].find((r) => r.profileId === profile.id && r.kind === 'main')
   if (existing && !existing.win.isDestroyed()) {
     if (existing.win.isMinimized()) existing.win.restore()
     existing.win.focus()
@@ -112,11 +112,59 @@ function connectProfile (profile) {
   win.on('closed', drop)
   win.on('destroyed', drop)
 
-  const record = { id: webContentsId, win, profileId: profile.id, url: normalized, name: profile.name || normalized, partition }
+  const record = { id: webContentsId, win, profileId: profile.id, url: normalized, name: profile.name || normalized, partition, kind: 'main' }
   messengerWindows.set(webContentsId, record)
   profiles.touch(profile.id)
 
   win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(profile.id))
+  win.once('ready-to-show', () => win.show())
+  return { ok: true, id: webContentsId, reused: false }
+}
+
+/* Open (or focus) a dedicated conversation window for a profile. Each chat gets
+ * its own window, deduped per profile + conversation. */
+function openChatWindow (profile, type, id) {
+  const convKey = (type === 'room' ? 'room:' : 'dm:') + String(id).toLowerCase()
+
+  const existing = [...messengerWindows.values()].find((r) => r.profileId === profile.id && r.kind === 'chat' && r.convKey === convKey)
+  if (existing && !existing.win.isDestroyed()) {
+    if (existing.win.isMinimized()) existing.win.restore()
+    existing.win.focus()
+    return { ok: true, id: existing.id, reused: true }
+  }
+
+  const partition = profiles.partitionFor(profile.id)
+  allowPermissions(session.fromPartition(partition))
+  const title = type === 'room' ? '#' + id : id
+
+  const win = new BrowserWindow({
+    width: 780,
+    height: 640,
+    minWidth: 520,
+    minHeight: 400,
+    title,
+    icon: APP_ICON,
+    show: false,
+    backgroundColor: '#1a1a24',
+    webPreferences: {
+      partition,
+      preload: path.join(__dirname, 'preload-messenger.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false
+    }
+  })
+
+  const webContentsId = win.webContents.id
+  const drop = () => { messengerWindows.delete(webContentsId) }
+  win.on('closed', drop)
+  win.on('destroyed', drop)
+
+  const record = { id: webContentsId, win, profileId: profile.id, url: profile.url, name: title, partition, kind: 'chat', convType: type, convId: id, convKey }
+  messengerWindows.set(webContentsId, record)
+
+  win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(profile.id) + '&chat=' + encodeURIComponent(type + ':' + id))
   win.once('ready-to-show', () => win.show())
   return { ok: true, id: webContentsId, reused: false }
 }
@@ -205,9 +253,44 @@ function registerIpc () {
     if (!record) return { ok: false }
     const ses = session.fromPartition(record.partition)
     return ses.clearStorageData({}).then(() => {
+      // Dedicated chat windows share the wiped partition session — close them.
+      for (const r of [...messengerWindows.values()]) {
+        if (r.profileId === record.profileId && r.id !== record.id && !r.win.isDestroyed()) r.win.close()
+      }
       if (!record.win.isDestroyed()) record.win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(record.profileId))
       return { ok: true }
     })
+  })
+
+  // Open a dedicated conversation window (Compact view double-click).
+  ipcMain.handle('chat:open', (event, { type, id }) => {
+    const record = messengerWindows.get(event.sender.id)
+    if (!record) return { ok: false, error: 'Unknown window' }
+    if (type !== 'dm' && type !== 'room') return { ok: false, error: 'Bad conversation type' }
+    if (!id) return { ok: false, error: 'Bad conversation id' }
+    const profile = profiles.find(record.profileId)
+    if (!profile) return { ok: false, error: 'Profile not found' }
+    return openChatWindow(profile, type, id)
+  })
+
+  // Shrink/widen the main messenger window between Compact and Advanced layouts.
+  ipcMain.handle('window:setCompact', (event, compact) => {
+    const r = messengerWindows.get(event.sender.id)
+    if (r && r.kind === 'main' && !r.win.isDestroyed()) {
+      if (compact) {
+        r.win.setMinimumSize(300, 420)
+        r.win.setSize(360, 700)
+      } else {
+        r.win.setMinimumSize(800, 560)
+        r.win.setSize(1120, 760)
+      }
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle('clipboard:write', (_e, text) => {
+    clipboard.writeText(String(text == null ? '' : text))
+    return { ok: true }
   })
 
   // A session is live (the user logged in) — tuck the profile manager away.

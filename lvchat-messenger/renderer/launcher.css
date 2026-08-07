@@ -130,7 +130,7 @@ button.danger:hover:not(:disabled) { background: var(--danger-hover); color: #ff
 .site-list .site-name { font-weight: 600; }
 .site-list .site-url { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .site-list .grow { flex: 1; min-width: 0; }
-.site-list .actions { display: flex; gap: 6px; }
+.site-list .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .site-list button { padding: 5px 10px; font-size: 12px; }
 
 .badge {

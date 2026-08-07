@@ -172,6 +172,13 @@ button.icon-btn:hover { background: var(--hover); color: var(--text); }
   background: var(--head-bg);
   color: var(--head-fg);
 }
+
+/* Compact view: the main window is a Pidgin-style buddy/room list only. */
+body.compact #chat { display: none; }
+body.compact #sidebar { width: 100%; border-right: none; }
+
+/* Dedicated conversation windows: sidebar hidden, chat fills the window. */
+body.chat-window #sidebar { display: none; }
 .me { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .avatar {
   width: 32px; height: 32px;
@@ -291,6 +298,7 @@ button.icon-btn:hover { background: var(--hover); color: var(--text); }
 .req { padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .req .req-meta { display: flex; align-items: center; gap: 8px; }
 .req .req-name { font-weight: 600; }
+.req .req-sub { color: var(--muted); font-size: 12px; margin: 2px 0 0 36px; }
 .req .req-actions { margin-top: 6px; display: flex; gap: 6px; }
 
 /* Chat head */
@@ -489,6 +497,7 @@ button.icon-btn:hover { background: var(--hover); color: var(--text); }
   letter-spacing: 0.5px;
   color: var(--muted);
 }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 
 /* Modal dialogs (replaces window.prompt/confirm/alert) */
 #modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }

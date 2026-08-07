@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld('lvchat', {
   focusWindow: (payload) => ipcRenderer.invoke('windows:focus', payload),
   closeWindow: (payload) => ipcRenderer.invoke('windows:close', payload),
   showLauncher: () => ipcRenderer.invoke('launcher:show'),
-  refreshMenus: () => ipcRenderer.send('app:refresh-menus')
+  refreshMenus: () => ipcRenderer.send('app:refresh-menus'),
+  openExternal: (url) => ipcRenderer.invoke('msg:openExternal', url)
 })

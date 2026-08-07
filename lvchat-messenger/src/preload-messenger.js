@@ -14,5 +14,8 @@ contextBridge.exposeInMainWorld('msg', {
   prefsSet: (key, value) => ipcRenderer.invoke('prefs:set', { key, value }),
   showLauncher: () => ipcRenderer.invoke('launcher:show'),
   loginComplete: () => ipcRenderer.send('msg:loginComplete'),
-  notify: (payload) => ipcRenderer.send('msg:notify', payload)
+  notify: (payload) => ipcRenderer.send('msg:notify', payload),
+  openChat: (payload) => ipcRenderer.invoke('chat:open', payload),
+  setCompact: (compact) => ipcRenderer.invoke('window:setCompact', compact),
+  copyText: (text) => ipcRenderer.invoke('clipboard:write', text)
 })

@@ -11,6 +11,7 @@ const state = {
   friends: [],
   incoming: [],
   outgoing: [],
+  channelInvites: [],
   groups: [],
   dmList: [],
   channelUnread: {},
@@ -22,8 +23,28 @@ const state = {
   collapsed: new Set(),
   pollTimer: null,
   pollBusy: false,
-  dirTimer: null
+  dirTimer: null,
+  chatWindow: false, // this window is a dedicated conversation window (Compact)
+  viewMode: 'compact', // 'compact' | 'advanced' (persisted in prefs)
+  _chatTarget: null
 }
+
+/* The window may have been opened as a dedicated conversation window:
+ * messenger.html?profile=<id>&chat=room:slug | chat=dm:username */
+function parseChatTarget () {
+  const params = new URLSearchParams(location.search)
+  const chat = params.get('chat') || ''
+  const sep = chat.indexOf(':')
+  if (sep === -1) return
+  const type = chat.slice(0, sep)
+  const id = chat.slice(sep + 1)
+  if ((type === 'dm' || type === 'room') && id) {
+    state.chatWindow = true
+    state._chatTarget = { type, id }
+  }
+}
+
+parseChatTarget()
 
 function esc (s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
@@ -122,7 +143,7 @@ async function boot () {
   $('#login-username').value = state.profile.username || ''
   $('#login-target').hidden = false
 
-  applyTheme()
+  await Promise.all([applyTheme(), applyViewMode()])
 
   // Resume an existing session if the messenger API is reachable. Never let a
   // fetch/CORS failure abort boot: always land on the login view.
@@ -266,6 +287,14 @@ async function startMain (me) {
   window.msg.loginComplete()
 
   showView('main')
+
+  if (state.chatWindow && state._chatTarget) {
+    try {
+      await openConversation(state._chatTarget.type, state._chatTarget.id)
+    } catch (err) { /* leave whatever rendered */ }
+    return
+  }
+
   try {
     await refreshBuddyData()
   } catch (err) { /* keep going; the poll loop re-renders */ }
@@ -322,6 +351,11 @@ async function pollTick () {
     }
     if (!j.ok || !j.body) return
     handlePoll(j.body)
+    // A dedicated room window keeps the server-side unread watermark advanced
+    // so the buddy-list window's badge stays clear while this window is open.
+    if (state.chatWindow && state.open && state.open.type === 'room') {
+      LvApi.postForm('/api/channel/read', { channel: state.open.id })
+    }
   } catch (err) {
     /* transient network error — keep polling */
   } finally {
@@ -337,6 +371,7 @@ function handlePoll (body) {
   if (Array.isArray(body.dm_list)) state.dmList = body.dm_list
   if (Array.isArray(body.friends)) state.friends = body.friends
   if (Array.isArray(body.friend_requests)) state.incoming = body.friend_requests
+  if (Array.isArray(body.channel_invites)) state.channelInvites = body.channel_invites
   if (body.channel_unread && Array.isArray(body.channel_unread)) {
     const map = {}
     for (const c of body.channel_unread) map[c.slug] = c.unread
@@ -414,6 +449,18 @@ function openRoom (slug) {
   openConversation('room', slug)
 }
 
+/* In Compact view, opening a conversation always means a dedicated window. In
+ * Advanced view it opens in the in-window pane. */
+async function openConversationOrWindow (type, id) {
+  if (state.viewMode === 'compact') return openChatWindow(type, id)
+  return type === 'dm' ? openDm(id) : openRoom(id)
+}
+
+/* Ask the main process for a dedicated conversation window (Pidgin-style). */
+async function openChatWindow (type, id) {
+  await window.msg.openChat({ type, id })
+}
+
 /* ── Rendering: sidebar ───────────────────────────────────── */
 
 function renderAll () {
@@ -462,7 +509,13 @@ function makeContact (user, opts) {
 
   wrap.addEventListener('click', (e) => {
     if (e.target.closest('.ctx-menu')) return
+    if (state.viewMode === 'compact') return
     openDm(user.username)
+  })
+  wrap.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.ctx-menu')) return
+    e.preventDefault()
+    openChatWindow('dm', user.username)
   })
   wrap.addEventListener('contextmenu', (e) => {
     e.preventDefault()
@@ -472,6 +525,7 @@ function makeContact (user, opts) {
 }
 
 function renderSidebar () {
+  if (state.chatWindow) return
   // Directory search panel takes precedence while typing.
   const searching = $('#directory-search').value.trim() !== ''
   $('#panel-directory').hidden = !searching
@@ -480,7 +534,7 @@ function renderSidebar () {
   $('#tab-rooms').classList.toggle('active', state.tab === 'rooms')
   $('#tab-requests').classList.toggle('active', state.tab === 'requests')
 
-  const reqCount = state.incoming.length
+  const reqCount = state.incoming.length + state.channelInvites.length
   const badge = $('#req-badge')
   badge.hidden = reqCount === 0
   badge.textContent = reqCount > 99 ? '99+' : reqCount
@@ -558,6 +612,10 @@ function renderGroup (g) {
     else state.collapsed.add('g:' + g.id)
     node.classList.toggle('collapsed')
   })
+  head.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    openGroupContextMenu(e.clientX, e.clientY, g)
+  })
 
   const members = document.createElement('div')
   members.className = 'group-members'
@@ -619,7 +677,15 @@ function renderRoomsList () {
       b.textContent = c.unread > 99 ? '99+' : c.unread
       row.appendChild(b)
     }
-    row.addEventListener('click', () => openRoom(c.slug))
+    row.addEventListener('click', () => {
+      if (state.viewMode === 'compact') return
+      openRoom(c.slug)
+    })
+    row.addEventListener('dblclick', () => openChatWindow('room', c.slug))
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      openRoomContextMenu(e.clientX, e.clientY, c)
+    })
     list.appendChild(row)
   }
 }
@@ -628,6 +694,15 @@ function renderRequestsList () {
   const list = $('#requests-list')
   list.replaceChildren()
 
+  if (state.channelInvites.length) {
+    const t = document.createElement('div')
+    t.className = 'panel-title'
+    t.textContent = 'Channel invites'
+    list.appendChild(t)
+    for (const inv of state.channelInvites) {
+      list.appendChild(makeInviteRow(inv))
+    }
+  }
   if (state.incoming.length) {
     const t = document.createElement('div')
     t.className = 'panel-title'
@@ -646,12 +721,59 @@ function renderRequestsList () {
       list.appendChild(makeRequestRow(r, 'outgoing'))
     }
   }
-  if (!state.incoming.length && !state.outgoing.length) {
+  if (!state.incoming.length && !state.outgoing.length && !state.channelInvites.length) {
     const empty = document.createElement('div')
     empty.className = 'empty'
-    empty.textContent = 'No pending friend requests.'
+    empty.textContent = 'No pending requests or invites.'
     list.appendChild(empty)
   }
+}
+
+/* A channel invite row: accept joins the room, decline removes it. */
+function makeInviteRow (inv) {
+  const wrap = document.createElement('div')
+  wrap.className = 'req'
+  const meta = document.createElement('div')
+  meta.className = 'req-meta'
+  const icon = document.createElement('div')
+  icon.className = 'avatar'
+  icon.textContent = '#'
+  const name = document.createElement('div')
+  name.className = 'req-name'
+  name.textContent = inv.channel_name || inv.slug
+  meta.append(icon, name)
+  wrap.appendChild(meta)
+  if (inv.inviter) {
+    const by = document.createElement('div')
+    by.className = 'req-sub'
+    by.textContent = 'Invited by ' + inv.inviter
+    wrap.appendChild(by)
+  }
+
+  const actions = document.createElement('div')
+  actions.className = 'req-actions'
+  const accept = document.createElement('button')
+  accept.className = 'primary'
+  accept.textContent = 'Accept'
+  const decline = document.createElement('button')
+  decline.className = 'ghost small'
+  decline.textContent = 'Decline'
+  accept.addEventListener('click', async () => {
+    accept.disabled = true
+    await LvApi.postForm('/api/channel/invite/accept', { channel: inv.slug })
+    state.channelInvites = state.channelInvites.filter((x) => x.slug !== inv.slug)
+    renderRequestsList()
+    await pollTick()
+  })
+  decline.addEventListener('click', async () => {
+    decline.disabled = true
+    await LvApi.postForm('/api/channel/invite/decline', { channel: inv.slug })
+    state.channelInvites = state.channelInvites.filter((x) => x.slug !== inv.slug)
+    renderRequestsList()
+  })
+  actions.append(accept, decline)
+  wrap.appendChild(actions)
+  return wrap
 }
 
 function makeRequestRow (r, dir) {
@@ -681,7 +803,7 @@ function makeRequestRow (r, dir) {
   dm.className = 'ghost small'
   dm.textContent = 'Message'
 
-  dm.addEventListener('click', () => openDm(r.username))
+  dm.addEventListener('click', () => openConversationOrWindow('dm', r.username))
 
   if (dir === 'incoming') {
     accept.addEventListener('click', async () => {
@@ -770,7 +892,7 @@ function makeDirectoryRow (r) {
   wrap.appendChild(btn)
   wrap.addEventListener('click', (e) => {
     if (e.target.closest('button')) return
-    openDm(r.username)
+    openConversationOrWindow('dm', r.username)
   })
   return wrap
 }
@@ -784,14 +906,21 @@ function closeContextMenu () {
 }
 
 function openContextMenu (x, y, user) {
-  closeContextMenu()
   const menu = document.createElement('div')
   menu.className = 'ctx-menu'
   menu.style.left = x + 'px'
   menu.style.top = y + 'px'
 
+  const open = menuItem('Open in new window', () => { openChatWindow('dm', user.username); closeContextMenu() })
+  menu.appendChild(open)
   const dm = menuItem('Message', () => { openDm(user.username); closeContextMenu() })
   menu.appendChild(dm)
+  const profile = menuItem('View profile', () => {
+    window.msg.openExternal(new URL('/u/' + encodeURIComponent(user.username), LvApi.origin()).toString())
+    closeContextMenu()
+  })
+  menu.appendChild(profile)
+  menu.appendChild(menuSeparator())
 
   // Add-to-group section.
   const groups = state.groups
@@ -815,6 +944,7 @@ function openContextMenu (x, y, user) {
   }
   const newGroup = menuItem('New group…', () => { closeContextMenu(); promptNewGroupFor(user) })
   menu.appendChild(newGroup)
+  menu.appendChild(menuSeparator())
 
   const remove = menuItem('Remove friend', async () => {
     await LvApi.postForm('/api/friend/remove', { username: user.username })
@@ -824,18 +954,105 @@ function openContextMenu (x, y, user) {
   remove.classList.add('danger')
   menu.appendChild(remove)
 
-  document.body.appendChild(menu)
-  positionMenu(menu, x, y)
+  showContextMenu(menu, x, y)
 }
 
-function openMemberContextMenu (x, y, user, group) {
-  closeContextMenu()
+/* Right-click on a room row: open in a new window, share, browser, leave. */
+function openRoomContextMenu (x, y, c) {
   const menu = document.createElement('div')
   menu.className = 'ctx-menu'
   menu.style.left = x + 'px'
   menu.style.top = y + 'px'
+
+  const open = menuItem('Open in new window', () => { openChatWindow('room', c.slug); closeContextMenu() })
+  menu.appendChild(open)
+  if (state.viewMode !== 'compact') {
+    menu.appendChild(menuItem('Open here', () => { openRoom(c.slug); closeContextMenu() }))
+  }
+  menu.appendChild(menuSeparator())
+  menu.appendChild(menuItem('Copy share link', async () => {
+    await window.msg.copyText(new URL('/c/' + encodeURIComponent(c.slug), LvApi.origin()).toString())
+    closeContextMenu()
+  }))
+  menu.appendChild(menuItem('Open in browser', () => {
+    window.msg.openExternal(new URL('/app?channel=' + encodeURIComponent(c.slug), LvApi.origin()).toString())
+    closeContextMenu()
+  }))
+  menu.appendChild(menuSeparator())
+  const leave = menuItem('Leave room', async () => {
+    closeContextMenu()
+    const ok = await appConfirm('Leave #' + c.slug + '?')
+    if (!ok) return
+    await LvApi.postForm('/api/part', { channel: c.slug })
+    await refreshBuddyData()
+    await pollTick()
+  })
+  leave.classList.add('danger')
+  menu.appendChild(leave)
+
+  showContextMenu(menu, x, y)
+}
+
+/* Right-click on a group header: rename / delete / collapse. */
+function openGroupContextMenu (x, y, g) {
+  const menu = document.createElement('div')
+  menu.className = 'ctx-menu'
+  menu.style.left = x + 'px'
+  menu.style.top = y + 'px'
+
+  if (!g.isUngrouped) {
+    menu.appendChild(menuItem('Rename group', () => { closeContextMenu(); renameGroup(g) }))
+    const del = menuItem('Delete group', () => { closeContextMenu(); deleteGroup(g) })
+    del.classList.add('danger')
+    menu.appendChild(del)
+    menu.appendChild(menuSeparator())
+  }
+
+  const collapsed = state.collapsed.has('g:' + g.id)
+  menu.appendChild(menuItem(collapsed ? 'Expand' : 'Collapse', () => {
+    closeContextMenu()
+    if (state.collapsed.has('g:' + g.id)) state.collapsed.delete('g:' + g.id)
+    else state.collapsed.add('g:' + g.id)
+    renderBuddyList()
+  }))
+
+  showContextMenu(menu, x, y)
+}
+
+/* Right-click on a message: copy the text, jump to the sender's profile. */
+function openMessageContextMenu (x, y, m) {
+  const menu = document.createElement('div')
+  menu.className = 'ctx-menu'
+  menu.style.left = x + 'px'
+  menu.style.top = y + 'px'
+
+  menu.appendChild(menuItem('Copy message', async () => {
+    await window.msg.copyText(String(m.content || ''))
+    closeContextMenu()
+  }))
+  if (m.username) {
+    menu.appendChild(menuItem('View ' + m.username + '\u2019s profile', () => {
+      window.msg.openExternal(new URL('/u/' + encodeURIComponent(m.username), LvApi.origin()).toString())
+      closeContextMenu()
+    }))
+  }
+
+  showContextMenu(menu, x, y)
+}
+
+function openMemberContextMenu (x, y, user, group) {
+  const menu = document.createElement('div')
+  menu.className = 'ctx-menu'
+  menu.style.left = x + 'px'
+  menu.style.top = y + 'px'
+  menu.appendChild(menuItem('Open in new window', () => { openChatWindow('dm', user.username); closeContextMenu() }))
   const dm = menuItem('Message', () => { openDm(user.username); closeContextMenu() })
   menu.appendChild(dm)
+  menu.appendChild(menuItem('View profile', () => {
+    window.msg.openExternal(new URL('/u/' + encodeURIComponent(user.username), LvApi.origin()).toString())
+    closeContextMenu()
+  }))
+  menu.appendChild(menuSeparator())
   const remove = menuItem('Remove from ' + group.name, async () => {
     await LvApi.postForm('/api/groups/member/remove', { group_id: group.id, friend_id: user.id })
     await refreshBuddyData()
@@ -843,8 +1060,7 @@ function openMemberContextMenu (x, y, user, group) {
   })
   remove.classList.add('danger')
   menu.appendChild(remove)
-  document.body.appendChild(menu)
-  positionMenu(menu, x, y)
+  showContextMenu(menu, x, y)
 }
 
 function menuItem (text, onClick) {
@@ -856,12 +1072,26 @@ function menuItem (text, onClick) {
   return item
 }
 
+function menuSeparator () {
+  const sep = document.createElement('div')
+  sep.className = 'ctx-sep'
+  return sep
+}
+
 function positionMenu (menu, x, y) {
   const rect = menu.getBoundingClientRect()
   const left = Math.min(x, window.innerWidth - rect.width - 8)
   const top = Math.min(y, window.innerHeight - rect.height - 8)
   menu.style.left = left + 'px'
   menu.style.top = top + 'px'
+}
+
+/* Close any open menu, then show + track this one. */
+function showContextMenu (menu, x, y) {
+  closeContextMenu()
+  document.body.appendChild(menu)
+  positionMenu(menu, x, y)
+  ctxMenu = menu
 }
 
 /* ── Groups ───────────────────────────────────────────────── */
@@ -951,7 +1181,7 @@ function renderMembers () {
     name.className = 'contact-name'
     name.textContent = m.username + (m.away ? ' (away)' : '')
     row.append(dot, avatar, name)
-    row.addEventListener('click', () => openDm(m.username))
+    row.addEventListener('click', () => openConversationOrWindow('dm', m.username))
     panel.appendChild(row)
   }
   if (!(open.members || []).length) {
@@ -998,6 +1228,10 @@ function buildMessageEl (m) {
     c.textContent = m.content || ''
     body.appendChild(c)
     wrap.appendChild(body)
+    wrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      openMessageContextMenu(e.clientX, e.clientY, m)
+    })
     return wrap
   }
 
@@ -1025,6 +1259,10 @@ function buildMessageEl (m) {
   body.appendChild(bubble)
 
   wrap.append(mine ? body : avatar, mine ? avatar : body)
+  wrap.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    openMessageContextMenu(e.clientX, e.clientY, m)
+  })
   return wrap
 }
 
@@ -1280,6 +1518,45 @@ async function loadGifs (q) {
   }
 }
 
+/* ── View mode (Compact / Advanced) ───────────────────────── */
+
+async function applyViewMode () {
+  let mode = await window.msg.prefsGet('viewMode')
+  if (mode !== 'compact' && mode !== 'advanced') mode = 'compact'
+  state.viewMode = mode
+  document.body.classList.remove('compact', 'advanced')
+  if (state.chatWindow) {
+    document.body.classList.add('chat-window')
+  } else {
+    document.body.classList.add(mode)
+    window.msg.setCompact(mode === 'compact')
+  }
+  updateViewModeButton()
+}
+
+function updateViewModeButton () {
+  const btn = $('#view-mode-btn')
+  if (!btn) return
+  if (state.viewMode === 'compact') {
+    btn.textContent = '▦'
+    btn.title = 'Switch to Advanced view'
+  } else {
+    btn.textContent = '◧'
+    btn.title = 'Switch to Compact view'
+  }
+}
+
+async function toggleViewMode () {
+  const next = state.viewMode === 'compact' ? 'advanced' : 'compact'
+  state.viewMode = next
+  document.body.classList.remove('compact', 'advanced')
+  document.body.classList.add(next)
+  await window.msg.prefsSet('viewMode', next)
+  if (!state.chatWindow) window.msg.setCompact(next === 'compact')
+  updateViewModeButton()
+  renderAll()
+}
+
 /* ── Theme ────────────────────────────────────────────────── */
 
 async function applyTheme () {
@@ -1359,6 +1636,7 @@ function wireEvents () {
   })
 
   $('#theme-toggle').addEventListener('click', toggleTheme)
+  $('#view-mode-btn').addEventListener('click', toggleViewMode)
   $('#profile-manager').addEventListener('click', () => window.msg.showLauncher())
   $('#logout-btn').addEventListener('click', doLogout)
 
