@@ -18,7 +18,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
   </div>
   <div>
     <label class="label">Site tagline</label>
-    <input class="input" name="site_tagline" value="<?= h($settings['site_tagline'] ?: 'IRC-style web chat') ?>" placeholder="IRC-style web chat">
+    <input class="input" name="site_tagline" value="<?= h($settings['site_tagline'] ?: 'Discord-style web chat') ?>" placeholder="Discord-style web chat">
     <p class="text-xs text-discord-400 mt-1">Short subtitle shown in the header and PWA description.</p>
   </div>
   <div>

@@ -897,7 +897,7 @@ final class AdminController
                 $oldWsCert = (string) (config_get('ws_ssl_cert', '') ?? '');
                 $oldWsKey = (string) (config_get('ws_ssl_key', '') ?? '');
                 config_set('site_name', trim((string) ($_POST['site_name'] ?? 'LVChat')));
-                config_set('site_tagline', trim((string) ($_POST['site_tagline'] ?? 'IRC-style web chat')));
+                config_set('site_tagline', trim((string) ($_POST['site_tagline'] ?? 'Discord-style web chat')));
                 config_set('logo_url', trim((string) ($_POST['logo_url'] ?? '')));
                 config_set('registration_enabled', ($_POST['registration_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('registration_requires_approval', ($_POST['registration_requires_approval'] ?? '0') === '1' ? '1' : '0');

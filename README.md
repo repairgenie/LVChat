@@ -1,10 +1,15 @@
-# LVChat — Discord-style IRC web chat (PHP + SQLite)
+# LVChat — Discord-style web chat (PHP + SQLite)
 
-A modern, Discord-look chat that speaks fluent IRC. Channels use `#name` names, users
-use `/slash` commands in the standard IRC format (kline, ban, kick, /me, topic, etc.),
-channel ops work with `~ & @ % +` access levels, and a full admin dashboard mirrors
-UnrealIRCd's IRCop tooling plus the NickServ / ChanServ / MemoServ / HostServ / OperServ
-services from Anope.
+A modern, Discord-look web chat that pays homage to one of the greatest chat
+systems of all time. Channels use `#name` names, users run `/slash` commands
+(kline, ban, kick, /me, topic, and more), channel ops work with `~ & @ % +`
+access levels, and a full admin dashboard mirrors IRC's operator tooling plus
+the NickServ / ChanServ / MemoServ / HostServ / OperServ services.
+
+**This is a web app, not an IRC server.** There's no IRC protocol, no IRC
+daemon, and nothing for an IRC client to connect to. The IRC-style commands,
+channel modes, access levels, and services are emulated natively — a deliberate
+nod to IRC rather than an implementation of it.
 
 ## Features
 
@@ -17,7 +22,7 @@ services from Anope.
 - **Admin tools** — see every user's IP, ban by nick or IP/CIDR with duration and reason (kline/gline/zline/shun), manage the bad-word filter (censor to `****` or block the whole message with a ChanServ notice) via **Admin → Bad words**, per-channel `+C` flag, and a clickable mode bar with tooltips above each channel
 - **Admin presence** — operators' messages and nicks render in red throughout the chat and member lists
 - **Private messages** — `/msg`, notices, ignore list, unread badges, read receipts,
-  and messaging yourself (an IRC hallmark)
+  and messaging yourself (an IRC tradition kept alive)
 - **Context menus** — right-click any message, user, or channel for actions (copy, edit,
   delete, report, message, profile, whois, ignore, kick, ban, share link, leave, channel info)
 - **Message reports** — right-click → **Report message** on any channel or DM message with
@@ -73,7 +78,7 @@ services from Anope.
   live search and trending; the API key is set under **Admin → Settings** and all
   search/trending calls are proxied through this server so the key never reaches browsers.
   Posted GIFs render inline and stay searchable by their title in chat history
-- **Slash commands** — full parser + Discord-style autocomplete for the entire IRC/Anope command set (see `/help`)
+- **Slash commands** — full parser + Discord-style autocomplete for the entire IRC-style command set (see `/help`)
 - **Shareable channel links** — `/c/gaming` links that land a logged-out friend on login/register
   and bounce them back into the channel; logged-in users with the link are auto-joined
   (private channels are hidden from `/list` but joinable via their link)
@@ -81,7 +86,8 @@ services from Anope.
   and private message is written to an append-only archive visible in full to admins, with a
   per-channel participant list; nothing is ever removed
 - **Custom roles & permissions** — admins create roles (name, colour, permissions) and assign
-  them to users; the `oper` permission turns a regular user into an IRC Operator. Marking a
+  them to users; the `oper` permission turns a regular user into an operator (the IRC-style
+  elevated role). Marking a
   role as **Helper** gives its members a green nick and automatic half-op (`%`) in every channel
 - **Helper users** — a distinct tier between regular users and staff; helpers are grouped
   separately in the member list, show green nicks, and receive automatic half-op in all channels
@@ -97,7 +103,7 @@ services from Anope.
   a channel as a bot (JSON or form-encoded, `content` + `username` + `avatar_url` + `embeds`).
   Point FriendsOfFlarum/webhooks (or GitHub/GitLab/Zapier) at one per channel. Manage from
   **Admin → Webhooks**.
-- **Channel operator rules** — ops can promote other members to op; half-ops get standard IRC
+- **Channel operator rules** — ops can promote other members to op; half-ops get standard IRC-style
   privileges (voice/kick/ban/`+imtk`) but not op-level modes (`+l`, `+C`, `+p`, `+s`, `+o`)
 - **Admin dashboard** — users, channels, global bans (kline/gline/zline/shun/qline),
   spam filters, MOTD, server settings, audit log, `/oper` privilege elevation, analytics
@@ -279,7 +285,8 @@ database automatically becomes the server admin (the second and later accounts a
 users). Log in as that account to reach `/admin`.
 
 After that, admins can promote other users from the **Users** page, or create an **o:line**
-in **Admin → O-lines** (username + password + operator class) so a user can `/oper` up
+(an IRC-style operator line) in **Admin → O-lines** (username + password + operator class)
+so a user can `/oper` up
 against their own nick and gain that class's permissions. Default classes: `netadmin`,
 `serveradmin`, `globalop`, `localop` (custom classes via **Admin → Operclasses**). There is
 no shared operator password. (You can also set the `users.role` column directly in SQLite
@@ -417,34 +424,67 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **558+ automated assertions** in three layers:
+Runs **899 automated assertions** in three layers:
 
-- **`tests/smoke.php`** (379) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (545) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
   share links, guests, webhooks, account invites + SMTP, age verification, the
   moderation queue (filter hits, kicks, *lines), pending/suspended account status,
   staff notes, support tickets, and legal-page sanitisation.
-- **`tests/http_test.php`** (179) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (342) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
   message reports, moderation/reports/support/legal admin pages, pending-approval and
   suspended login flows, share-link redirects, webhooks, and logout.
-- **`tests/ws_test.php`** (9) — WebSocket gateway integration: spawns the realtime
+- **`tests/ws_test.php`** (12) — WebSocket gateway integration: spawns the realtime
   daemon against a scratch DB and verifies ticket auth, channel/DM subscriptions,
   and message/msg-update fan-out (ports via `WS_PORT` / `WS_PUSH_PORT`).
 
-A headless-browser check (Chrome DevTools Protocol) is also used during development to
-confirm the chat page loads without JS errors, fills the viewport, polls for messages,
-and sends messages from the UI.
+The two desktop clients also ship their own Electron end-to-end suites
+(`npm test` in each folder — see [Desktop clients](#desktop-clients)).
 
-## LVChat Messenger (IM-first desktop client)
+## Desktop clients
 
-`lvchat-messenger/` is a separate Electron app (vanilla HTML/CSS/JS, no bundler) that is
-IM-first: a buddy list with custom contact groups, DMs, and joined rooms — the basis for
-future native mobile apps. It lives side by side with `desktop/` (the web-wrapper client)
-and does not modify the web app. Build/run from inside the folder:
+Two native Electron apps live in this repository. Both are **pure clients** —
+they connect to LVChat servers over HTTP(S) and contain no server-side code —
+and the web app itself runs fully in any browser with nothing depending on them.
+
+### LVChat Desktop (`desktop/`) — the web app as a native client
+
+The web-wrapper client. A **Profile Manager** window stores multiple server
+profiles (name + URL, verified against `GET /api/version`), and each server
+opens in its own isolated window with a persistent session — you stay logged in
+across restarts. Optionally save a username/password per server, encrypted in
+the OS keychain (Electron `safeStorage`), for **one-click auto-login**: a hidden
+helper window performs the real session login so the web login form never
+flashes (a "Logging in…" splash plays instead), and accounts protected by
+**TOTP/MFA** are handed to the MFA page so you can enter the code. The **Admin**
+links in the chat open the dashboard in its own window sharing the profile's
+session.
+
+Desktop **OS notifications** work without Web Push (which Electron can't
+receive): the client bridges the same events the web app already gates, so your
+**Profile → Push notifications** preferences — per-context toggles and
+per-channel/per-user mutes — control desktop alerts identically on every
+platform. A tray icon and app menus manage servers and windows, per-server
+auto-connect on startup is supported, and a test-notification button verifies
+the OS pipeline.
+
+```bash
+cd desktop
+npm install && npm start      # run
+npm test                      # e2e tests against a local mock LVChat server
+npm run dist:linux            # or dist:win / dist:mac — packages an installer
+```
+
+### LVChat Messenger (`lvchat-messenger/`) — IM-first client
+
+A separate Electron app (vanilla HTML/CSS/JS, no bundler) that is IM-first: a
+buddy list with custom contact groups, DMs, and joined rooms — the basis for
+future native mobile apps. It lives side by side with `desktop/` and does not
+modify the web app. Build/run from inside the folder:
 
 ```bash
 cd lvchat-messenger
@@ -499,12 +539,14 @@ bin/deploy.sh    post-upload restore + sanity check
 bin/ws-server.php   Workerman realtime gateway (WebSocket + internal push endpoint)
 bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/test.sh      run the full automated test suite
-tests/smoke.php  319 command/service assertions
-tests/http_test.php  122 HTTP assertions
+tests/smoke.php  545 command/service assertions
+tests/http_test.php  342 HTTP assertions
 tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
 composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)
 data/            SQLite database (beside public/, never web-served)
+desktop/         LVChat Desktop — the web app as a native Electron client (see above)
+lvchat-messenger/   LVChat Messenger — IM-first Electron client (see above)
 ```
 
 The **PWA layer** ships as committed files — `public/sw.js` (service worker),
@@ -518,6 +560,6 @@ verifies the service worker, manifest MIME type, and icons after every upload.
 - Passwords: argon2id (`password_hash`), channel keys hashed, all queries prepared
 - CSRF tokens on every POST; HTML-escaped output with a small safe-markup renderer
 - Rate limiting on sends; spam filters, shuns, and global bans enforced server-side
-- Operators authenticate with per-user **o:lines** (Admin → O-lines) against an
+- Operators authenticate with per-user **o:lines** (IRC-style operator lines, **Admin → O-lines**) against an
   operator class (netadmin, serveradmin, globalop, localop, or custom) — there is no
   shared operator password; `/oper` only works for the nick the o:line is tied to

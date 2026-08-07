@@ -24,7 +24,7 @@ final class PwaController
         echo json_encode([
             'name' => $site,
             'short_name' => $short,
-            'description' => ((string) (config_get('site_tagline', 'IRC-style web chat') ?: 'IRC-style web chat')) . ' — ' . $site,
+            'description' => ((string) (config_get('site_tagline', 'Discord-style web chat') ?: 'Discord-style web chat')) . ' — ' . $site,
             'id' => '/app',
             'start_url' => '/app',
             'scope' => '/',

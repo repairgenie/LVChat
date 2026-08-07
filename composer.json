@@ -1,6 +1,6 @@
 {
     "name": "lvchat/lvchat",
-    "description": "LVChat - Discord-style IRC web chat (PHP + SQLite) with a Workerman realtime gateway",
+    "description": "LVChat - Discord-style web chat (PHP + SQLite) with a Workerman realtime gateway",
     "type": "project",
     "license": "proprietary",
     "require": {
