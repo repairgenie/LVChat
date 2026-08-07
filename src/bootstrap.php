@@ -42,6 +42,7 @@ require ROOT . '/src/services/ModerationService.php';
 require ROOT . '/src/services/SupportService.php';
 require ROOT . '/src/services/LegalService.php';
 require ROOT . '/src/services/FriendService.php';
+require ROOT . '/src/services/ContactGroupService.php';
 require ROOT . '/src/services/Realtime.php';
 require ROOT . '/src/services/PushService.php';
 require ROOT . '/src/services/CommandRunner.php';
@@ -69,6 +70,7 @@ require ROOT . '/src/controllers/SupportController.php';
 require ROOT . '/src/controllers/LegalController.php';
 require ROOT . '/src/controllers/PwaController.php';
 require ROOT . '/src/controllers/FriendController.php';
+require ROOT . '/src/controllers/ContactGroupController.php';
 require ROOT . '/src/controllers/OpenClawController.php';
 require ROOT . '/src/controllers/PushController.php';
 
@@ -80,3 +82,36 @@ $tz = Database::scalar("SELECT value FROM server_config WHERE key = 'timezone'")
 if ($tz && in_array($tz, DateTimeZone::listIdentifiers(), true)) {
     date_default_timezone_set($tz);
 }
+
+// Cross-origin app clients (the LVChat Messenger Electron app, future native
+// mobile apps). CORS headers are emitted ONLY when an allowlisted Origin header
+// is present, so the web app's same-origin traffic is completely untouched.
+// Allowed origins come from the CHAT_CORS_ORIGINS env var or the `app_origins`
+// config key (comma-separated). The built-in `null` origin (file://) and any
+// http://127.0.0.1:* origin cover the local Electron messenger out of the box.
+$__corsOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($__corsOrigin !== '') {
+    $__corsAllowed = false;
+    $__corsList = trim((string) (config_get('app_origins') ?? getenv('CHAT_CORS_ORIGINS')));
+    if ($__corsList !== '') {
+        foreach (explode(',', $__corsList) as $__o) {
+            if (strcasecmp(trim($__o), $__corsOrigin) === 0) {
+                $__corsAllowed = true;
+                break;
+            }
+        }
+    }
+    if (!$__corsAllowed && ($__corsOrigin === 'null' || preg_match('#^http://127\.0\.0\.1(:\d+)?$#', $__corsOrigin))) {
+        $__corsAllowed = true;
+    }
+    if ($__corsAllowed) {
+        header('Access-Control-Allow-Origin: ' . $__corsOrigin);
+        header('Access-Control-Allow-Credentials: true');
+        header('Vary: Origin');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, X-CSRF');
+        header('Access-Control-Max-Age: 600');
+    }
+    unset($__o, $__corsList);
+}
+unset($__corsOrigin, $__corsAllowed);

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>Profile Manager — LVChat Messenger</title>
+  <link rel="stylesheet" href="launcher.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">LV</div>
+      <div>
+        <h1>LVChat Messenger</h1>
+        <p class="tagline">Connect to your LVChat servers. Everything stays on the server — this app only signs you in.</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="servers" class="card">
+      <div class="card-head">
+        <h2>Your servers</h2>
+        <button id="add-server-toggle" class="ghost">+ Add server</button>
+      </div>
+
+      <form id="server-form" class="site-form" hidden>
+        <input id="server-name" type="text" placeholder="Name (e.g. Las Vegas Chat)" aria-label="Server name" />
+        <input id="server-url" type="text" inputmode="url" spellcheck="false"
+               placeholder="https://chat.example.com" aria-label="Server URL" />
+        <div class="row-actions">
+          <button type="button" id="server-check" class="ghost">Check server</button>
+          <button type="submit" id="server-save" class="primary">Save</button>
+          <button type="button" id="server-cancel" class="ghost">Cancel</button>
+        </div>
+        <p id="server-check-result" class="hint" hidden></p>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="server-username">Username</label>
+            <input id="server-username" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Your account name on this server" aria-label="Username" />
+          </div>
+          <div class="field" id="password-field" hidden>
+            <label for="server-password">Password</label>
+            <input id="server-password" type="password" autocomplete="off"
+                   placeholder="Saved in your system keychain" aria-label="Password" />
+          </div>
+        </div>
+        <label class="check" id="save-password-wrap" hidden>
+          <input type="checkbox" id="save-password" checked />
+          <span>Save password for one-click login</span>
+        </label>
+        <p class="hint" id="keychain-warning" hidden>System keychain unavailable — password won't be saved.</p>
+
+        <label class="check">
+          <input type="checkbox" id="server-auto-connect" />
+          <span>Connect automatically when LVChat Messenger starts</span>
+        </label>
+
+        <p id="server-error" class="error" hidden></p>
+      </form>
+
+      <ul id="server-list" class="site-list"></ul>
+      <p id="server-empty" class="empty" hidden>No servers yet. Add one above — it must be an LVChat server.</p>
+    </section>
+
+    <section id="connections" class="card">
+      <div class="card-head">
+        <h2>Active connections</h2>
+        <button id="connections-refresh" class="ghost">Refresh</button>
+      </div>
+      <ul id="connection-list" class="site-list"></ul>
+      <p id="connection-empty" class="empty" hidden>No chat windows open.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>LVChat Messenger <span id="version"></span></span>
+  </footer>
+
+  <script src="launcher.js"></script>
+</body>
+</html>

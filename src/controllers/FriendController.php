@@ -125,4 +125,43 @@ final class FriendController
         }
         json_out(['status' => FriendService::status((int) $user['id'], (int) $t['id'])]);
     }
+
+    /**
+     * GET /api/directory — search the user directory to find people to send
+     * friend requests to. Registered, active, non-bot users only (guests are
+     * excluded); each result carries the requester's relationship status.
+     */
+    public static function search(): void
+    {
+        $user = self::requireUser();
+        $q = trim((string) ($_GET['q'] ?? ''));
+        $limit = max(1, min(50, (int) ($_GET['limit'] ?? 25)));
+        if ($q === '') {
+            json_out(['ok' => true, 'results' => []]);
+        }
+        $rows = Database::all(
+            "SELECT id, username, avatar, role, away, last_seen
+             FROM users
+             WHERE guest = 0 AND status = 'active' AND bot = 0 AND id != ?
+               AND username LIKE ? COLLATE NOCASE
+               AND NOT EXISTS (SELECT 1 FROM friendships fb WHERE fb.status = 'blocked'
+                               AND ((fb.user_id = ? AND fb.friend_id = users.id)
+                                 OR (fb.user_id = users.id AND fb.friend_id = ?)))
+             ORDER BY (last_seen >= datetime('now', '-30 seconds')) DESC, username COLLATE NOCASE
+             LIMIT ?",
+            [(int) $user['id'], '%' . $q . '%', (int) $user['id'], (int) $user['id'], $limit]
+        );
+        $results = [];
+        foreach ($rows as $r) {
+            $results[] = [
+                'id' => (int) $r['id'],
+                'username' => $r['username'],
+                'avatar' => $r['avatar'] ?? null,
+                'role' => $r['role'],
+                'is_online' => Auth::isOnline($r) ? 1 : 0,
+                'status' => FriendService::status((int) $user['id'], (int) $r['id']),
+            ];
+        }
+        json_out(['ok' => true, 'results' => $results]);
+    }
 }

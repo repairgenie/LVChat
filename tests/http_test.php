@@ -349,6 +349,109 @@ foreach (($j['dm_list'] ?? []) as $d) {
 }
 check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found, $b);
 
+// ── Messenger: CORS + user-directory search + contact groups ────────────────
+echo "== messenger ==\n";
+// Current-user endpoint for app clients.
+[$s] = req('GET', '/api/me');
+check('me requires auth', $s === 401, (string) $s);
+[$s, , $b] = req('GET', '/api/me', [], $cjA);
+$j = jsonDecode($b);
+check('me returns the session user', $s === 200 && ($j['user']['username'] ?? '') === 'alice' && isset($j['user']['id']) && array_key_exists('avatar', $j['user'] ?? []), $b);
+[$s, , $b] = req('GET', '/api/csrf', [], $cjA);
+$j = jsonDecode($b);
+check('csrf endpoint returns the session token', $s === 200 && is_string($j['csrf'] ?? null) && strlen($j['csrf'] ?? '') === 64, $b);
+// Channel read endpoint (clears a room's unread for app clients).
+$t = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/channel/read', ['csrf' => $t, 'channel' => 'gaming'], $cjA);
+check('mark channel read', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+[$s, , $b] = req('POST', '/api/channel/read', ['csrf' => $t, 'channel' => 'no-such'], $cjA);
+check('channel read rejects unknown channel', $s === 404, (string) $s);
+// CORS: allowlisted loopback origin gets headers; unknown origins don't.
+[$s, $h] = req('GET', '/api/version', [], null, ['Origin: http://127.0.0.1:48231']);
+check('loopback origin gets CORS headers', ($h['access-control-allow-origin'] ?? '') === 'http://127.0.0.1:48231' && ($h['access-control-allow-credentials'] ?? '') === 'true', var_export($h, true));
+[$s, $h] = req('GET', '/api/version', [], null, ['Origin: https://evil.example']);
+check('unknown origin gets no CORS headers', !isset($h['access-control-allow-origin']), var_export($h, true));
+[$s, $h] = req('GET', '/api/version', [], null, ['Origin: null']);
+check('null origin (electron file://) allowed', ($h['access-control-allow-origin'] ?? '') === 'null', var_export($h, true));
+
+// Directory search: auth required, then excludes self + reports status.
+[$s] = req('GET', '/api/directory?q=bob');
+check('directory search requires auth', $s === 401, (string) $s);
+[$s, , $b] = req('GET', '/api/directory?q=bob', [], $cjA);
+$j = jsonDecode($b);
+$hit = null;
+foreach (($j['results'] ?? []) as $r) { if (($r['username'] ?? '') === 'bob') $hit = $r; }
+check('directory finds bob with status none', $s === 200 && $hit !== null && ($hit['status'] ?? '') === 'none' && isset($hit['is_online']), $b);
+[$s, , $b] = req('GET', '/api/directory?q=alice', [], $cjA);
+$j2 = jsonDecode($b);
+check('directory excludes self', $s === 200 && count($j2['results'] ?? []) === 0, $b);
+[$s, , $b] = req('GET', '/api/directory?q=', [], $cjA);
+check('empty directory query returns empty', $s === 200 && count(jsonDecode($b)['results'] ?? []) === 0, $b);
+
+// Friend flow drives the relationship status inside directory results.
+[$s, , $b] = req('POST', '/api/friend/request', ['csrf' => $tA, 'username' => 'bob'], $cjA);
+check('alice -> bob friend request', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+[$s, , $b] = req('GET', '/api/directory?q=bob', [], $cjA);
+$j = jsonDecode($b);
+$hit = null;
+foreach (($j['results'] ?? []) as $r) { if (($r['username'] ?? '') === 'bob') $hit = $r; }
+check('directory status flips to outgoing', ($hit['status'] ?? '') === 'outgoing', $b);
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s] = req('POST', '/api/friend/accept', ['csrf' => $tB, 'username' => 'alice'], $cjB);
+check('bob accepts', $s === 200, (string) $s);
+
+// Contact groups CRUD.
+[$s] = req('GET', '/api/groups');
+check('groups list requires auth', $s === 401, (string) $s);
+[$s, , $b] = req('GET', '/api/groups', [], $cjA);
+check('alice starts with no groups', $s === 200 && count(jsonDecode($b)['groups'] ?? []) === 0, $b);
+[$s] = req('POST', '/api/groups', ['name' => 'Streaming Pals'], $cjA);
+check('group create requires csrf', $s === 419, (string) $s);
+[$s, , $b] = req('POST', '/api/groups', ['csrf' => $tA, 'name' => 'Streaming Pals'], $cjA);
+$j = jsonDecode($b);
+check('create group', $s === 200 && ($j['ok'] ?? false) === true && ($j['group']['name'] ?? '') === 'Streaming Pals', $b);
+$gid = (int) ($j['group']['id'] ?? 0);
+[$s, , $b] = req('POST', '/api/groups', ['csrf' => $tA, 'name' => 'streaming pals'], $cjA);
+check('duplicate group name rejected', $s === 400, (string) $s);
+[$s, , $b] = req('POST', '/api/groups', ['csrf' => $tA, 'name' => '   '], $cjA);
+check('blank group name rejected', $s === 400, (string) $s);
+
+// Membership is enforced to accepted friends only.
+$bobId = (int) (dbq('SELECT id FROM users WHERE username = "bob"')[0]['id'] ?? 0);
+[$s, , $b] = req('POST', '/api/groups/member/add', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => (string) $bobId], $cjA);
+$j = jsonDecode($b);
+check('add friend to group', $s === 200 && ($j['ok'] ?? false) === true, $b);
+[$s, , $b] = req('POST', '/api/groups/member/add', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => (string) $bobId], $cjA);
+check('duplicate member rejected', $s === 400, (string) $s);
+$aliceId = (int) (dbq('SELECT id FROM users WHERE username = "alice"')[0]['id'] ?? 0);
+[$s, , $b] = req('POST', '/api/groups/member/add', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => (string) $aliceId], $cjA);
+check('cannot add self to group', $s === 400, (string) $s);
+[$s, , $b] = req('POST', '/api/groups/member/add', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => '999999'], $cjA);
+check('unknown member rejected', $s === 400, (string) $s);
+
+// A non-friend (dave) can be found in the directory but not grouped.
+$tD = csrf(req('GET', '/register', [], '/tmp/opencode/httptest-d.txt')[2]);
+[$s] = req('POST', '/register', ['csrf' => $tD, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], '/tmp/opencode/httptest-d.txt');
+check('register dave', $s === 302, (string) $s);
+$daveId = (int) (dbq('SELECT id FROM users WHERE username = "dave"')[0]['id'] ?? 0);
+[$s, , $b] = req('POST', '/api/groups/member/add', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => (string) $daveId], $cjA);
+check('non-friend cannot be grouped', $s === 400, (string) $s);
+
+[$s, , $b] = req('GET', '/api/groups', [], $cjA);
+$j = jsonDecode($b);
+$g = $j['groups'][0] ?? [];
+check('group list has member bob', $s === 200 && count($j['groups'] ?? []) === 1 && count($g['members'] ?? []) === 1 && ($g['members'][0]['username'] ?? '') === 'bob', $b);
+[$s, , $b] = req('POST', '/api/groups/rename', ['csrf' => $tA, 'id' => (string) $gid, 'name' => 'Gaming Pals'], $cjA);
+check('rename group', $s === 200 && (jsonDecode($b)['group']['name'] ?? '') === 'Gaming Pals', $b);
+[$s, , $b] = req('POST', '/api/groups/member/remove', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => (string) $bobId], $cjA);
+check('remove member from group', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+[$s, , $b] = req('GET', '/api/groups', [], $cjA);
+check('group is empty after member remove', count(jsonDecode($b)['groups'][0]['members'] ?? []) === 0, $b);
+[$s, , $b] = req('POST', '/api/groups/delete', ['csrf' => $tA, 'id' => (string) $gid], $cjA);
+check('delete group', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+[$s, , $b] = req('GET', '/api/groups', [], $cjA);
+check('no groups after delete', count(jsonDecode($b)['groups'] ?? []) === 0, $b);
+
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
 foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks', '/admin/support'] as $p) {

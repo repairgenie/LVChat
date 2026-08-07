@@ -439,6 +439,42 @@ A headless-browser check (Chrome DevTools Protocol) is also used during developm
 confirm the chat page loads without JS errors, fills the viewport, polls for messages,
 and sends messages from the UI.
 
+## LVChat Messenger (IM-first desktop client)
+
+`lvchat-messenger/` is a separate Electron app (vanilla HTML/CSS/JS, no bundler) that is
+IM-first: a buddy list with custom contact groups, DMs, and joined rooms — the basis for
+future native mobile apps. It lives side by side with `desktop/` (the web-wrapper client)
+and does not modify the web app. Build/run from inside the folder:
+
+```bash
+cd lvchat-messenger
+npm install && npm start      # run
+npm test                      # mock-server end-to-end suite
+npm run dist                  # package installers (electron-builder)
+```
+
+The messenger talks to this server's JSON API cross-origin using the browser session's
+cookies, so the server needs CORS enabled for the app's loopback origin. This is on by
+default for `null` (file://) and any `http://127.0.0.1:*` origin. To allow other origins
+(web/mobile builds), set the `CHAT_CORS_ORIGINS` env var or the `app_origins` config key
+to a comma-separated list, e.g. `CHAT_CORS_ORIGINS=https://app.example.com`. CORS headers
+are only emitted when an allowlisted `Origin` header is present — normal web-app traffic is
+untouched.
+
+Messenger-specific API (additive, auth + CSRF enforced):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/me` | current session's account (id, username, avatar) |
+| `GET /api/csrf` | the session's CSRF token for app clients |
+| `GET /api/directory?q=` | user-directory search with relationship status (find people to add) |
+| `GET /api/groups`, `POST /api/groups`, `/rename`, `/delete`, `/member/add`, `/member/remove` | custom contact groups ("nodes") |
+| `POST /api/channel/read` | mark a room read (clears its unread badge) |
+
+Contact groups live in `contact_groups` + `contact_group_members` (see `schema.sql`);
+membership is enforced to accepted friends. Directory search + groups + the read endpoint
+are exercised in `tests/http_test.php`.
+
 ## Layout
 
 ```

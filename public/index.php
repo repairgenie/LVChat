@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 
+// CORS preflight for cross-origin app clients (image uploads are multipart and
+// trigger one). The allow-headers/methods were already emitted by bootstrap for
+// allowed origins; respond with a bare 204 so the real request can proceed.
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
 $router = new Router();
 
 // Auth
@@ -51,6 +59,7 @@ $router->post('/api/channels', [ChannelController::class, 'create']);
 $router->post('/api/join', [ChannelController::class, 'join']);
 $router->post('/api/part', [ChannelController::class, 'part']);
 $router->post('/api/channel/notify', [ChannelController::class, 'notify']);
+$router->post('/api/channel/read', [ChannelController::class, 'markRead']);
 $router->post('/api/channel/delete', [ChannelController::class, 'deleteChannel']);
 $router->post('/api/channel/invite/accept', [ChannelController::class, 'acceptInvite']);
 $router->post('/api/channel/invite/decline', [ChannelController::class, 'declineInvite']);
@@ -64,6 +73,8 @@ $router->get('/api/gifs', [ChatController::class, 'gifSearch']);
 
 // Users / profiles
 $router->get('/u/{username}', [UserController::class, 'profile']);
+$router->get('/api/me', [UserController::class, 'me']);
+$router->get('/api/csrf', [UserController::class, 'csrf']);
 $router->get('/api/online', [UserController::class, 'online']);
 $router->post('/api/password', [UserController::class, 'changePassword']);
 $router->post('/api/profile', [UserController::class, 'updateProfile']);
@@ -83,6 +94,15 @@ $router->post('/api/friend/remove', [FriendController::class, 'remove']);
 $router->post('/api/friend/cancel', [FriendController::class, 'cancel']);
 $router->post('/api/friend/block', [FriendController::class, 'block']);
 $router->post('/api/friend/unblock', [FriendController::class, 'unblock']);
+
+// Messenger: user-directory search + custom contact groupings
+$router->get('/api/directory', [FriendController::class, 'search']);
+$router->get('/api/groups', [ContactGroupController::class, 'list']);
+$router->post('/api/groups', [ContactGroupController::class, 'create']);
+$router->post('/api/groups/rename', [ContactGroupController::class, 'rename']);
+$router->post('/api/groups/delete', [ContactGroupController::class, 'delete']);
+$router->post('/api/groups/member/add', [ContactGroupController::class, 'addMember']);
+$router->post('/api/groups/member/remove', [ContactGroupController::class, 'removeMember']);
 
 // Sound alerts (user settings)
 $router->post('/api/sound/prefs', [SoundController::class, 'prefs']);

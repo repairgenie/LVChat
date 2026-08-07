@@ -1,0 +1,65 @@
+{
+  "name": "lvchat-messenger",
+  "version": "0.1.0",
+  "description": "LVChat Messenger — IM-first desktop client for LVChat",
+  "main": "src/main.js",
+  "author": {
+    "name": "LVChat",
+    "email": "admin@lasvegasbestinternet.com"
+  },
+  "homepage": "https://lasvegasbestinternet.com",
+  "desktopName": "lvchat-messenger.desktop",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "bash tests/run.sh",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:mac:zip": "electron-builder --mac zip",
+    "dist:linux": "electron-builder --linux",
+    "dist:rpm": "electron-builder --linux rpm",
+    "icon": "node build/generate-icon.js"
+  },
+  "build": {
+    "appId": "com.lasvegasbestinternet.lvchatmessenger",
+    "productName": "LVChat Messenger",
+    "files": [
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.social-networking"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "category": "Network",
+      "syncDesktopName": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

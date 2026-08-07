@@ -4,6 +4,33 @@ declare(strict_types=1);
 
 final class UserController
 {
+    /** GET /api/me — current session's account (messenger/API clients). */
+    public static function me(): void
+    {
+        $u = Auth::user();
+        if (!$u) {
+            json_out(['error' => 'Not authenticated.'], 401);
+        }
+        json_out([
+            'ok' => true,
+            'user' => [
+                'id' => (int) $u['id'],
+                'username' => $u['username'],
+                'avatar' => $u['avatar'] ?? null,
+                'role' => $u['role'],
+                'guest' => (int) ($u['guest'] ?? 0),
+                'away' => $u['away'] ?? null,
+                'status' => $u['status'] ?? 'active',
+            ],
+        ]);
+    }
+
+    /** GET /api/csrf — the session's CSRF token for app clients that post JSON/form bodies. */
+    public static function csrf(): void
+    {
+        json_out(['ok' => true, 'csrf' => Csrf::token()]);
+    }
+
     public static function profile(array $params): void
     {
         $viewer = Auth::require();

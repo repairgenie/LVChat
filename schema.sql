@@ -599,3 +599,26 @@ CREATE TABLE IF NOT EXISTS rt_transports (
   PRIMARY KEY (actor_id, guest)
 );
 CREATE INDEX IF NOT EXISTS idx_rt_transports_updated ON rt_transports(updated_at);
+
+-- Messenger contact groups: per-user custom groupings of friends ("nodes").
+-- Each row is one group owned by a user; members are the OTHER user's id and
+-- must be an accepted friend of the owner (enforced in ContactGroupService).
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_contact_groups_user ON contact_groups(user_id);
+
+CREATE TABLE IF NOT EXISTS contact_group_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
+  friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  added_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (group_id, friend_id)
+);
+CREATE INDEX IF NOT EXISTS idx_contact_group_members_group ON contact_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_contact_group_members_friend ON contact_group_members(friend_id);

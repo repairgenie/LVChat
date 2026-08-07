@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; connect-src https: http:" />
+  <title>LVChat Messenger</title>
+  <link rel="stylesheet" href="messenger.css" />
+</head>
+<body class="theme-dark">
+
+  <!-- Login -->
+  <div id="view-login" class="view view-center" hidden>
+    <div class="card login-card">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">LV</div>
+        <div>
+          <h1>LVChat Messenger</h1>
+          <p class="sub" id="login-server-name">LVChat</p>
+        </div>
+      </div>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="login-server">Server</label>
+          <input id="login-server" type="text" inputmode="url" spellcheck="false" placeholder="https://chat.example.com" />
+        </div>
+        <div class="field">
+          <label for="login-username">Username</label>
+          <input id="login-username" type="text" autocomplete="username" spellcheck="false" placeholder="your username" />
+        </div>
+        <div class="field">
+          <label for="login-password">Password</label>
+          <input id="login-password" type="password" autocomplete="current-password" placeholder="your password" />
+        </div>
+        <label class="check">
+          <input type="checkbox" id="login-save" checked />
+          <span>Save password on this device for one-click sign-in</span>
+        </label>
+        <p id="login-error" class="error" hidden></p>
+        <button type="submit" id="login-submit" class="primary wide">Sign in</button>
+      </form>
+      <div class="links">
+        <a href="#" id="login-forgot">Forgot password?</a>
+        <a href="#" id="login-register">Create an account</a>
+      </div>
+      <p class="sub" id="login-target">Connecting to <span id="login-server-url"></span></p>
+    </div>
+  </div>
+
+  <!-- MFA -->
+  <div id="view-mfa" class="view view-center" hidden>
+    <div class="card login-card">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">LV</div>
+        <div>
+          <h1>Two-factor authentication</h1>
+          <p class="sub">Enter the 6-digit code from your authenticator app.</p>
+        </div>
+      </div>
+      <form id="mfa-form" novalidate>
+        <div class="field">
+          <label for="mfa-code">Authentication code</label>
+          <input id="mfa-code" class="code-input" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
+        </div>
+        <p id="mfa-error" class="error" hidden></p>
+        <button type="submit" id="mfa-submit" class="primary wide">Verify</button>
+      </form>
+      <div class="links">
+        <a href="#" id="mfa-back">&larr; Back to sign in</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="view-main" class="view" hidden>
+    <aside id="sidebar">
+      <header class="sidebar-head">
+        <div class="me">
+          <div class="avatar" id="me-avatar"></div>
+          <div class="me-info">
+            <div class="me-name" id="me-name"></div>
+            <div class="me-status" id="me-status">online</div>
+          </div>
+        </div>
+        <div class="head-actions">
+          <button id="theme-toggle" class="icon-btn" title="Toggle light / dark mode">◐</button>
+          <button id="profile-manager" class="icon-btn" title="Profile manager">⚙</button>
+          <button id="logout-btn" class="icon-btn" title="Sign out">⏻</button>
+        </div>
+      </header>
+
+      <div class="search-row">
+        <input id="directory-search" type="text" spellcheck="false" placeholder="Search people to add…" />
+      </div>
+
+      <nav class="nav">
+        <button id="tab-buddy" class="nav-tab active">Friends</button>
+        <button id="tab-rooms" class="nav-tab">Rooms</button>
+        <button id="tab-requests" class="nav-tab">Requests<span id="req-badge" class="badge" hidden></span></button>
+      </nav>
+
+      <div id="panel-buddy" class="panel">
+        <div class="buddy-actions">
+          <button id="btn-new-group" class="ghost small">+ New group</button>
+        </div>
+        <div id="buddy-list"></div>
+      </div>
+
+      <div id="panel-rooms" class="panel" hidden>
+        <div id="rooms-list"></div>
+      </div>
+
+      <div id="panel-requests" class="panel" hidden>
+        <div id="requests-list"></div>
+      </div>
+
+      <div id="panel-directory" class="panel" hidden>
+        <div class="panel-title">Search results</div>
+        <div id="directory-list"></div>
+      </div>
+    </aside>
+
+    <main id="chat">
+      <header id="chat-head">
+        <div class="chat-head-info">
+          <div id="chat-title" class="chat-title">LVChat Messenger</div>
+          <div id="chat-sub" class="chat-sub">Pick a friend or room to start chatting</div>
+        </div>
+        <div class="chat-head-actions">
+          <button id="members-toggle" class="ghost small" title="Active members" hidden>Members</button>
+        </div>
+      </header>
+
+      <div id="chat-body">
+        <div id="stream"></div>
+        <aside id="members" hidden></aside>
+      </div>
+
+      <div id="composer" hidden>
+        <div id="gif-panel" class="picker-panel" hidden>
+          <div class="gif-search-row">
+            <input id="gif-search-input" type="text" spellcheck="false" placeholder="Search GIPHY…" />
+          </div>
+          <div id="gif-grid"></div>
+        </div>
+        <div id="emoji-panel" class="picker-panel" hidden></div>
+        <div class="composer-row">
+          <button id="btn-emoji" class="icon-btn" title="Emoji">☺</button>
+          <button id="btn-gif" class="ghost small" title="GIF">GIF</button>
+          <button id="btn-image" class="icon-btn" title="Send an image">🖼</button>
+          <input id="image-file" type="file" accept="image/*" hidden />
+          <textarea id="composer-input" rows="1" placeholder="Type a message…" enterkeyhint="send"></textarea>
+          <button id="composer-send" class="primary">Send</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="modal" hidden>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal">
+      <div id="modal-title" class="modal-title"></div>
+      <div id="modal-message" class="modal-message" hidden></div>
+      <input id="modal-input" type="text" hidden />
+      <div class="modal-actions">
+        <button id="modal-ok" class="primary">OK</button>
+        <button id="modal-cancel" class="ghost" hidden>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="emoji.js"></script>
+  <script src="api.js"></script>
+  <script src="messenger.js"></script>
+</body>
+</html>

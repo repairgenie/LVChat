@@ -6,3 +6,4 @@ public/assets/avatars/
 *.log
 .DS_Store
 desktop/dist/
+lvchat-messenger/dist/

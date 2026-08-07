@@ -177,6 +177,22 @@ final class ChannelController
         json_out(['ok' => true, 'mode' => $mode]);
     }
 
+    /** POST /api/channel/read — mark a channel read (messenger/API clients). */
+    public static function markRead(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        if (!AccessService::member($channel['id'], $user)) {
+            json_out(['error' => 'You are not a member of this channel.'], 403);
+        }
+        ChannelService::markRead($channel['id'], $user);
+        json_out(['ok' => true]);
+    }
+
     /** POST /api/channel/delete — founder deletes their channel (history preserved). */
     public static function deleteChannel(): void
     {
