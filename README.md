@@ -1,7 +1,7 @@
 # LVChat — Discord-style web chat (PHP + SQLite)
 
 A modern, Discord-look web chat that pays homage to one of the greatest chat
-systems of all time. Channels use `#name` names, users run `/slash` commands
+systems of all time- IRC. Channels use `#name` names, users run `/slash` commands
 (kline, ban, kick, /me, topic, and more), channel ops work with `~ & @ % +`
 access levels, and a full admin dashboard mirrors IRC's operator tooling plus
 the NickServ / ChanServ / MemoServ / HostServ / OperServ services.
