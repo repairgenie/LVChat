@@ -71,13 +71,18 @@ const NOTIFY_BRIDGE = `
     });
 
     // 2. Feed notifications — poll the source directly so alerts are real time.
+    //    The first poll seeds the dedup set silently (pre-existing unread items
+    //    must not re-alert on every app start / page load); only items that
+    //    appear afterwards produce OS alerts.
     var seen = {};
+    var seeded = false;
     function handleFeed (list) {
       if (!Array.isArray(list)) return;
       for (var i = 0; i < list.length; i++) {
         var n = list[i];
         if (!n || !n.id || seen[n.id]) continue;
         seen[n.id] = 1;
+        if (!seeded) continue;
         var kind = String(n.kind || '');
         var title = 'LVChat';
         var body = '';
@@ -112,6 +117,7 @@ const NOTIFY_BRIDGE = `
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (j && Array.isArray(j.notifications)) handleFeed(j.notifications);
+          seeded = true;
         })
         .catch(function () {});
     }
@@ -119,9 +125,11 @@ const NOTIFY_BRIDGE = `
     setInterval(loadFeed, 5000);
 
     // 3. Older servers + polling realtime: watch /api/poll for background
-    //    channel messages (the feed never lists plain channel messages).
+    //    channel messages (the feed never lists plain channel messages). Same
+    //    first-poll seeding so existing unread background messages stay silent.
     if (!serverHasBridge && 'fetch' in window) {
       var bgSeen = {};
+      var bgSeeded = false;
       var origFetch = window.fetch.bind(window);
       window.fetch = function (input, init) {
         return origFetch(input, init).then(function (res) {
@@ -129,13 +137,16 @@ const NOTIFY_BRIDGE = `
             var url = (typeof input === 'string' ? input : (input && input.url) || '') || '';
             if (url.indexOf('/api/poll') !== -1) {
               res.clone().json().then(function (j) {
-                if (j && Array.isArray(j.bg_messages) && prefs.channels === 1) {
+                if (j && Array.isArray(j.bg_messages)) {
                   for (var i = 0; i < j.bg_messages.length; i++) {
                     var m = j.bg_messages[i];
                     if (!m || !m.id || bgSeen[m.id]) continue;
                     bgSeen[m.id] = 1;
+                    if (!bgSeeded) continue;
+                    if (prefs.channels !== 1) continue;
                     push(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + strip(m.content || ''));
                   }
+                  bgSeeded = true;
                 }
               }).catch(function () {});
             }

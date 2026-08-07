@@ -77,7 +77,7 @@ function reactions_html(array $m, array $viewer): string {
 function msg_html(array $m, ?array $prev, array $viewer): string {
     $system = in_array($m['kind'], MessageService::SYSTEM_KINDS, true);
     if ($system) {
-        return '<div class="msg-system px-4 py-1.5 text-xs text-discord-400 italic text-center select-none" data-kind="' . h($m['kind']) . '">' . chat_markup($m['content']) . '</div>';
+        return '<div class="msg-system px-4 py-1.5 text-xs text-discord-400 italic text-center select-none" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '">' . chat_markup($m['content']) . '</div>';
     }
     if ($m['kind'] === 'action') {
         $isAdmin = ($m['role'] ?? '') === 'admin';

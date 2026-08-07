@@ -37,7 +37,7 @@
   if (lastMsg && lastMsg.created_at) lastDate = String(lastMsg.created_at).slice(0, 10);
 
   function lastMsgId() {
-    const els = msgsEl ? msgsEl.querySelectorAll('.msg[data-id]') : [];
+    const els = msgsEl ? msgsEl.querySelectorAll('.msg[data-id], .msg-system[data-id]') : [];
     let max = 0;
     els.forEach((el) => { const id = parseInt(el.dataset.id, 10); if (id > max) max = id; });
     return max;
@@ -278,7 +278,7 @@
 
   function msgHtml(m, grouped) {
     if (SYSTEM.includes(m.kind)) {
-      return `<div class="msg-system px-4 py-1.5 text-xs text-discord-400 italic text-center select-none" data-kind="${esc(m.kind)}">${linkify(m.content)}</div>`;
+      return `<div class="msg-system px-4 py-1.5 text-xs text-discord-400 italic text-center select-none" data-id="${m.id}" data-kind="${esc(m.kind)}">${linkify(m.content)}</div>`;
     }
     const isAdmin = m.role === 'admin';
     const guestTag = m.guest ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
@@ -341,7 +341,9 @@
     if (!msgsEl) return;
     // Dedupe by id: a poll that was already in flight can echo a message the
     // sender just appended optimistically (this used to duplicate emojis/text).
-    if (m.id && msgsEl.querySelector('.msg[data-id="' + m.id + '"]')) return;
+    // System messages carry a data-id too so a trailing join/topic/part isn't
+    // re-appended by the first poll after the initial render.
+    if (m.id && msgsEl.querySelector('.msg[data-id="' + m.id + '"], .msg-system[data-id="' + m.id + '"]')) return;
     const date = String(m.created_at || '').slice(0, 10);
     let html = '';
     if (date && date !== lastDate) {

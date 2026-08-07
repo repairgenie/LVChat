@@ -18,6 +18,7 @@
     "dist:mac": "electron-builder --mac",
     "dist:mac:zip": "electron-builder --mac zip",
     "dist:linux": "electron-builder --linux",
+    "dist:rpm": "electron-builder --linux rpm",
     "icon": "node build/generate-icon.js"
   },
   "build": {
@@ -49,7 +50,8 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "category": "Network",
       "syncDesktopName": true

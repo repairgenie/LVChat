@@ -216,6 +216,11 @@ async function main () {
     const creds = await js(win, `window.lvchat.saveCredentials({ id: '${autoAdd.profile.id}', username: 'alice', password: 'secret' })`)
     check('save credentials for auto-login profile', creds.ok === true, JSON.stringify(creds))
 
+    // A pre-existing unread notification must NOT re-alert when the window
+    // starts — the bridge seeds its dedup set on the first feed poll.
+    const preCount = getNotifyCount()
+    lvchat.addNotification({ id: 1001, kind: 'dm', sender: 'alice', content: 'old dm' })
+
     const connAuto = await js(win, `window.lvchat.connectProfile({ id: '${autoAdd.profile.id}' })`)
     check('auto-login profile connects', connAuto.ok === true, JSON.stringify(connAuto))
 
@@ -229,6 +234,10 @@ async function main () {
     const appUrl = chatWindows.get(connAuto.id).win.webContents.getURL()
     check('auto-login URL is the app page', appUrl.includes('/app'), appUrl)
 
+    // Allow the bridge's first feed poll (immediate) to run and seed.
+    await new Promise((r) => setTimeout(r, 3000))
+    check('pre-existing feed notifications do not re-alert on start', getNotifyCount() === preCount, String(getNotifyCount()) + ' vs ' + preCount)
+
     // The native-notification bridge: the chat page's lvchat:notify event must
     // reach the main process through the preload bridge.
     const bridgePresent = await js(chatWindows.get(connAuto.id).win,
@@ -240,11 +249,11 @@ async function main () {
     const notified = await waitFor(() => getNotifyCount() > beforeNotify)
     check('lvchat:notify event reaches the main process', notified)
 
-    // Feed-notification polling: a new item in the server's /api/notifications
+    // Feed-notification polling: a NEW item in the server's /api/notifications
     // feed must be picked up by the bridge and shown as an OS notification
     // (the bridge polls it directly — the web app only loads the feed on click).
     const beforeFeed = getNotifyCount()
-    lvchat.addNotification({ id: 1001, kind: 'dm', sender: 'alice', content: 'hello there' })
+    lvchat.addNotification({ id: 1002, kind: 'dm', sender: 'bob', content: 'new dm' })
     const feedObserved = await waitFor(() => getNotifyCount() > beforeFeed)
     check('bridge polls the notifications API and shows alerts', feedObserved)
 
