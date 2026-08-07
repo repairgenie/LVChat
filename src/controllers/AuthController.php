@@ -184,6 +184,13 @@ final class AuthController
     public static function register(): void
     {
         Csrf::verify();
+        // Honeypot: bots fill every visible-looking field. Humans never see this
+        // one, so a non-empty value means an automated submission. Fail silently —
+        // no flash, no account — so bots can't tell a block from a success.
+        if (trim((string) ($_POST['website'] ?? '')) !== '') {
+            log_audit('bot_signup_blocked', trim((string) ($_POST['username'] ?? '')));
+            redirect('/register');
+        }
         $next = $_POST['next'] ?? '/app?channel=general';
         $inviteToken = trim((string) ($_POST['invite'] ?? ''));
         $username = trim($_POST['username'] ?? '');
@@ -210,6 +217,14 @@ final class AuthController
             redirect('/register');
         }
 
+        // Per-IP registration throttle. Invite flows are exempt: the token is
+        // already the proof of access, and admins control who gets invites.
+        $regLimit = registration_rate_limit();
+        if ($invite === null && $regLimit > 0 && registration_attempt_count() >= $regLimit) {
+            flash('Too many accounts have been created from this address recently. Please try again later.');
+            redirect('/register');
+        }
+
         $age18 = ($_POST['age18'] ?? '0') === '1';
         $result = Auth::register($username, $email, $password, $age18);
         if (!$result['ok']) {
@@ -219,6 +234,8 @@ final class AuthController
         }
         if ($invite) {
             InviteService::claim((int) $invite['id'], (int) $result['id']);
+        } else {
+            registration_attempt_record();
         }
         $user = Auth::attempt($username, $password);
         if (TotpService::requiredFor($user)) {

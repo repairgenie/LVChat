@@ -26,6 +26,10 @@
     <form method="post" action="/register" class="space-y-4">
       <?= Csrf::field() ?>
       <input type="hidden" name="next" value="<?= h($next) ?>">
+      <div class="absolute left-[-9999px] top-auto" aria-hidden="true">
+        <label for="website">Leave this field empty</label>
+        <input type="text" id="website" name="website" tabindex="-1" autocomplete="off" value="">
+      </div>
       <?php if ($invite): ?>
       <input type="hidden" name="invite" value="<?= h($invite['token']) ?>">
       <?php endif; ?>

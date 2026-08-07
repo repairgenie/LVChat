@@ -168,6 +168,14 @@ check('GET /login 200', $s === 200);
 [$s, , $b] = req('GET', '/register');
 check('GET /register 200', $s === 200);
 
+// Honeypot: a filled trap field must be silently dropped (no account, no flash).
+$cjBot = '/tmp/opencode/httptest-bot.txt';
+$tBot = csrf(req('GET', '/register', [], $cjBot)[2]);
+[$s, $h] = req('POST', '/register', ['csrf' => $tBot, 'website' => 'http://spam.example', 'username' => 'botty', 'email' => 'botty@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjBot);
+check('honeypot registration silently redirected', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
+$botty = dbq('SELECT COUNT(*) AS n FROM users WHERE username = ?', ['botty']);
+check('honeypot registration created no user', (int) $botty[0]['n'] === 0, json_encode($botty));
+
 $cjA = '/tmp/opencode/httptest-a.txt';
 $page = req('GET', '/register', [], $cjA)[2];
 $t = csrf($page);
@@ -565,6 +573,26 @@ check('invite bypasses closed registration', $s === 302 && ($h['location'] ?? ''
 // Restore open registration for the rest of the suite.
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
 req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'registration_enabled' => '1', 'back' => '/admin/settings'], $cjA);
+
+// Per-IP registration throttle: N accounts per window, then blocked. Invites exempt.
+dbq('DELETE FROM registration_attempts');
+dbq("INSERT OR REPLACE INTO server_config (key, value) VALUES ('registration_rate_limit', '2')");
+$cjR = '/tmp/opencode/httptest-r.txt';
+foreach (['rlim1', 'rlim2'] as $rn) {
+    $jar = $cjR . '-' . $rn;
+    $t = csrf(req('GET', '/register', [], $jar)[2]);
+    [$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => $rn, 'email' => "$rn@x.com", 'password' => 'password123', 'age18' => '1', 'next' => '/'], $jar);
+    check("rate limit allows registration $rn", $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
+}
+$jar = $cjR . '-rlim3';
+$t = csrf(req('GET', '/register', [], $jar)[2]);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'rlim3', 'email' => 'rlim3@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $jar);
+check('rate limit blocks over the cap', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
+$rlim3 = dbq('SELECT COUNT(*) AS n FROM users WHERE username = ?', ['rlim3']);
+check('rate-limited registration created no user', (int) $rlim3[0]['n'] === 0, json_encode($rlim3));
+// Reset the throttle so the rest of the suite is unaffected.
+dbq("DELETE FROM server_config WHERE key = 'registration_rate_limit'");
+dbq('DELETE FROM registration_attempts');
 
 // Manual user creation: auto-generated password shown once, then login works.
 $tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);

@@ -40,6 +40,11 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     </div>
     <input type="checkbox" name="registration_requires_approval" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['registration_requires_approval'] ?? '0') === '1' ? 'checked' : '' ?>>
   </div>
+  <div>
+    <label class="label">Registration rate limit</label>
+    <input class="input" type="number" min="0" name="registration_rate_limit" value="<?= (int) ($settings['registration_rate_limit'] ?? 20) ?>">
+    <p class="text-xs text-discord-400 mt-1">Max new accounts per IP per 10 minutes. Set to 0 for unlimited. Invite links are exempt.</p>
+  </div>
   <div class="pt-4 border-t border-discord-700">
     <div class="text-sm font-medium text-white mb-1">Require two-factor authentication</div>
     <p class="text-xs text-discord-400 mb-3">Accounts in a checked class must enroll MFA (authenticator app) before they can use the site. Users not yet enrolled are walked through setup right after signing in with their password. Admins can reset a user's MFA from their profile page if they lose their authenticator.</p>

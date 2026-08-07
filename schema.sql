@@ -348,6 +348,15 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, attempted_at);
 
+-- Rolling window of new accounts per client IP (registration throttle; rows are
+-- pruned opportunistically by registration_attempt_count()).
+CREATE TABLE IF NOT EXISTS registration_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ip TEXT NOT NULL,
+  attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_registration_attempts_ip ON registration_attempts(ip, attempted_at);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,

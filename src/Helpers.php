@@ -212,6 +212,26 @@ function login_attempt_clear(): void
     Database::query('DELETE FROM login_attempts WHERE ip = ?', [client_ip() ?: '']);
 }
 
+/** Max new accounts per IP inside the registration window (0 = unlimited). */
+function registration_rate_limit(): int
+{
+    return (int) (config_get('registration_rate_limit', '20') ?? 20);
+}
+
+/** Prune the registration log and return how many this IP has in the window. */
+function registration_attempt_count(): int
+{
+    Database::query('DELETE FROM registration_attempts WHERE attempted_at < datetime("now", "-10 minutes")');
+    $ip = client_ip();
+    return (int) Database::scalar('SELECT COUNT(*) FROM registration_attempts WHERE ip = ?', [$ip ?: '']);
+}
+
+/** Record a new account created from this IP. */
+function registration_attempt_record(): void
+{
+    Database::query('INSERT INTO registration_attempts (ip) VALUES (?)', [client_ip() ?: '']);
+}
+
 /** URL of the configured site logo, or null when none is set. */
 function site_logo(): ?string
 {
