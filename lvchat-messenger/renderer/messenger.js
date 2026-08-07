@@ -124,14 +124,34 @@ async function boot () {
 
   applyTheme()
 
-  const me = await LvApi.getJson('/api/me')
+  // Resume an existing session if the messenger API is reachable. Never let a
+  // fetch/CORS failure abort boot: always land on the login view.
+  let me = null
+  try {
+    me = await LvApi.getJson('/api/me')
+  } catch (err) {
+    me = { ok: false, status: 0 }
+  }
+
   if (me.ok && me.body && me.body.user) {
     await startMain(me.body.user)
     return
   }
 
-  // Not signed in yet — try the keychain-saved credentials first.
   showView('login')
+
+  // The messenger endpoint is missing or CORS-blocked → the server is running
+  // an older LVChat build (no CORS middleware, no /api/me). Give the user an
+  // actionable message instead of a silent failure.
+  if (me.status === 404 || me.status === 0) {
+    showLoginError(
+      'Could not reach this LVChat server, or it is running an older build. ' +
+      'Deploy the latest LVChat build (it adds CORS + the Messenger API) and try again.'
+    )
+    return
+  }
+
+  // Not signed in yet — try the keychain-saved credentials first.
   const saved = await window.msg.savedCredentials()
   if (saved && saved.username && saved.password) {
     await attemptLogin(saved.username, saved.password, false)
@@ -243,9 +263,13 @@ async function startMain (me) {
   $('#me-status').textContent = 'online'
 
   showView('main')
-  await refreshBuddyData()
+  try {
+    await refreshBuddyData()
+  } catch (err) { /* keep going; the poll loop re-renders */ }
   await startPoll()
-  renderAll()
+  try {
+    renderAll()
+  } catch (err) { /* leave whatever rendered */ }
 }
 
 async function refreshBuddyData () {

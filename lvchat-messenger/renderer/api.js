@@ -28,13 +28,20 @@ window.LvApi = (() => {
     return Object.assign({}, extra)
   }
 
+  /* Fetch without throwing: network/CORS failures return a status-0 result so
+   * callers can render a helpful message instead of a blank window. */
   async function get (path) {
-    const res = await fetch(base + path, { credentials: 'include', headers: headers() })
-    return res
+    try {
+      const res = await fetch(base + path, { credentials: 'include', headers: headers() })
+      return res
+    } catch (err) {
+      return { status: 0, ok: false, res: null, error: String((err && err.message) || err) }
+    }
   }
 
   async function getJson (path) {
     const res = await get(path)
+    if (!res || res.status === 0) return { status: 0, ok: false, body: null, res: null, error: res ? res.error : '' }
     let body
     try {
       body = await res.json()
@@ -56,6 +63,7 @@ window.LvApi = (() => {
     } catch (err) { /* fall through */ }
     try {
       const res = await get('/login')
+      if (!res || typeof res.text !== 'function') return csrfToken
       const html = await res.text()
       const m = html.match(/name="csrf" value="([^"]+)"/)
       if (m) csrfToken = m[1]
@@ -68,12 +76,17 @@ window.LvApi = (() => {
     const body = new URLSearchParams(data)
     body.set('csrf', tok)
     body.set('ajax', '1') // JSON responses; without this /api/send treats "/…" as a command and redirects
-    const res = await fetch(base + path, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body
-    })
+    let res
+    try {
+      res = await fetch(base + path, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body
+      })
+    } catch (err) {
+      return { status: 0, ok: false, body: null, res: null, error: String((err && err.message) || err) }
+    }
     let j = null
     try {
       j = await res.json()
@@ -84,11 +97,16 @@ window.LvApi = (() => {
   async function upload (path, formData) {
     const tok = await csrf()
     formData.set('csrf', tok)
-    const res = await fetch(base + path, {
-      method: 'POST',
-      credentials: 'include',
-      body: formData
-    })
+    let res
+    try {
+      res = await fetch(base + path, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      })
+    } catch (err) {
+      return { status: 0, ok: false, body: null, res: null, error: String((err && err.message) || err) }
+    }
     let j = null
     try {
       j = await res.json()
