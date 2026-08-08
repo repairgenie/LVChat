@@ -13,7 +13,7 @@ const http = require('http')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lvchat-messenger-test-'))
 app.setPath('userData', tmp)
 
-require('../src/main')
+const messengerMain = require('../src/main')
 
 // Intercept external-browser opens so registration URLs can be asserted without
 // launching a real browser. main.js references the same `shell` singleton.
@@ -139,6 +139,7 @@ function mockLvchatServer () {
 
   const state = {
     directoryDanStatus: 'none',
+    dmUnread: 2,
     groups: [{ id: 1, name: 'Friends', position: 0, members: [2] }],
     joinedChannels: [{ slug: 'gaming', unread: 3, online: 4 }, { slug: 'general', unread: 0, online: 1 }],
     invites: [
@@ -178,7 +179,7 @@ function mockLvchatServer () {
       messages: [],
       presence: [],
       notify_count: 1,
-      dm_list: [{ user_id: 3, username: 'carol', role: 'user', guest: 0, away: null, last_seen: '2026-08-01 00:00:00', unread: 2, last_content: 'hey', last_id: 3, muted: 0 }],
+      dm_list: [{ user_id: 3, username: 'carol', role: 'user', guest: 0, away: null, last_seen: '2026-08-01 00:00:00', unread: state.dmUnread, last_content: 'hey', last_id: 3, muted: 0 }],
       friends: friends(),
       friend_requests: incoming(),
       channel_invites: state.invites,
@@ -466,6 +467,19 @@ function mockLvchatServer () {
       req.on('end', () => { json(200, { ok: true }) })
       return
     }
+    if (url.pathname === '/api/push/prefs') {
+      json(200, { ok: true, prefs: { channels: 1, dms: 1, invites: 1 } })
+      return
+    }
+    if (url.pathname === '/api/notifications') {
+      json(200, { ok: true, notifications: [] })
+      return
+    }
+    if (url.pathname === '/api/ws/ticket') {
+      // A dead port on purpose: exercises the WS connect + poll-fallback path.
+      json(200, { ok: true, ticket: 'test-ticket', url: 'ws://127.0.0.1:1/' })
+      return
+    }
     json(404, { error: 'Not found' })
   })
 
@@ -502,6 +516,16 @@ async function main () {
   check('add test profile', addRes.ok === true, JSON.stringify(addRes))
   const profileId = addRes.profile.id
 
+  // Multiple accounts per server: same URL with a different username is a
+  // distinct profile; same URL + same username is still rejected.
+  const dupRes = await js(launcherWin, `window.lvchat.addProfile({ url: ${JSON.stringify(mock.base)}, username: 'bob', autoConnect: false })`)
+  check('second account on same server is allowed', dupRes.ok === true, JSON.stringify(dupRes))
+  const dupId = dupRes.profile && dupRes.profile.id
+  check('same-server profile defaults to user@host', dupRes.profile && dupRes.profile.name === 'bob@' + new URL(mock.base).hostname, String(dupRes.profile && dupRes.profile.name))
+  const dupFail = await js(launcherWin, `window.lvchat.addProfile({ name: 'Dup', url: ${JSON.stringify(mock.base)}, username: 'alice', autoConnect: false })`)
+  check('same server + same username is rejected', dupFail.ok === false, JSON.stringify(dupFail))
+  if (dupId) await js(launcherWin, `window.lvchat.removeProfile({ id: ${JSON.stringify(dupId)} })`)
+
   // Registration is also reachable from each saved server row.
   await js(launcherWin, `(() => { const li = [...document.querySelectorAll('#server-list li')].find((x) => x.textContent.includes('Test')); const b = li && [...li.querySelectorAll('button')].find((x) => x.textContent === 'Register'); if (b) b.click(); return !!b })()`)
   await waitExternal(mock.base + '/register')
@@ -509,6 +533,9 @@ async function main () {
 
   const conn = await js(launcherWin, `window.lvchat.connectProfile({ id: ${JSON.stringify(profileId)} })`)
   check('connect opens a messenger window', conn.ok === true && conn.reused === false, JSON.stringify(conn))
+
+  const switchRes = await js(launcherWin, `window.lvchat.switchProfile({ id: ${JSON.stringify(profileId)} })`)
+  check('switch to the active profile focuses it', switchRes.ok === true && switchRes.reused === true, JSON.stringify(switchRes))
 
   const win = await waitMessenger()
   check('messenger window loads', !!win, '')
@@ -549,6 +576,15 @@ async function main () {
   check('buddy list renders bob + carol', (buddyText || '').includes('bob') && (buddyText || '').includes('carol'), String(buddyText).slice(0, 200))
   check('group node "Friends" + ungrouped render', (buddyText || '').includes('Friends') && (buddyText || '').includes('Ungrouped'), String(buddyText).slice(0, 200))
   check('carol unread badge shows 2', await waitJs(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); return c && c.querySelector('.unread') && c.querySelector('.unread').textContent === '2' })()`))
+
+  // A DM arriving while on the buddy list fires a native OS notification via
+  // the main process (seeding on the first poll must not alert).
+  const n0 = await js(win, `window.msg.notifyStats()`)
+  mock.state.dmUnread = 3
+  await new Promise((r) => setTimeout(r, 3500))
+  const n1 = await js(win, `window.msg.notifyStats()`)
+  check('new DM unread triggers a native notification', (n1.count || 0) > (n0.count || 0), `${JSON.stringify(n0)} -> ${JSON.stringify(n1)}`)
+  mock.state.dmUnread = 2
 
   // Directory search → add friend.
   await js(win, `document.getElementById('directory-search').value = 'dan'; document.getElementById('directory-search').dispatchEvent(new Event('input'))`)
@@ -691,6 +727,11 @@ async function main () {
   await js(win, `document.getElementById('theme-toggle').click()`)
   const themeAfter = await js(win, `document.body.className`)
   check('theme toggle switches light/dark', themeBefore !== themeAfter, themeBefore + ' -> ' + themeAfter)
+
+  // Tray icon must never be blank, and the icon asset must ship in the package.
+  check('tray icon image is non-empty', messengerMain.trayImage && !messengerMain.trayImage().isEmpty(), '')
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
+  check('packaged files ship build/icon.png', Array.isArray(pkg.build.files) && pkg.build.files.includes('build/icon.png'), JSON.stringify(pkg.build.files))
 
   // Logout wipes the session cookie; because the login form saved the password
   // (keychain), the reload auto-logins with saved credentials → MFA gate.

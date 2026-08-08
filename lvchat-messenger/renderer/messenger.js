@@ -29,6 +29,18 @@ const state = {
   _chatTarget: null
 }
 
+/* OS-notification engine state. Only the buddy-list window alerts; dedicated
+ * conversation windows stay silent (their host window already notifies). */
+const notif = {
+  prefs: { channels: 1, dms: 1, invites: 1 },
+  seeded: false, // poll-derived alerts seeded (pre-existing state must not alert)
+  feedSeeded: false, // /api/notifications feed seeded
+  bgMax: 0, // highest background message id seen
+  prevDm: {}, // username(lower) -> unread
+  feedSeen: new Set(), // notification ids already surfaced
+  feedTimer: null
+}
+
 /* The window may have been opened as a dedicated conversation window:
  * messenger.html?profile=<id>&chat=room:slug | chat=dm:username */
 function parseChatTarget () {
@@ -156,6 +168,16 @@ async function boot () {
   }
 
   if (me.ok && me.body && me.body.user) {
+    const expected = state.profile.username
+    const actual = me.body.user.username
+    if (expected && actual && String(expected).toLowerCase() !== String(actual).toLowerCase()) {
+      // The persisted partition still holds a session for a different account
+      // (the profile's server/account was edited, or an old session predates a
+      // re-add). Wipe it so the user signs in as the account this profile
+      // expects; msg:logout clears storage and reloads onto the login view.
+      await window.msg.logout()
+      return
+    }
     await startMain(me.body.user)
     return
   }
@@ -272,6 +294,8 @@ async function verifyMfa () {
 
 async function doLogout () {
   stopPoll()
+  stopNotifications()
+  stopWs()
   LvApi.resetCsrf()
   await window.msg.logout()
 }
@@ -300,6 +324,8 @@ async function startMain (me) {
     await refreshBuddyData()
   } catch (err) { /* keep going; the poll loop re-renders */ }
   await startPoll()
+  await initNotifications()
+  initWs()
   try {
     renderAll()
   } catch (err) { /* leave whatever rendered */ }
@@ -342,6 +368,7 @@ async function pollTick () {
       const key = state.open.type === 'dm' ? 'dm' : 'channel'
       path += '&' + key + '=' + encodeURIComponent(state.open.id)
     }
+    path += '&bg_since=' + notif.bgMax
     const j = await LvApi.getJson(path)
     if (j.status === 401) {
       LvApi.resetCsrf()
@@ -401,7 +428,242 @@ function handlePoll (body) {
     state.open.presence = body.presence[0]
   }
 
+  checkAlerts(body)
   renderAll()
+}
+
+/* ── OS notifications (rendered by the main process) ───────── */
+
+function notify (payload) {
+  try {
+    window.msg.notify(payload)
+  } catch (err) { /* preload bridge missing */ }
+}
+
+function truncateNotify (s, n) {
+  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim()
+  const max = n || 120
+  return t.length > max ? t.slice(0, max - 1) + '…' : t
+}
+
+function totalUnread () {
+  let n = 0
+  for (const d of state.dmList) n += Number(d.unread) || 0
+  for (const slug of Object.keys(state.channelUnread)) n += Number(state.channelUnread[slug]) || 0
+  return n
+}
+
+/* Detect new DMs + background channel messages from a poll payload, and keep
+ * the tray tooltip's unread total fresh. Only the buddy-list window alerts;
+ * dedicated conversation windows never do. */
+function checkAlerts (body) {
+  if (state.chatWindow) return
+  try { window.msg.setUnread(totalUnread()) } catch (err) { /* ignore */ }
+  const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true
+
+  // First poll: seed the watermark/prev state silently so pre-existing unread
+  // messages, invites and background chatter never fire an alert.
+  if (!notif.seeded) {
+    if (Array.isArray(body.dm_list)) {
+      for (const d of body.dm_list) notif.prevDm[String(d.username || '').toLowerCase()] = Number(d.unread) || 0
+    }
+    if (Array.isArray(body.bg_messages)) {
+      for (const m of body.bg_messages) notif.bgMax = Math.max(notif.bgMax, Number(m.id) || 0)
+    }
+    notif.seeded = true
+    return
+  }
+
+  if (Array.isArray(body.dm_list)) {
+    for (const d of body.dm_list) {
+      const key = String(d.username || '').toLowerCase()
+      const prev = notif.prevDm[key] || 0
+      const now = Number(d.unread) || 0
+      notif.prevDm[key] = now
+      if (now <= prev || now === 0) continue
+      if (notif.prefs.dms !== 1) continue
+      if (focused && state.open && state.open.type === 'dm' && String(state.open.id).toLowerCase() === key) continue
+      const content = truncateNotify(d.last_content)
+      notify({
+        title: 'DM from ' + d.username,
+        body: content ? d.username + ': ' + content : 'New direct message',
+        conv: { type: 'dm', id: d.username }
+      })
+    }
+  }
+
+  if (Array.isArray(body.bg_messages)) {
+    for (const m of body.bg_messages) {
+      const id = Number(m.id) || 0
+      if (id <= notif.bgMax) continue
+      notif.bgMax = id
+      if (notif.prefs.channels !== 1) continue
+      if (focused && state.open && state.open.type === 'room' && String(state.open.id).toLowerCase() === String(m.channel_slug || '').toLowerCase()) continue
+      const slug = m.channel_slug || 'channel'
+      notify({
+        title: '#' + slug,
+        body: (m.username ? m.username + ': ' : '') + truncateNotify(m.content),
+        conv: { type: 'room', id: slug }
+      })
+    }
+  }
+}
+
+/* Poll the notifications feed for friend requests/accepts, invites and
+ * mentions — the poll payload never lists those with their content. First
+ * successful read seeds the dedupe set silently. */
+async function pollNotificationsFeed () {
+  if (state.chatWindow) return
+  const j = await LvApi.getJson('/api/notifications')
+  if (!j.ok || !j.body || !Array.isArray(j.body.notifications)) { notif.feedSeeded = false; return }
+  const seed = !notif.feedSeeded
+  for (const n of j.body.notifications) {
+    if (!n || !n.id) continue
+    const kind = String(n.kind || '')
+    if (kind !== 'friend_request' && kind !== 'friend_accepted' && kind !== 'invite' && kind !== 'mention') continue
+    if (notif.feedSeen.has(n.id)) continue
+    notif.feedSeen.add(n.id)
+    if (seed) continue
+    if (kind === 'friend_request') {
+      notify({ title: 'Friend request', body: (n.sender || 'Someone') + ' sent you a friend request', conv: { type: 'dm', id: n.sender } })
+    } else if (kind === 'friend_accepted') {
+      notify({ title: 'Friend request accepted', body: (n.sender || 'Someone') + ' is now your friend', conv: { type: 'dm', id: n.sender } })
+    } else if (kind === 'invite') {
+      if (notif.prefs.invites !== 1) continue
+      notify({ title: 'Channel invite', body: 'You were invited to ' + (n.channel_name || 'a channel') + (n.sender ? ' by ' + n.sender : '') })
+    } else if (kind === 'mention') {
+      if (notif.prefs.channels !== 1) continue
+      notify({ title: 'Mentioned you', body: (n.sender ? '@' + n.sender : 'Someone') + (n.channel_name ? ' in ' + n.channel_name : '') })
+    }
+  }
+  notif.feedSeeded = true
+}
+
+async function initNotifications () {
+  try {
+    const j = await LvApi.getJson('/api/push/prefs')
+    if (j.ok && j.body && j.body.prefs) {
+      const p = j.body.prefs
+      notif.prefs = { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 }
+    }
+  } catch (err) { /* defaults stay on */ }
+  notif.feedTimer = setInterval(pollNotificationsFeed, 4000)
+  pollNotificationsFeed()
+}
+
+function stopNotifications () {
+  if (notif.feedTimer) {
+    clearInterval(notif.feedTimer)
+    notif.feedTimer = null
+  }
+}
+
+/* ── WebSocket real-time ─────────────────────────────────────
+ * Additive transport: the 2s poll keeps running as the always-on fallback and
+ * sidebar/friends/reconcile source. WS only accelerates delivery of messages
+ * in the open conversation and drives the notifications feed on bell changes.
+ * Handshake mirrors the web app (GET /api/ws/ticket, one-time ticket in the
+ * URL, {action:'subscribe'} after open, 30s pings, backoff reconnects). */
+const wsrt = {
+  ws: null,
+  ticket: '',
+  base: '',
+  fails: 0,
+  retryTimer: null,
+  pingTimer: null,
+  gone: false
+}
+
+function wsSend (obj) {
+  if (wsrt.ws && wsrt.ws.readyState === WebSocket.OPEN) wsrt.ws.send(JSON.stringify(obj))
+}
+
+function wsSubscribe () {
+  if (!wsrt.ws || wsrt.ws.readyState !== WebSocket.OPEN || !state.open) return
+  const payload = state.open.type === 'dm'
+    ? { action: 'subscribe', dm: state.open.id }
+    : { action: 'subscribe', channel: state.open.id }
+  wsrt.ws.send(JSON.stringify(payload))
+}
+
+function wsRefreshTicket (done) {
+  LvApi.getJson('/api/ws/ticket')
+    .then((j) => {
+      if (j.ok && j.body && j.body.ticket) {
+        wsrt.ticket = j.body.ticket
+        wsrt.base = j.body.url || wsrt.base
+      }
+      done()
+    })
+    .catch(() => done())
+}
+
+function wsHandle (j) {
+  if (j.pong) return
+  if (j.reconnect) { location.reload(); return }
+  if (Array.isArray(j.messages) && j.messages.length) {
+    // Frames arrive only for the conversation this socket is subscribed to.
+    if (state.open) applyMessages(j.messages)
+    return
+  }
+  if (j.msg_update && state.open && state.open.type === 'room') {
+    const u = j.msg_update
+    const idx = state.messages.findIndex((m) => Number(m.id) === Number(u.message_id))
+    if (idx !== -1) {
+      if (u.action === 'delete') { state.messages.splice(idx, 1); renderStream() }
+      else if (u.action === 'edit' && typeof u.content === 'string') { state.messages[idx].content = u.content; renderStream() }
+    }
+    return
+  }
+  // Unread bell moved server-side — refresh the notifications feed so friend
+  // requests/accepts/invites/mentions surface without waiting for the timer.
+  if (typeof j.notify_count === 'number' && !state.chatWindow) pollNotificationsFeed()
+}
+
+function wsOpen () {
+  if (wsrt.gone) return
+  const base = wsrt.base
+  if (!base) { wsrt.gone = true; return }
+  const sep = base.indexOf('?') >= 0 ? '&' : '?'
+  let socket = null
+  try {
+    socket = new WebSocket(base + sep + 'ticket=' + encodeURIComponent(wsrt.ticket))
+  } catch (err) { /* fall through */ }
+  if (!socket) { wsrt.gone = true; return }
+  wsrt.ws = socket
+  socket.onopen = () => { wsrt.fails = 0; wsSubscribe() }
+  socket.onmessage = (ev) => {
+    let j = null
+    try { j = JSON.parse(ev.data) } catch (err) { return }
+    wsHandle(j)
+  }
+  socket.onerror = () => { try { socket.close() } catch (err) {} }
+  socket.onclose = () => {
+    wsrt.ws = null
+    if (wsrt.gone) return
+    wsrt.fails++
+    if (wsrt.fails >= 3) {
+      // Daemon unreachable: back way off but keep re-probing so a later daemon
+      // start re-enables realtime. The 2s poll keeps everything working.
+      wsrt.fails = 0
+      wsrt.retryTimer = setTimeout(() => wsRefreshTicket(wsOpen), 5 * 60 * 1000)
+      return
+    }
+    wsRefreshTicket(() => { wsrt.retryTimer = setTimeout(wsOpen, 2000 * wsrt.fails) })
+  }
+}
+
+async function initWs () {
+  if (typeof WebSocket === 'undefined' || wsrt.gone) return
+  wsrt.pingTimer = setInterval(() => wsSend({ action: 'ping' }), 30000)
+  wsRefreshTicket(wsOpen)
+}
+
+function stopWs () {
+  wsrt.gone = true
+  if (wsrt.retryTimer) { clearTimeout(wsrt.retryTimer); wsrt.retryTimer = null }
+  if (wsrt.pingTimer) { clearInterval(wsrt.pingTimer); wsrt.pingTimer = null }
+  if (wsrt.ws) { try { wsrt.ws.close() } catch (err) {} wsrt.ws = null }
 }
 
 function applyMessages (messages) {
@@ -436,6 +698,7 @@ async function openConversation (type, id) {
   state.tab = type === 'room' ? 'rooms' : 'buddy'
   setTab(state.tab)
   renderAll()
+  wsSubscribe()
   await pollTick()
   if (type === 'room') {
     await LvApi.postForm('/api/channel/read', { channel: id })
@@ -1563,7 +1826,18 @@ async function toggleViewMode () {
 
 /* ── Hamburger menu (narrow sidebar) ──────────────────────── */
 
-function toggleHeadMenu (force) {
+function headMenuLabel (p) {
+  return p.username ? `@${p.username} — ${p.name}` : p.name
+}
+
+async function switchProfile (profile) {
+  const ok = await appConfirm(`Switch to ${headMenuLabel(profile)}?`)
+  if (!ok) return
+  const r = await window.msg.switchProfile({ id: profile.id })
+  if (!r || !r.ok) await appAlert((r && r.error) || 'Could not switch accounts.')
+}
+
+async function toggleHeadMenu (force) {
   const menu = $('#head-menu')
   const willShow = force !== undefined ? !!force : menu.hidden
   if (!willShow) { menu.hidden = true; return }
@@ -1578,8 +1852,33 @@ function toggleHeadMenu (force) {
   }
   add(state.viewMode === 'compact' ? 'Switch to Advanced view' : 'Switch to Compact view', toggleViewMode)
   add('Toggle light / dark theme', toggleTheme)
+
+  // Account switching: every other saved profile. Same-server accounts make
+  // this the way to hop between sessions without signing out first.
+  let profiles = []
+  try {
+    const data = await window.msg.listProfiles()
+    profiles = (data && data.profiles) || []
+  } catch (err) { /* ignore */ }
+  const others = profiles.filter((p) => p.id !== state.profile.id)
+  if (others.length) {
+    const label = document.createElement('div')
+    label.className = 'ctx-label'
+    label.textContent = 'Switch account'
+    menu.appendChild(label)
+    for (const p of others) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'ctx-item'
+      b.textContent = headMenuLabel(p)
+      b.addEventListener('click', () => { menu.hidden = true; switchProfile(p) })
+      menu.appendChild(b)
+    }
+  }
+
   add('Profile manager', () => window.msg.showLauncher())
   add('Sign out', doLogout, true)
+  add('Quit LVChat Messenger', () => window.msg.quit(), true)
   menu.hidden = false
 }
 
@@ -1811,4 +2110,16 @@ function wireEvents () {
 }
 
 wireEvents()
+
+function wireOpenConversation () {
+  try {
+    if (window.msg.onOpenConversation) {
+      window.msg.onOpenConversation((conv) => {
+        if (conv && conv.type && conv.id) openConversationOrWindow(conv.type, conv.id)
+      })
+    }
+  } catch (err) { /* bridge missing */ }
+}
+
+wireOpenConversation()
 boot()

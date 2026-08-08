@@ -26,6 +26,7 @@
     "productName": "LVChat Desktop",
     "files": [
       "src/**/*",
+      "build/icon.png",
       "package.json"
     ],
     "directories": {

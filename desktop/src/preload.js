@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('lvchat', {
   removeProfile: (payload) => ipcRenderer.invoke('profiles:remove', payload),
   connectProfile: (payload) => ipcRenderer.invoke('profiles:connect', payload),
   disconnectProfile: (payload) => ipcRenderer.invoke('profiles:disconnect', payload),
+  switchProfile: (payload) => ipcRenderer.invoke('profiles:switch', payload),
   saveCredentials: (payload) => ipcRenderer.invoke('credentials:save', payload),
   hasCredentials: (payload) => ipcRenderer.invoke('credentials:has', payload),
   listWindows: () => ipcRenderer.invoke('windows:list'),

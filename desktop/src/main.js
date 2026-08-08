@@ -3,6 +3,8 @@ const path = require('path')
 const profiles = require('./profiles')
 
 app.setName('LVChat Desktop')
+// Required for Windows toast notifications to appear.
+app.setAppUserModelId('com.lasvegasbestinternet.lvchat')
 
 let launcherWindow = null
 let tray = null
@@ -12,6 +14,23 @@ const chatWindows = new Map()
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.png')
 const SPLASH = path.join(__dirname, 'renderer', 'splash.html')
+
+// Small brand mark baked in as a data URL so the tray icon is never blank even
+// when build/icon.png isn't available (e.g. a packaged build where the asset
+// lives in buildResources and is not shipped in the app asar).
+const TRAY_FALLBACK = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAATElEQVR4nGNQ07ChCmIYNWjUICwoIvVTROonOBtTkCiDIBogenCx6WsQsi8wDRrqsTaIDXrtOg+CKDIIbgpBs4acQVQLI2rGGr0NAgABE3N6IZJN6AAAAABJRU5ErkJggg=='
+
+function trayImage () {
+  try {
+    const img = nativeImage.createFromPath(APP_ICON).resize({ width: 24, height: 24 })
+    if (!img.isEmpty()) return img
+  } catch (err) { /* fall through */ }
+  try {
+    const fallback = nativeImage.createFromDataURL(TRAY_FALLBACK)
+    if (!fallback.isEmpty()) return fallback
+  } catch (err) { /* fall through */ }
+  return nativeImage.createEmpty()
+}
 
 // Web-app UI that makes no sense inside the desktop client: the PWA install
 // buttons and the Web-Push enable row (Electron can't subscribe to Web Push —
@@ -465,13 +484,7 @@ function profileSubmenu () {
 }
 
 function buildTray () {
-  let image
-  try {
-    image = nativeImage.createFromPath(APP_ICON).resize({ width: 24, height: 24 })
-  } catch (err) {
-    image = nativeImage.createEmpty()
-  }
-  tray = new Tray(image)
+  tray = new Tray(trayImage())
   tray.setToolTip('LVChat Desktop')
   tray.on('click', () => createLauncherWindow())
   rebuildTrayMenu()
@@ -518,6 +531,17 @@ function registerIpc () {
   ipcMain.handle('profiles:remove', (_e, { id }) => profiles.remove(id))
   ipcMain.handle('profiles:connect', (_e, { id }) => connectProfile(profiles.find(id)))
   ipcMain.handle('profiles:disconnect', (_e, { id }) => disconnectProfile(id))
+
+  // Switch accounts cleanly: close every other connected profile's windows and
+  // open the target profile (its own session partition).
+  ipcMain.handle('profiles:switch', (_e, { id }) => {
+    const target = profiles.find(id)
+    if (!target) return { ok: false, error: 'Profile not found' }
+    for (const pid of new Set([...chatWindows.values()].map((r) => r.profileId))) {
+      if (pid !== id) disconnectProfile(pid)
+    }
+    return connectProfile(target)
+  })
 
   ipcMain.handle('credentials:save', (_e, payload) => profiles.setCredentials(payload?.id, payload?.username, payload?.password))
   ipcMain.handle('credentials:has', (_e, { id }) => !!profiles.getCredentials(id)?.hasPassword)

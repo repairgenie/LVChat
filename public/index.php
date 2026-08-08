@@ -112,6 +112,7 @@ $router->post('/api/sound/override/remove', [SoundController::class, 'removeOver
 // Push notifications (user settings)
 $router->post('/api/push/subscribe', [PushController::class, 'subscribe']);
 $router->post('/api/push/unsubscribe', [PushController::class, 'unsubscribe']);
+$router->get('/api/push/prefs', [PushController::class, 'prefsGet']);
 $router->post('/api/push/prefs', [PushController::class, 'prefs']);
 $router->post('/api/push/mute', [PushController::class, 'mute']);
 $router->post('/api/push/unmute', [PushController::class, 'unmute']);

@@ -1,18 +1,39 @@
-const { app, BrowserWindow, ipcMain, Menu, shell, session, clipboard } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, shell, session, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const profiles = require('./profiles')
 const { createStaticServer } = require('./server')
 
 app.setName('LVChat Messenger')
+// Required for Windows toast notifications to appear.
+app.setAppUserModelId('com.lasvegasbestinternet.lvchatmessenger')
 
 let launcherWindow = null
+let tray = null
 let isQuitting = false
+let messengerNotifications = 0
 let staticServer = null
 let appOrigin = 'http://127.0.0.1'
 const messengerWindows = new Map()
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.png')
+
+// Small brand mark baked in as a data URL so the tray icon is never blank even
+// when build/icon.png isn't available (e.g. a packaged build where the asset
+// lives in buildResources and is not shipped in the app asar).
+const TRAY_FALLBACK = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAATElEQVR4nGNQ07ChCmIYNWjUICwoIvVTROonOBtTkCiDIBogenCx6WsQsi8wDRrqsTaIDXrtOg+CKDIIbgpBs4acQVQLI2rGGr0NAgABE3N6IZJN6AAAAABJRU5ErkJggg=='
+
+function trayImage () {
+  try {
+    const img = nativeImage.createFromPath(APP_ICON).resize({ width: 24, height: 24 })
+    if (!img.isEmpty()) return img
+  } catch (err) { /* fall through */ }
+  try {
+    const fallback = nativeImage.createFromDataURL(TRAY_FALLBACK)
+    if (!fallback.isEmpty()) return fallback
+  } catch (err) { /* fall through */ }
+  return nativeImage.createEmpty()
+}
 
 function prefsPath () {
   return path.join(app.getPath('userData'), 'prefs.json')
@@ -111,6 +132,7 @@ function connectProfile (profile) {
   const existing = [...messengerWindows.values()].find((r) => r.profileId === profile.id && r.kind === 'main')
   if (existing && !existing.win.isDestroyed()) {
     if (existing.win.isMinimized()) existing.win.restore()
+    existing.win.show()
     existing.win.focus()
     return { ok: true, id: existing.id, reused: true }
   }
@@ -138,6 +160,14 @@ function connectProfile (profile) {
   const drop = () => { messengerWindows.delete(webContentsId) }
   win.on('closed', drop)
   win.on('destroyed', drop)
+  // Closing with the X hides to the tray instead of quitting; a real quit (or
+  // disconnect/logout) bypasses this via destroy() / isQuitting.
+  win.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      win.hide()
+    }
+  })
   rememberBounds(win)
 
   const record = { id: webContentsId, win, profileId: profile.id, url: normalized, name: profile.name || normalized, partition, kind: 'main' }
@@ -146,6 +176,7 @@ function connectProfile (profile) {
 
   win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(profile.id))
   win.once('ready-to-show', () => win.show())
+  rebuildTrayMenu()
   return { ok: true, id: webContentsId, reused: false }
 }
 
@@ -157,6 +188,7 @@ function openChatWindow (profile, type, id) {
   const existing = [...messengerWindows.values()].find((r) => r.profileId === profile.id && r.kind === 'chat' && r.convKey === convKey)
   if (existing && !existing.win.isDestroyed()) {
     if (existing.win.isMinimized()) existing.win.restore()
+    existing.win.show()
     existing.win.focus()
     return { ok: true, id: existing.id, reused: true }
   }
@@ -188,6 +220,13 @@ function openChatWindow (profile, type, id) {
   const drop = () => { messengerWindows.delete(webContentsId) }
   win.on('closed', drop)
   win.on('destroyed', drop)
+  // Same close-to-tray behavior as the main messenger window.
+  win.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      win.hide()
+    }
+  })
 
   const record = { id: webContentsId, win, profileId: profile.id, url: profile.url, name: title, partition, kind: 'chat', convType: type, convId: id, convKey }
   messengerWindows.set(webContentsId, record)
@@ -202,6 +241,7 @@ function disconnectProfile (profileId) {
   for (const r of records) {
     if (!r.win.isDestroyed()) r.win.destroy()
   }
+  rebuildTrayMenu()
   return { ok: true, closed: records.length }
 }
 
@@ -241,6 +281,69 @@ function profileSubmenu () {
   return items
 }
 
+/* Show the first messenger window (restoring it if hidden in the tray), or the
+ * Profile Manager when nothing is open. Used by the tray click + dock activate. */
+function showMessengerOrLauncher () {
+  const record = [...messengerWindows.values()].find((r) => r.kind === 'main' && !r.win.isDestroyed())
+  if (record) {
+    if (record.win.isMinimized()) record.win.restore()
+    record.win.show()
+    record.win.focus()
+    return
+  }
+  createLauncherWindow()
+}
+
+/* System-tray presence. Closing a messenger window with the X hides it here;
+ * the tray carries the same context menu as LVChat Desktop (per-profile
+ * actions, Profile Manager, Quit), attached exactly the way Desktop does it —
+ * setContextMenu() with no extra event listeners, which is what keeps the
+ * tray icon rendering reliably on Linux. */
+function buildTray () {
+  try {
+    tray = new Tray(trayImage())
+    tray.setToolTip('LVChat Messenger')
+    tray.on('click', showMessengerOrLauncher)
+    rebuildTrayMenu()
+  } catch (err) {
+    console.warn('tray setup failed:', err.message)
+  }
+}
+
+function rebuildTrayMenu () {
+  if (!tray) return
+  const items = []
+  for (const p of profiles.list()) {
+    const record = [...messengerWindows.values()].find((r) => r.profileId === p.id && !r.win.isDestroyed())
+    items.push({
+      label: p.name,
+      submenu: [
+        ...(record
+          ? [{
+            label: 'Focus window',
+            click: () => {
+              if (record.win.isMinimized()) record.win.restore()
+              record.win.show()
+              record.win.focus()
+            }
+          }]
+          : []),
+        { label: record ? 'Open another window' : 'Connect', click: () => connectProfile(p) },
+        ...(record ? [{ label: 'Disconnect', click: () => disconnectProfile(p.id) }] : [])
+      ]
+    })
+  }
+  items.push({ type: 'separator' })
+  items.push({ label: 'Profile Manager', click: () => createLauncherWindow() })
+  items.push({ type: 'separator' })
+  items.push({ label: 'Quit LVChat Messenger', click: () => { isQuitting = true; app.quit() } })
+  tray.setContextMenu(Menu.buildFromTemplate(items))
+}
+
+function trayPresent () {
+  return !!tray
+}
+
 function registerIpc () {
   ipcMain.handle('profiles:list', () => ({
     profiles: profiles.list(),
@@ -255,6 +358,18 @@ function registerIpc () {
   ipcMain.handle('profiles:remove', (_e, { id }) => profiles.remove(id))
   ipcMain.handle('profiles:connect', (_e, { id }) => connectProfile(profiles.find(id)))
   ipcMain.handle('profiles:disconnect', (_e, { id }) => disconnectProfile(id))
+
+  // Switch accounts cleanly: close every other connected profile's windows
+  // (their partitions are wiped by their own logout flows; here we just tear
+  // down the windows) and open the target profile's messenger.
+  ipcMain.handle('profiles:switch', (_e, { id }) => {
+    const target = profiles.find(id)
+    if (!target) return { ok: false, error: 'Profile not found' }
+    for (const pid of new Set([...messengerWindows.values()].map((r) => r.profileId))) {
+      if (pid !== id) disconnectProfile(pid)
+    }
+    return connectProfile(target)
+  })
 
   ipcMain.handle('credentials:save', (_e, payload) => profiles.setCredentials(payload?.id, payload?.username, payload?.password))
   ipcMain.handle('credentials:has', (_e, { id }) => !!profiles.getCredentials(id)?.hasPassword)
@@ -281,9 +396,11 @@ function registerIpc () {
     if (!record) return { ok: false }
     const ses = session.fromPartition(record.partition)
     return ses.clearStorageData({}).then(() => {
-      // Dedicated chat windows share the wiped partition session — close them.
+      // Dedicated chat windows share the wiped partition session — destroy them
+      // (close() would be intercepted by the close-to-tray handler and leave
+      // stale hidden windows holding the old session).
       for (const r of [...messengerWindows.values()]) {
-        if (r.profileId === record.profileId && r.id !== record.id && !r.win.isDestroyed()) r.win.close()
+        if (r.profileId === record.profileId && r.id !== record.id && !r.win.isDestroyed()) r.win.destroy()
       }
       if (!record.win.isDestroyed()) record.win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(record.profileId))
       return { ok: true }
@@ -340,6 +457,60 @@ function registerIpc () {
     return { ok: true }
   })
 
+  // Native OS notifications requested by the messenger renderer. Shown by the
+  // main process (the renderer's Notification permission is unreliable);
+  // clicking restores the window and opens the conversation that was alerted.
+  ipcMain.on('msg:notify', (event, payload) => {
+    const record = messengerWindows.get(event.sender.id)
+    messengerNotifications++
+    try {
+      const notification = new Notification({
+        title: String((payload && payload.title) || 'LVChat Messenger'),
+        body: String((payload && payload.body) || ''),
+        icon: APP_ICON
+      })
+      notification.on('click', () => {
+        const conv = payload && payload.conv
+        if (record && record.win && !record.win.isDestroyed()) {
+          if (record.win.isMinimized()) record.win.restore()
+          record.win.show()
+          record.win.focus()
+        }
+        if (record && conv && !record.win.isDestroyed() && !record.win.webContents.isDestroyed()) {
+          record.win.webContents.send('msg:open-conv', conv)
+        }
+      })
+      notification.show()
+    } catch (err) {
+      // A broken notification daemon must never take the app down.
+      console.warn('notification failed:', err.message)
+    }
+  })
+
+  ipcMain.handle('notify:test', () => {
+    try {
+      const notification = new Notification({
+        title: 'LVChat Messenger',
+        body: 'Test notification — desktop alerts are working.',
+        icon: APP_ICON
+      })
+      notification.on('click', () => showMessengerOrLauncher())
+      notification.show()
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle('notify:stats', () => ({ count: messengerNotifications }))
+
+  // Reflect unread totals in the tray tooltip (main messenger windows only).
+  ipcMain.on('tray:setUnread', (_event, count) => {
+    if (!tray) return
+    const n = Number(count) || 0
+    tray.setToolTip(n > 0 ? 'LVChat Messenger — ' + n + ' unread' : 'LVChat Messenger')
+  })
+
   ipcMain.handle('prefs:get', (_e, key) => loadPrefs()[key] ?? null)
   ipcMain.handle('prefs:set', (_e, { key, value }) => {
     const prefs = loadPrefs()
@@ -357,6 +528,7 @@ function registerIpc () {
     const r = messengerWindows.get(Number(id))
     if (r && !r.win.isDestroyed()) {
       if (r.win.isMinimized()) r.win.restore()
+      r.win.show()
       r.win.focus()
       return { ok: true }
     }
@@ -370,7 +542,17 @@ function registerIpc () {
     return { ok: true }
   })
   ipcMain.handle('launcher:show', () => { createLauncherWindow(); return { ok: true } })
-  ipcMain.on('app:refresh-menus', () => buildMenu())
+  // Quit the app from the messenger UI (guaranteed path even if the tray menu
+  // is unreachable on the host desktop).
+  ipcMain.handle('app:quit', () => {
+    isQuitting = true
+    app.quit()
+    return { ok: true }
+  })
+  ipcMain.on('app:refresh-menus', () => {
+    buildMenu()
+    rebuildTrayMenu()
+  })
 }
 
 app.on('web-contents-created', (_e, contents) => {
@@ -393,14 +575,40 @@ app.whenReady().then(async () => {
 
   registerIpc()
   buildMenu()
-  createLauncherWindow()
+  buildTray()
 
-  for (const p of profiles.list()) {
-    if (p.autoConnect) connectProfile(p)
+  // The Profile Manager is only ever auto-opened when there is nothing to
+  // connect to (first run). Once a profile exists it is never shown on its own
+  // at startup — auto-connect profiles open directly, and otherwise the most
+  // recently used profile's messenger window opens (landing on the login modal
+  // if there's no live session). The manager stays reachable manually.
+  const allProfiles = profiles.list()
+  if (allProfiles.length === 0) {
+    createLauncherWindow()
+  } else {
+    let opened = 0
+    const auto = allProfiles.filter((p) => p.autoConnect)
+    if (auto.length > 0) {
+      for (const p of auto) {
+        const r = connectProfile(p)
+        if (r && r.ok) opened++
+      }
+    } else {
+      const last = [...allProfiles]
+        .sort((a, b) => String(b.lastConnectedAt || '').localeCompare(String(a.lastConnectedAt || '')))[0]
+        || allProfiles[0]
+      const r = connectProfile(last)
+      if (r && r.ok) opened++
+    }
+    // Safety net: if every connect failed (e.g. an invalid URL), fall back to
+    // the Profile Manager so the user isn't left with nothing.
+    if (opened === 0) createLauncherWindow()
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createLauncherWindow()
+    // Dock click: restore a hidden messenger window (tray state) rather than
+    // popping the Profile Manager; only open the launcher when nothing exists.
+    showMessengerOrLauncher()
   })
 })
 
@@ -414,4 +622,4 @@ app.on('will-quit', () => {
   if (staticServer) staticServer.close()
 })
 
-module.exports = { createLauncherWindow, connectProfile, disconnectProfile, messengerWindows, registerIpc, appOrigin: () => appOrigin }
+module.exports = { createLauncherWindow, connectProfile, disconnectProfile, messengerWindows, registerIpc, trayPresent, trayImage, appOrigin: () => appOrigin }

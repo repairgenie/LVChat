@@ -61,6 +61,13 @@ final class PushController
         json_out(['ok' => true, 'prefs' => PushService::prefs($user)]);
     }
 
+    /** GET /api/push/prefs — the per-context toggles, read-only (desktop/messenger clients). */
+    public static function prefsGet(): void
+    {
+        $user = self::requireUser();
+        json_out(['ok' => true, 'prefs' => PushService::prefs($user)]);
+    }
+
     /** POST /api/push/mute — mute a user across every notification surface. */
     public static function mute(): void
     {

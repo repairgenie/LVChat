@@ -124,13 +124,18 @@ function renderServers () {
     disconnect.disabled = !connectedIds.has(profile.id)
     disconnect.addEventListener('click', () => api.disconnectProfile({ id: profile.id }).then(loadAll))
 
+    const switchBtn = el('button', 'ghost', 'Switch')
+    switchBtn.title = 'Switch to this account'
+    switchBtn.disabled = ![...connectedIds].some((id) => id !== profile.id)
+    switchBtn.addEventListener('click', () => api.switchProfile({ id: profile.id }).then(loadAll))
+
     const edit = el('button', 'ghost', 'Edit')
     edit.addEventListener('click', () => startEdit(profile))
 
     const del = el('button', 'danger', 'Delete')
     del.addEventListener('click', () => removeProfile(profile))
 
-    actions.append(register, connect, disconnect, edit, del)
+    actions.append(register, connect, switchBtn, disconnect, edit, del)
     li.append(grow, actions)
     serverList.appendChild(li)
   }

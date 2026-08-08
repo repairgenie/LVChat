@@ -91,6 +91,16 @@ function canonicalKey (url) {
   return stripTrailingSlash(normalizeUrl(url) || url).toLowerCase()
 }
 
+/* A profile is uniquely identified by (server URL, account username). Same
+ * server with a different account is a distinct profile (multi-account), so
+ * the dedupe key must include the username. Profiles without a username still
+ * dedupe on the URL alone (can't distinguish two anonymous entries). */
+function profileKey (url, username) {
+  const base = canonicalKey(url)
+  const user = String(username || '').trim().toLowerCase()
+  return user ? base + '\u0000' + user : base
+}
+
 function probeServer (url) {
   const base = normalizeUrl(url)
   if (!base) return Promise.resolve({ ok: false, error: 'Invalid URL' })
@@ -133,17 +143,23 @@ function find (id) {
 function add ({ name, url, username, autoConnect, siteName }) {
   const normalized = normalizeUrl(url)
   if (!normalized) return { ok: false, error: 'Invalid URL' }
+  const user = (username || '').trim() || null
   const data = load()
-  const key = canonicalKey(normalized)
-  if (data.profiles.some((p) => canonicalKey(p.url) === key)) {
-    return { ok: false, error: 'That server is already in your list.' }
+  const key = profileKey(normalized, user)
+  if (data.profiles.some((p) => profileKey(p.url, p.username) === key)) {
+    return { ok: false, error: 'That server and account are already in your list.' }
   }
+  // With multiple accounts per server, default the display name to the account
+  // so same-server profiles stay distinguishable in menus and the tray.
+  const hostname = (() => {
+    try { return new URL(normalized).hostname } catch (err) { return stripTrailingSlash(normalized) }
+  })()
   const profile = {
     id: crypto.randomUUID(),
-    name: (name || '').trim() || stripTrailingSlash(normalized),
+    name: (name || '').trim() || (user ? user + '@' + hostname : stripTrailingSlash(normalized)),
     url: normalized,
     siteName: (siteName || '').trim() || null,
-    username: (username || '').trim() || null,
+    username: user,
     autoConnect: !!autoConnect,
     createdAt: new Date().toISOString(),
     lastConnectedAt: null
@@ -159,18 +175,22 @@ function update (id, { name, url, username, autoConnect, siteName }) {
   if (!profile) return { ok: false, error: 'Not found' }
   const normalized = url ? normalizeUrl(url) : profile.url
   if (!normalized) return { ok: false, error: 'Invalid URL' }
-  if (url) {
-    const key = canonicalKey(normalized)
-    if (data.profiles.some((p) => p.id !== id && canonicalKey(p.url) === key)) {
-      return { ok: false, error: 'That server is already in your list.' }
-    }
-    profile.url = normalized
+  const nextUser = typeof username === 'string' ? (username.trim() || null) : profile.username
+  const key = profileKey(normalized, nextUser)
+  if (data.profiles.some((p) => p.id !== id && profileKey(p.url, p.username) === key)) {
+    return { ok: false, error: 'That server and account are already in your list.' }
   }
+  const accountChanged = (normalized !== profile.url) || (nextUser !== profile.username)
+  profile.url = normalized
   if (typeof name === 'string') profile.name = name.trim() || stripTrailingSlash(profile.url)
   if (typeof siteName === 'string') profile.siteName = siteName.trim() || null
-  if (typeof username === 'string') profile.username = username.trim() || null
+  if (typeof username === 'string') profile.username = nextUser
   if (typeof autoConnect === 'boolean') profile.autoConnect = autoConnect
   persist(data)
+  // The persisted partition is keyed by profile.id and keeps its session cookies;
+  // an edited server/account must not resume the old account's session, so drop
+  // any saved password too (the messenger wipes the partition on connect).
+  if (accountChanged) deleteCredentials(id)
   return { ok: true, profile }
 }
 
@@ -262,5 +282,6 @@ module.exports = {
   probeServer,
   normalizeUrl,
   canonicalKey,
+  profileKey,
   partitionFor
 }

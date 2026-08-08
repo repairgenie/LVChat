@@ -173,8 +173,18 @@ async function main () {
   const add = await js(win, `window.lvchat.addProfile({ name: 'Test Chat', url: '${base}', username: 'alice' })`)
   check('add profile', add.ok && add.profile.url === base + '/', JSON.stringify(add))
 
-  const dup = await js(win, `window.lvchat.addProfile({ name: 'Dupe', url: '${base}' })`)
-  check('reject duplicate server URL', dup.ok === false, JSON.stringify(dup))
+  // Multi-account: same URL with a different username is a distinct profile;
+  // exact URL + username duplicates and duplicate anonymous URLs are rejected.
+  const dupe2 = await js(win, `window.lvchat.addProfile({ name: 'Dupe', url: '${base}', username: 'carol' })`)
+  check('same URL + different account is allowed', dupe2.ok === true, JSON.stringify(dupe2))
+  const dupe3 = await js(win, `window.lvchat.addProfile({ name: 'Dupe2', url: '${base}', username: 'carol' })`)
+  check('same URL + same account is rejected', dupe3.ok === false, JSON.stringify(dupe3))
+  await js(win, `window.lvchat.removeProfile({ id: '${dupe2.profile.id}' })`)
+  const anon1 = await js(win, `window.lvchat.addProfile({ name: 'Anon', url: '${base}/anon' })`)
+  check('anonymous profile added', anon1.ok === true, JSON.stringify(anon1))
+  const anon2 = await js(win, `window.lvchat.addProfile({ name: 'Anon2', url: '${base}/anon' })`)
+  check('duplicate anonymous server URL rejected', anon2.ok === false, JSON.stringify(anon2))
+  await js(win, `window.lvchat.removeProfile({ id: '${anon1.profile.id}' })`)
 
   const upd = await js(win, `window.lvchat.updateProfile({ id: '${add.profile.id}', name: 'Test Chat 2', username: 'bob', autoConnect: true })`)
   check('update profile', upd.ok && upd.profile.name === 'Test Chat 2' && upd.profile.username === 'bob' && upd.profile.autoConnect === true, JSON.stringify(upd))
