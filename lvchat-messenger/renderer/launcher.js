@@ -25,6 +25,27 @@ const connectionList = document.getElementById('connection-list')
 const connectionEmpty = document.getElementById('connection-empty')
 const connectionsRefresh = document.getElementById('connections-refresh')
 
+const testNotificationBtn = document.getElementById('test-notification')
+const notifyCountEl = document.getElementById('notify-count')
+
+testNotificationBtn.addEventListener('click', async () => {
+  await api.testNotification()
+  refreshNotifyStats()
+})
+
+function refreshNotifyStats () {
+  api.notifyStats().then((stats) => {
+    if (!stats) return
+    const parts = []
+    if (stats.supported === false) parts.push('notifications NOT supported on this OS')
+    if (stats.count) parts.push('shown: ' + stats.count)
+    if (parts.length) {
+      notifyCountEl.textContent = parts.join(' · ')
+      notifyCountEl.hidden = false
+    }
+  }).catch(() => {})
+}
+
 let editingId = null
 let originalUrl = null
 let profilesData = []
@@ -345,3 +366,4 @@ connectionsRefresh.addEventListener('click', loadConnections)
 
 loadAll()
 setInterval(loadConnections, 4000)
+setInterval(refreshNotifyStats, 3000)

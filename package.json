@@ -1,6 +1,6 @@
 {
   "name": "lvchat",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "LVChat — Discord-style web chat (PHP + SQLite)",
   "private": true,
   "scripts": {

@@ -35,6 +35,44 @@ function trayImage () {
   return nativeImage.createEmpty()
 }
 
+/* Show an OS notification via the main process. Windows toasts need the app's
+ * AppUserModelID to be registered (set at startup); failure to create/show is
+ * surfaced through the 'failed' event and logged, never thrown. */
+function showOsNotification (record, title, body, conv) {
+  try {
+    if (!Notification.isSupported()) {
+      console.warn('[notify] OS notifications unsupported on this system')
+      return false
+    }
+    let icon
+    try {
+      const img = nativeImage.createFromPath(APP_ICON)
+      icon = img.isEmpty() ? undefined : img.resize({ width: 64, height: 64 })
+    } catch (err) { icon = undefined }
+    const options = { title: String(title || 'LVChat Messenger'), body: String(body || '') }
+    if (icon) options.icon = icon
+    const notification = new Notification(options)
+    notification.on('click', () => {
+      if (record && record.win && !record.win.isDestroyed()) {
+        if (record.win.isMinimized()) record.win.restore()
+        record.win.show()
+        record.win.focus()
+      }
+      if (record && conv && !record.win.isDestroyed() && !record.win.webContents.isDestroyed()) {
+        record.win.webContents.send('msg:open-conv', conv)
+      }
+    })
+    notification.on('show', () => console.log('[notify] shown:', title))
+    notification.on('failed', (_e, err) => console.warn('[notify] failed:', err || 'unknown error'))
+    notification.show()
+    return true
+  } catch (err) {
+    // A broken notification daemon must never take the app down.
+    console.warn('[notify] error:', err.message)
+    return false
+  }
+}
+
 function prefsPath () {
   return path.join(app.getPath('userData'), 'prefs.json')
 }
@@ -463,46 +501,19 @@ function registerIpc () {
   ipcMain.on('msg:notify', (event, payload) => {
     const record = messengerWindows.get(event.sender.id)
     messengerNotifications++
-    try {
-      const notification = new Notification({
-        title: String((payload && payload.title) || 'LVChat Messenger'),
-        body: String((payload && payload.body) || ''),
-        icon: APP_ICON
-      })
-      notification.on('click', () => {
-        const conv = payload && payload.conv
-        if (record && record.win && !record.win.isDestroyed()) {
-          if (record.win.isMinimized()) record.win.restore()
-          record.win.show()
-          record.win.focus()
-        }
-        if (record && conv && !record.win.isDestroyed() && !record.win.webContents.isDestroyed()) {
-          record.win.webContents.send('msg:open-conv', conv)
-        }
-      })
-      notification.show()
-    } catch (err) {
-      // A broken notification daemon must never take the app down.
-      console.warn('notification failed:', err.message)
-    }
+    showOsNotification(record, payload && payload.title, payload && payload.body, payload && payload.conv)
   })
 
   ipcMain.handle('notify:test', () => {
-    try {
-      const notification = new Notification({
-        title: 'LVChat Messenger',
-        body: 'Test notification — desktop alerts are working.',
-        icon: APP_ICON
-      })
-      notification.on('click', () => showMessengerOrLauncher())
-      notification.show()
-    } catch (err) {
-      return { ok: false, error: err.message }
-    }
-    return { ok: true }
+    const shown = showOsNotification(null, 'LVChat Messenger', 'Test notification — desktop alerts are working.')
+    return { ok: shown }
   })
 
-  ipcMain.handle('notify:stats', () => ({ count: messengerNotifications }))
+  ipcMain.handle('notify:stats', () => {
+    let supported = false
+    try { supported = Notification.isSupported() } catch (err) { /* ignore */ }
+    return { count: messengerNotifications, supported }
+  })
 
   // Reflect unread totals in the tray tooltip (main messenger windows only).
   ipcMain.on('tray:setUnread', (_event, count) => {
