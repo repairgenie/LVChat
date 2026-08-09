@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; connect-src https: http: ws: wss:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' https: http: data: blob:; connect-src https: http: ws: wss:" />
   <title>LVChat Messenger</title>
   <link rel="stylesheet" href="messenger.css" />
 </head>
@@ -72,13 +72,16 @@
 
   <!-- Main app -->
   <div id="view-main" class="view" hidden>
-    <aside id="sidebar">
+    <div id="offline-banner" hidden>Offline — messages you send will be queued and delivered when you reconnect.</div>
+    <div id="app-row">
+      <aside id="sidebar">
       <header class="sidebar-head">
         <div class="me">
-          <div class="avatar" id="me-avatar"></div>
+          <div class="avatar" id="me-avatar" role="button" title="Set your status"></div>
           <div class="me-info">
             <div class="me-name" id="me-name"></div>
-            <div class="me-status" id="me-status">online</div>
+            <button id="me-status" class="me-status" title="Set your status" type="button">online</button>
+            <div id="status-menu" class="status-menu" hidden></div>
           </div>
         </div>
         <div class="head-actions">
@@ -163,6 +166,7 @@
         </div>
       </div>
     </main>
+    </div>
   </div>
 
   <div id="modal" hidden>
@@ -174,6 +178,46 @@
       <div class="modal-actions">
         <button id="modal-ok" class="primary">OK</button>
         <button id="modal-cancel" class="ghost" hidden>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal settings-modal">
+      <div class="modal-title">Settings</div>
+
+      <div class="settings-section">
+        <div class="settings-label">Notifications</div>
+        <label class="check"><input type="checkbox" id="set-notify-dms" /> Direct messages</label>
+        <label class="check"><input type="checkbox" id="set-notify-channels" /> Channel messages</label>
+        <label class="check"><input type="checkbox" id="set-notify-invites" /> Channel invites</label>
+        <div class="settings-hint">Notifications appear in your operating system. They can also be turned off per channel or per person in your web profile.</div>
+        <div id="win-notify-hint" hidden>
+          <p class="settings-hint">Not seeing notifications? Open Windows notification settings and make sure notifications are enabled for “LVChat Messenger” (and that Focus assist isn’t on). The app must be installed via the Setup installer for notifications to appear.</p>
+          <button type="button" id="win-notify-settings" class="ghost small">Open Windows notification settings</button>
+        </div>
+        <button type="button" id="set-notify-test" class="ghost small">Test notification</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">Sounds</div>
+        <div class="settings-row">
+          <label class="check"><input type="checkbox" id="set-sound-dm-on" /> DM sound</label>
+          <select id="set-sound-dm" disabled></select>
+        </div>
+        <div class="settings-row">
+          <label class="check"><input type="checkbox" id="set-sound-channel-on" /> Channel sound</label>
+          <select id="set-sound-channel" disabled></select>
+        </div>
+        <div class="settings-hint">Sounds play for new messages while the chat is in the background. Muting a person in your web profile silences their messages too.</div>
+        <button type="button" id="set-sound-test" class="ghost small">Test sound</button>
+      </div>
+
+      <div id="settings-status" class="settings-status" hidden></div>
+
+      <div class="modal-actions">
+        <button id="settings-close" class="primary">Done</button>
       </div>
     </div>
   </div>

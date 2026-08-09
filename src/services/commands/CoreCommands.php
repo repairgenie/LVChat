@@ -194,7 +194,10 @@ CommandRegistry::register('away', [
     'usage' => '/away [message]',
     'run' => function (array $args, array $user, ?array $channel) {
         $msg = implode(' ', $args);
-        Database::query('UPDATE users SET away = ?, away_at = datetime("now") WHERE id = ?', [$msg, $user['id']]);
+        Database::query(
+            'UPDATE users SET away = ?, away_at = datetime("now"), status_mode = \'away\' WHERE id = ?',
+            [$msg, $user['id']]
+        );
         return ['replies' => [$msg === '' ? 'You are now away.' : "You are now away: $msg"]];
     },
 ]);
@@ -204,7 +207,7 @@ CommandRegistry::register('back', [
     'desc' => 'Return from being away.',
     'usage' => '/back',
     'run' => function (array $args, array $user, ?array $channel) {
-        Database::query('UPDATE users SET away = NULL, away_at = NULL WHERE id = ?', [$user['id']]);
+        Database::query('UPDATE users SET away = NULL, away_at = NULL, status_mode = \'online\' WHERE id = ?', [$user['id']]);
         return ['replies' => ['You are back.']];
     },
 ]);
@@ -222,22 +225,29 @@ CommandRegistry::register('whois', [
         if (!$t) {
             return ['replies' => ["No such user: $nick"]];
         }
-        $online = Auth::isOnline($t) ? 'online' : 'offline';
+        $si = Auth::statusInfo($t);
+        $statusWord = match ($si['status_mode']) {
+            'away' => 'away',
+            'dnd' => 'Do Not Disturb',
+            'invisible' => 'appearing offline',
+            'custom' => 'custom status',
+            default => 'online',
+        };
         $roleTag = match ($t['role']) {
             'admin' => ' (IRC Operator)',
             'staff' => ' (Staff)',
             default => '',
         };
         $lines = [
-            h($t['username']) . " — $online" . $roleTag,
+            h($t['username']) . " — $statusWord" . $roleTag,
             'Registered: ' . date('Y-m-d H:i', strtotime($t['registered_at'] . ' UTC')),
             'Last seen: ' . relative_time($t['last_seen']),
         ];
         if (Auth::isOper($user)) {
             $lines[] = 'IP: ' . ($t['last_ip'] ?: '(none recorded)');
         }
-        if ($t['away']) {
-            $lines[] = 'Away: ' . h($t['away']);
+        if ($si['custom_status'] !== '') {
+            $lines[] = 'Status: ' . h($si['custom_status']);
         }
         $chans = ChannelService::joinedChannelNames($t);
         if ($chans) {

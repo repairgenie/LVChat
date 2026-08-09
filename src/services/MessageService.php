@@ -30,10 +30,14 @@ final class MessageService
         return (int) Database::lastId();
     }
 
-    /** Create a DM notification for a recipient actor (skips self-DMs). */
+    /** Create a DM notification for a recipient actor (skips self-DMs + DND). */
     public static function notifyDm(array $recipient, array $sender, int $pmId): void
     {
         if (self::sameActor($recipient, $sender)) {
+            return;
+        }
+        // Do Not Disturb silences every notification surface (bell + push).
+        if (Auth::isDnd($recipient)) {
             return;
         }
         // A per-user mute silences that person across every surface (bell + push).
@@ -418,7 +422,7 @@ final class MessageService
     {
         [$meU, $meG] = self::actorPair($me);
         $rows = Database::all(
-            "SELECT p.user_id, p.username, p.role, p.guest, p.last_seen, p.away,
+            "SELECT p.user_id, p.username, p.role, p.guest, p.last_seen, p.away, p.status_mode, p.custom_status,
                     (SELECT 1 FROM user_mutes um WHERE um.user_id = ? AND um.muted_user_id = p.id) AS muted,
                     (SELECT COUNT(*) FROM private_messages pm
                      WHERE pm.read_at IS NULL
@@ -448,13 +452,13 @@ final class MessageService
                      )
                      ORDER BY pm.id DESC LIMIT 1) AS last_id
              FROM (
-               SELECT 'user' AS ptype, u.id AS id, u.id AS user_id, u.username, u.role, u.guest, u.last_seen, u.away
-               FROM users u WHERE u.id IN (
-                 SELECT recipient_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
-                 UNION SELECT sender_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
-               )
-               UNION ALL
-               SELECT 'guest', g.id, g.id, g.nick, 'user', 1, g.last_seen, NULL
+               SELECT 'user' AS ptype, u.id AS id, u.id AS user_id, u.username, u.role, u.guest, u.last_seen, u.away, u.status_mode, u.custom_status
+                FROM users u WHERE u.id IN (
+                  SELECT recipient_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
+                  UNION SELECT sender_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
+                )
+                UNION ALL
+                SELECT 'guest', g.id, g.id, g.nick, 'user', 1, g.last_seen, NULL, 'online', ''
                FROM guests g WHERE g.id IN (
                  SELECT recipient_guest_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
                  UNION SELECT sender_guest_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
@@ -478,6 +482,8 @@ final class MessageService
                 'role' => $r['role'],
                 'guest' => (int) ($r['guest'] ?? 0),
                 'away' => $r['away'],
+                'status_mode' => (string) ($r['status_mode'] ?? 'online'),
+                'custom_status' => (string) ($r['custom_status'] ?? ''),
                 'last_seen' => $r['last_seen'],
                 'unread' => (int) $r['unread'],
                 'last_content' => (string) ($r['last_content'] ?? ''),
@@ -517,6 +523,10 @@ final class MessageService
                 // alerts at all; 'all' and 'mentions' both still deliver a
                 // mention). Guests never mute.
                 if ($target['user_id'] !== null) {
+                    // Do Not Disturb silences mentions too.
+                    if (Database::scalar('SELECT status_mode FROM users WHERE id = ?', [(int) $target['user_id']]) === 'dnd') {
+                        continue;
+                    }
                     $mode = (string) Database::scalar(
                         'SELECT mode FROM channel_notify WHERE channel_id = ? AND user_id = ?',
                         [$channelId, (int) $target['user_id']]

@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 // logout (cookie wipe), and external-link opening. All network calls are made
 // by the page directly to the LVChat server (CORS + session cookies).
 contextBridge.exposeInMainWorld('msg', {
+  platform: process.platform,
   profile: () => ipcRenderer.invoke('msg:profile'),
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   switchProfile: (payload) => ipcRenderer.invoke('profiles:switch', payload),

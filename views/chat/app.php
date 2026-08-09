@@ -213,11 +213,57 @@ function member_html(array $m, bool $online): string {
     $color = $m['role'] === 'admin' ? 'text-red-400' : ($online ? level_color($m['level']) : 'text-discord-400');
     $roleStyle = ($m['role'] !== 'admin' && !empty($m['role_color'])) ? ' style="color:' . h($m['role_color']) . '"' : '';
     $guestTag = !empty($m['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
+    $stDot = presence_dot_class($m);
+    $stText = presence_status_text($m);
     return '<a href="/app?dm=' . h(rawurlencode($m['username'])) . '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ' . $color . '"' . $roleStyle . ' data-username="' . h($m['username']) . '" data-user-id="' . (int) $m['id'] . '" data-level="' . h($m['level']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">
         <span class="text-[10px] font-bold w-3">' . h(level_symbol($m['level'])) . '</span>
         ' . avatar_img($m, 'w-6 h-6 rounded-full') . '
-        <span class="truncate">' . h($m['username']) . $guestTag . '</span>' . ($m['away'] ? '<span class="text-xs" title="' . h($m['away']) . '">💤</span>' : '') . $badge
+        <span class="w-2 h-2 rounded-full shrink-0 ' . $stDot . '"></span>
+        <span class="min-w-0"><span class="block truncate">' . h($m['username']) . $guestTag . '</span>' . ($stText !== '' ? '<span class="block truncate text-[11px] text-discord-500">' . h($stText) . '</span>' : '') . '</span>' . $badge
         . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button></a>';
+}
+
+/* Tailwind dot class for a user's presence (mirrors presenceDot in app.js). */
+function presence_dot_class(array $u): string {
+    $m = (string) ($u['status_mode'] ?? '');
+    if (!in_array($m, ['online', 'away', 'dnd', 'invisible', 'custom'], true)) {
+        $m = !empty($u['away']) ? 'away' : 'online';
+    }
+    return match ($m) {
+        'dnd' => 'bg-red-500',
+        'away', 'custom' => 'bg-amber-400',
+        'invisible' => 'bg-discord-500',
+        default => 'bg-green-500',
+    };
+}
+
+/* Status text shown under a nick (custom status, else away message). */
+function presence_status_text(array $u): string {
+    $m = (string) ($u['status_mode'] ?? '');
+    $t = trim((string) ($u['custom_status'] ?? ''));
+    if ($t === '' && $m === 'away') {
+        $t = trim((string) ($u['away'] ?? ''));
+    }
+    return mb_substr($t, 0, 60);
+}
+
+/* Human label for a user's presence mode. */
+function presence_mode(array $u): string {
+    $m = (string) ($u['status_mode'] ?? '');
+    if (!in_array($m, ['online', 'away', 'dnd', 'invisible', 'custom'], true)) {
+        $m = !empty($u['away']) ? 'away' : 'online';
+    }
+    return $m;
+}
+
+function presence_label(array $u): string {
+    return match (presence_mode($u)) {
+        'away' => 'Away',
+        'dnd' => 'Do Not Disturb',
+        'invisible' => 'Appear Offline',
+        'custom' => 'Custom status',
+        default => 'Online',
+    };
 }
 ?>
 <!DOCTYPE html>
@@ -251,6 +297,7 @@ function member_html(array $m, bool $online): string {
       data-push-all-off="<?= (int) (!(int) ($user['guest'] ?? 0) && (int) $pushPrefs['channels'] === 0 && (int) $pushPrefs['dms'] === 0 && (int) $pushPrefs['invites'] === 0) ?>"
       data-push-prefs="<?= h(json_encode(['channels' => (int) $pushPrefs['channels'], 'dms' => (int) $pushPrefs['dms'], 'invites' => (int) $pushPrefs['invites']])) ?>"
       data-my-level="<?= h($currentLevel) ?>"
+      data-me-status="<?= h($user['status_mode'] ?? 'online') ?>"
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
       data-my-nick="<?= h($user['username']) ?>"
@@ -361,7 +408,7 @@ function member_html(array $m, bool $online): string {
         <div class="mt-1 space-y-0.5">
           <?php foreach ($onlineUsers as $ou): ?>
           <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" data-user-id="<?= (int) ($ou['id'] ?? 0) ?>" data-guest="<?= !empty($ou['guest']) ? '1' : '0' ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
-            <span class="w-2 h-2 rounded-full bg-green-500"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
+            <span class="w-2 h-2 rounded-full <?= presence_dot_class($ou) ?>"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
             <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
           </a>
           <?php endforeach; ?>
@@ -373,16 +420,45 @@ function member_html(array $m, bool $online): string {
     <div class="border-t border-discord-700 bg-sidebar p-2 shrink-0">
       <a href="https://georgethegeek.com" target="_blank" rel="noopener" class="block text-center text-[10px] text-discord-500 hover:text-discord-300 py-1 transition-colors">Made with ❤️ in Las Vegas</a>
       <div class="flex items-center gap-2 rounded-md hover:bg-discord-600/40 px-2 py-1.5">
-        <div class="w-8 h-8 rounded-full bg-blurple flex items-center justify-center text-sm font-bold text-white"><?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?></div>
+        <?php
+        $stMode = (string) ($user['status_mode'] ?? '');
+        if (!in_array($stMode, ['online', 'away', 'dnd', 'invisible', 'custom'], true)) {
+            $stMode = !empty($user['away']) ? 'away' : 'online';
+        }
+        $stLabels = ['online' => 'Online', 'away' => 'Away', 'dnd' => 'Do Not Disturb', 'invisible' => 'Appear Offline', 'custom' => 'Custom status'];
+        $stText = trim((string) ($user['custom_status'] ?? ''));
+        if ($stText === '' && $stMode === 'away') {
+            $stText = trim((string) ($user['away'] ?? ''));
+        }
+        $stDot = match ($stMode) {
+            'dnd' => 'bg-red-500',
+            'away', 'custom' => 'bg-amber-400',
+            'invisible' => 'bg-discord-500',
+            default => 'bg-green-500',
+        };
+        ?>
+        <div id="me-header-avatar" class="relative w-8 h-8 rounded-full bg-blurple flex items-center justify-center text-sm font-bold text-white cursor-pointer" title="Set your status">
+          <?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?>
+          <span class="avatar-status absolute -right-0.5 -bottom-0.5 w-3 h-3 rounded-full border-2 border-sidebar <?= $stDot ?>"></span>
+        </div>
         <div class="min-w-0 flex-1">
           <div class="text-sm font-medium text-white truncate"><?= h($user['username']) ?></div>
-          <div class="text-[10px] text-discord-400 truncate"><?= (int) ($user['guest'] ?? 0) ? 'Guest' : ($user['role'] === 'admin' ? 'IRC Operator' : ($user['role'] === 'staff' ? 'Staff' : 'Registered')) ?></div>
+          <button type="button" id="me-status-line" class="text-[10px] text-discord-400 truncate underline decoration-dotted underline-offset-2 cursor-pointer hover:decoration-solid block max-w-full text-left">
+            <?= h($stLabels[$stMode] ?? 'Online') ?><?= $stText !== '' ? ' — ' . h(mb_substr($stText, 0, 60)) : '' ?>
+          </button>
         </div>
         <div class="relative">
           <button id="user-menu-btn" class="text-discord-400 hover:text-white text-xs px-1">⚙</button>
           <div id="user-menu" class="hidden absolute bottom-9 right-0 w-56 card p-1.5 shadow-xl z-50">
             <a href="/u/<?= h(rawurlencode($user['username'])) ?>" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Profile & settings</a>
             <a href="/support" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Support</a>
+            <div class="h-px bg-discord-700 my-1"></div>
+            <div class="px-2 py-1 text-[10px] uppercase tracking-wide text-discord-500">Status</div>
+            <button type="button" data-status="online" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Online</button>
+            <button type="button" data-status="away" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Away</button>
+            <button type="button" data-status="dnd" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Do Not Disturb</button>
+            <button type="button" data-status="invisible" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Appear Offline</button>
+            <button type="button" data-status="custom" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Custom status…</button>
             <?php if ($channel): ?>
             <button id="set-away-btn" class="w-full text-left px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Set away</button>
             <?php endif; ?>
@@ -424,7 +500,10 @@ function member_html(array $m, bool $online): string {
       </div>
       <?php elseif ($dm): ?>
       <span class="font-bold text-white text-sm"><?= h($dm['username']) ?></span>
-      <span class="text-xs text-discord-400">Private message</span>
+      <span class="flex items-center gap-1.5 text-xs text-discord-400">
+        <span class="w-2 h-2 rounded-full <?= presence_dot_class($dm) ?>"></span>
+        <?= h(presence_label($dm)) ?><?php $dmSt = presence_status_text($dm); if ($dmSt !== ''): ?> — <span class="truncate max-w-[24ch]"><?= h($dmSt) ?></span><?php endif; ?>
+      </span>
       <div class="relative ml-auto flex items-center gap-2">
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
         <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>

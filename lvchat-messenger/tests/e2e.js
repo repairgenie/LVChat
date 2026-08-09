@@ -142,6 +142,9 @@ function mockLvchatServer () {
     dmUnread: 2,
     groups: [{ id: 1, name: 'Friends', position: 0, members: [2] }],
     joinedChannels: [{ slug: 'gaming', unread: 3, online: 4 }, { slug: 'general', unread: 0, online: 1 }],
+    soundPrefs: null,
+    pushPrefs: null,
+    meStatus: null,
     invites: [
       { id: 5, channel_id: 9, channel_name: 'Dev Lounge', slug: 'dev', inviter: 'bob', created_at: '2026-08-06 07:00:00' },
       { id: 6, channel_id: 10, channel_name: 'Gamers Den', slug: 'gamers', inviter: 'carol', created_at: '2026-08-06 07:05:00' }
@@ -315,7 +318,19 @@ function mockLvchatServer () {
     }
 
     if (url.pathname === '/api/me') {
-      json(200, { ok: true, user: { id: 1, username: 'alice', avatar: null, role: 'user', guest: 0, away: null, status: 'active' } })
+      json(200, { ok: true, user: Object.assign({ id: 1, username: 'alice', avatar: null, role: 'user', guest: 0, away: null, status: 'active' }, state.meStatus || {}) })
+      return
+    }
+    if (url.pathname === '/api/status') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        const mode = p.get('status_mode') || 'online'
+        const custom = p.get('custom_status') || ''
+        state.meStatus = { status_mode: mode, custom_status: custom, dnd: mode === 'dnd' ? 1 : 0, invisible: mode === 'invisible' ? 1 : 0, is_online: mode === 'invisible' ? 0 : 1 }
+        json(200, { ok: true, status: state.meStatus, away: mode === 'away' ? custom || null : null })
+      })
       return
     }
     if (url.pathname === '/api/friends') {
@@ -468,7 +483,30 @@ function mockLvchatServer () {
       return
     }
     if (url.pathname === '/api/push/prefs') {
+      if (req.method === 'POST') {
+        let body = ''
+        req.on('data', (c) => { body += c })
+        req.on('end', () => {
+          const p = new URLSearchParams(body)
+          state.pushPrefs = { channels: p.get('channels') === '1' ? 1 : 0, dms: p.get('dms') === '1' ? 1 : 0, invites: p.get('invites') === '1' ? 1 : 0 }
+          json(200, { ok: true, prefs: state.pushPrefs })
+        })
+        return
+      }
       json(200, { ok: true, prefs: { channels: 1, dms: 1, invites: 1 } })
+      return
+    }
+    if (url.pathname === '/api/sounds') {
+      json(200, { ok: true, sounds: { 1: { name: 'Ding', url: '/assets/sounds/ding.wav' } }, dm_sound_id: 1, channel_sound_id: 1, overrides: {} })
+      return
+    }
+    if (url.pathname === '/api/sound/prefs') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        state.soundPrefs = Object.fromEntries(new URLSearchParams(body))
+        json(200, { ok: true })
+      })
       return
     }
     if (url.pathname === '/api/notifications') {
@@ -694,9 +732,77 @@ async function main () {
   await js(win, `document.querySelector('#gif-grid .gif-item').click()`)
   check('gif message posts to stream', await waitJs(win, `[...document.querySelectorAll('#stream .msg img.media')].some((img) => img.src.includes('giphy')) && 'ok'`))
 
+  // Emoji picker opens on click and closes on a second click (and via the GIF
+  // button / outside click), like the other pickers.
+  await js(win, `document.body.click()`)
+  await new Promise((r) => setTimeout(r, 200))
+  await js(win, `document.getElementById('btn-emoji').click()`)
+  await new Promise((r) => setTimeout(r, 250))
+  check('emoji picker opens', await js(win, `(() => { const p = document.getElementById('emoji-panel'); return !p.hidden && p.querySelectorAll('button').length > 0 })()`))
+  await js(win, `document.getElementById('btn-emoji').click()`)
+  await new Promise((r) => setTimeout(r, 250))
+  check('emoji picker closes on second click', await js(win, `document.getElementById('emoji-panel').hidden`))
+  await js(win, `document.getElementById('btn-emoji').click()`)
+  await new Promise((r) => setTimeout(r, 200))
+  await js(win, `document.getElementById('btn-gif').click()`)
+  await new Promise((r) => setTimeout(r, 200))
+  check('emoji picker closes when the GIF picker opens', await js(win, `document.getElementById('emoji-panel').hidden && !document.getElementById('gif-panel').hidden`))
+  await js(win, `document.body.click()`)
+  await new Promise((r) => setTimeout(r, 200))
+  check('gif picker closes on outside click', await js(win, `document.getElementById('gif-panel').hidden`))
+
   // Image upload (mock accepts the file without parsing its bytes).
   await js(win, `(() => { const f = new File([new Uint8Array([1,2,3])], 'pic.png', { type: 'image/png' }); const dt = new DataTransfer(); dt.items.add(f); const inp = document.getElementById('image-file'); inp.files = dt.files; inp.dispatchEvent(new Event('change')) })()`)
   check('image upload posts to stream', await waitJs(win, `[...document.querySelectorAll('#stream .msg img.media')].some((img) => img.src.includes('uploads')) && 'ok'`))
+
+  // Offline queue: go offline, send, message is queued + pending; reconnect
+  // flushes it and the server-confirmed message replaces the pending bubble.
+  await js(win, `window.dispatchEvent(new Event('offline'))`)
+  await js(win, `(() => { const i = document.getElementById('composer-input'); i.value = 'queued while offline'; document.getElementById('composer-send').click(); return 'ok' })()`)
+  check('offline banner appears', await waitJs(win, `!document.getElementById('offline-banner').hidden && 'ok'`))
+  check('offline message renders as pending', await waitJs(win, `(() => { const m = [...document.querySelectorAll('#stream .msg')].find((x) => x.textContent.includes('queued while offline')); return !!m && m.textContent.includes('Pending') && 'ok' })()`))
+  await js(win, `window.dispatchEvent(new Event('online'))`)
+  check('queued message delivered after reconnect', await waitJs(win, `(() => { const m = [...document.querySelectorAll('#stream .msg')].find((x) => x.textContent.includes('queued while offline')); return !!m && !m.textContent.includes('Pending') && 'ok' })()`))
+  check('offline banner hidden after reconnect', await waitJs(win, `document.getElementById('offline-banner').hidden && 'ok'`))
+
+  // Settings modal: notification + sound preferences.
+  await js(win, `document.getElementById('menu-btn').click()`)
+  await js(win, `(() => { const m = document.getElementById('head-menu'); const b = [...m.querySelectorAll('button')].find((x) => x.textContent.includes('Settings')); if (b) b.click(); return !!b })()`)
+  check('settings modal opens from the menu', await waitJs(win, `!document.getElementById('settings-modal').hidden && 'ok'`))
+  check('settings load current prefs', await waitJs(win, `document.getElementById('set-notify-dms').checked && document.getElementById('set-notify-channels').checked && document.getElementById('set-sound-dm-on').checked && document.getElementById('set-sound-dm').value === '1' && 'ok'`))
+  // Toggle DM notifications off -> saved to the server + reflected in prefs.
+  await js(win, `(() => { const c = document.getElementById('set-notify-dms'); c.checked = false; c.dispatchEvent(new Event('change')); return 'ok' })()`)
+  await new Promise((r) => setTimeout(r, 400))
+  check('DM notification toggle posts push prefs', !!mock.state.pushPrefs && mock.state.pushPrefs.dms === 0 && mock.state.pushPrefs.channels === 1, JSON.stringify(mock.state.pushPrefs))
+  // Toggle DM sound off -> POST /api/sound/prefs with dm_sound=0.
+  await js(win, `(() => { const c = document.getElementById('set-sound-dm-on'); c.checked = false; c.dispatchEvent(new Event('change')); return 'ok' })()`)
+  await new Promise((r) => setTimeout(r, 400))
+  check('DM sound toggle posts sound prefs', !!mock.state.soundPrefs && mock.state.soundPrefs.dm_sound === '0' && mock.state.soundPrefs.channel_sound === '1', JSON.stringify(mock.state.soundPrefs))
+  await js(win, `document.getElementById('settings-close').click()`)
+  check('settings modal closes', await waitJs(win, `document.getElementById('settings-modal').hidden && 'ok'`))
+
+  // Status selector: pick Do Not Disturb, then a custom status.
+  await js(win, `document.getElementById('me-status').click()`)
+  check('status menu opens', await waitJs(win, `!document.getElementById('status-menu').hidden && document.getElementById('status-menu').textContent.includes('Do Not Disturb') && 'ok'`))
+  await js(win, `(() => { const b = [...document.querySelectorAll('#status-menu .ctx-item')].find((x) => x.textContent.includes('Do Not Disturb')); if (b) b.click(); return !!b })()`)
+  await new Promise((r) => setTimeout(r, 400))
+  check('DND status saved to the server', !!mock.state.meStatus && mock.state.meStatus.status_mode === 'dnd' && mock.state.meStatus.dnd === 1, JSON.stringify(mock.state.meStatus))
+  check('header shows Do Not Disturb', await waitJs(win, `document.getElementById('me-status').textContent.includes('Do Not Disturb') && 'ok'`))
+  check('avatar status dot turns red for DND', await waitJs(win, `(() => { const d = document.getElementById('me-avatar').querySelector('.avatar-status'); return !!d && d.classList.contains('dnd') && 'ok' })()`))
+  check('Windows notification settings link present', await waitJs(win, `document.getElementById('win-notify-settings') !== null && 'ok'`))
+
+  // The avatar is a second way to open the status menu.
+  await js(win, `document.getElementById('me-avatar').click()`)
+  check('avatar click opens the status menu', await waitJs(win, `!document.getElementById('status-menu').hidden && document.getElementById('status-menu').textContent.includes('Do Not Disturb') && 'ok'`))
+  await js(win, `document.getElementById('status-menu').hidden = true`)
+
+  await js(win, `document.getElementById('me-status').click()`)
+  await js(win, `(() => { const b = [...document.querySelectorAll('#status-menu .ctx-item')].find((x) => x.textContent.includes('Custom status')); if (b) b.click(); return !!b })()`)
+  check('custom status prompt opens', await waitJs(win, `!document.getElementById('modal').hidden && 'ok'`))
+  await js(win, `(() => { const i = document.getElementById('modal-input'); i.value = 'streaming'; document.getElementById('modal-ok').click(); return 'ok' })()`)
+  await new Promise((r) => setTimeout(r, 400))
+  check('custom status saved to the server', !!mock.state.meStatus && mock.state.meStatus.status_mode === 'custom' && mock.state.meStatus.custom_status === 'streaming', JSON.stringify(mock.state.meStatus))
+  check('custom status shown in header', await waitJs(win, `document.getElementById('me-status').textContent.includes('Custom status') && document.getElementById('me-status').textContent.includes('streaming') && 'ok'`))
 
   // Buddy context menu (grouped member: window/profile/remove-from-group).
   await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)

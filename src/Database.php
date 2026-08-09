@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '29';
+    private const SCHEMA_VERSION = '30';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -88,6 +88,13 @@ final class Database
         }
         if (!in_array('totp_enabled_at', $userCols, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN totp_enabled_at TEXT');
+        }
+        // Rich presence statuses: online/away/dnd/invisible/custom (schema v30).
+        if (!in_array('status_mode', $userCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN status_mode TEXT NOT NULL DEFAULT 'online'");
+        }
+        if (!in_array('custom_status', $userCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN custom_status TEXT NOT NULL DEFAULT ''");
         }
         $guestCols = array_column($pdo->query('PRAGMA table_info(guests)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('age_verified_at', $guestCols, true)) {

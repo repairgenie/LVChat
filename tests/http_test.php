@@ -427,6 +427,49 @@ $tB = csrf(req('GET', '/app', [], $cjB)[2]);
 [$s] = req('POST', '/api/friend/accept', ['csrf' => $tB, 'username' => 'alice'], $cjB);
 check('bob accepts', $s === 200, (string) $s);
 
+// ── Presence statuses: online / away / dnd / invisible / custom ──────────
+[$s, , $b] = req('POST', '/api/status', ['csrf' => $tB, 'status_mode' => 'dnd'], $cjB);
+$j = jsonDecode($b);
+check('bob sets DND', $s === 200 && ($j['status']['status_mode'] ?? '') === 'dnd' && ($j['status']['dnd'] ?? 0) === 1 && ($j['status']['is_online'] ?? 0) === 1, $b);
+[$s, , $b] = req('GET', '/api/friends', [], $cjA);
+$j = jsonDecode($b);
+$bob = null;
+foreach (($j['friends'] ?? []) as $f) { if (($f['username'] ?? '') === 'bob') $bob = $f; }
+check('friend presence carries dnd status', ($bob['status_mode'] ?? '') === 'dnd' && ($bob['dnd'] ?? 0) === 1 && ($bob['is_online'] ?? 0) === 1, json_encode($bob));
+[$s, , $b] = req('POST', '/api/send', ['csrf' => $tA, 'recipient' => 'bob', 'content' => 'dnd test dm'], $cjA);
+$dndMsgId = (int) (jsonDecode($b)['message']['id'] ?? 0);
+check('DM to a dnd user still delivers', $s === 200 && $dndMsgId > 0, $b);
+$dndNotif = (int) (dbq("SELECT COUNT(*) AS c FROM notifications WHERE user_id = (SELECT id FROM users WHERE username = 'bob') AND kind = 'dm' AND message_id = ?", [$dndMsgId])[0]['c'] ?? 0);
+check('DND suppresses the DM bell/push notification', $dndNotif === 0, (string) $dndNotif);
+
+[$s, , $b] = req('POST', '/api/status', ['csrf' => $tB, 'status_mode' => 'invisible'], $cjB);
+check('bob sets invisible', $s === 200 && (jsonDecode($b)['status']['status_mode'] ?? '') === 'invisible', $b);
+[$s, , $b] = req('GET', '/api/friends', [], $cjA);
+$j = jsonDecode($b);
+$bob = null;
+foreach (($j['friends'] ?? []) as $f) { if (($f['username'] ?? '') === 'bob') $bob = $f; }
+check('invisible friend appears offline', ($bob['is_online'] ?? 1) === 0 && ($bob['invisible'] ?? 0) === 1, json_encode($bob));
+[$s, , $b] = req('GET', '/api/online', [], $cjA);
+$j = jsonDecode($b);
+$invis = false;
+foreach (($j['online'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $invis = true; }
+check('invisible user excluded from /api/online', !$invis, $b);
+
+[$s, , $b] = req('POST', '/api/status', ['csrf' => $tB, 'status_mode' => 'custom', 'custom_status' => 'streaming tonight'], $cjB);
+$j = jsonDecode($b);
+check('bob sets a custom status', $s === 200 && ($j['status']['status_mode'] ?? '') === 'custom' && ($j['status']['custom_status'] ?? '') === 'streaming tonight', $b);
+[$s, , $b] = req('GET', '/api/friends', [], $cjA);
+$j = jsonDecode($b);
+$bob = null;
+foreach (($j['friends'] ?? []) as $f) { if (($f['username'] ?? '') === 'bob') $bob = $f; }
+check('friend presence carries custom status text', ($bob['status_mode'] ?? '') === 'custom' && ($bob['custom_status'] ?? '') === 'streaming tonight', json_encode($bob));
+[$s] = req('POST', '/api/status', ['csrf' => $tB, 'status_mode' => 'online'], $cjB);
+check('bob back online', $s === 200, (string) $s);
+
+// The web chat header renders the rich status UI (avatar dot + clickable line).
+[$s, , $b] = req('GET', '/app?channel=gaming', [], $cjA);
+check('web header renders the avatar status dot + status line', $s === 200 && strpos($b, 'me-header-avatar') !== false && strpos($b, 'avatar-status') !== false && strpos($b, 'me-status-line') !== false, (string) $s);
+
 // Contact groups CRUD.
 [$s] = req('GET', '/api/groups');
 check('groups list requires auth', $s === 401, (string) $s);
@@ -842,6 +885,15 @@ check('prefs persisted (dm off, channel=upload)', (int) $prefRow['channel_sound_
 [$s, , $b] = req('GET', '/u/alice', [], $cjA);
 check('profile page renders the sounds settings', $s === 200 && strpos($b, 'Notification sounds') !== false, (string) $s);
 
+// Messenger audio alerts endpoint: the enabled sounds + the user's DM/channel
+// choices + per-sender overrides in one payload.
+[$s, , $b] = req('GET', '/api/sounds', [], $cjA);
+$j = jsonDecode($b);
+$sounds = $j['sounds'] ?? [];
+check('sounds endpoint returns enabled sounds', $s === 200 && isset($sounds[$soundId]) && ($sounds[$soundId]['name'] ?? '') === 'Test Blip' && isset($sounds[$soundId]['url']), $b);
+check('sounds endpoint reflects dm off / channel set', array_key_exists('dm_sound_id', $j) && $j['dm_sound_id'] === null && (int) ($j['channel_sound_id'] ?? 0) === $soundId, $b);
+check('sounds endpoint returns overrides map', is_array($j['overrides'] ?? null), $b);
+
 // Per-user override API: set a specific sound, then mute, then remove.
 [$s, , $b] = req('POST', '/api/sound/override', ['csrf' => $tA, 'target_user_id' => '2', 'sound' => (string) $soundId], $cjA);
 check('set per-user override sound', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
@@ -932,6 +984,31 @@ check('legal save sanitizes + renders on public page', $s === 200 && strpos($b, 
 $t = csrf(req('GET', '/app', [], $cjB)[2]);
 [$s, , $b] = req('POST', '/api/join', ['csrf' => $t, 'name' => '#gaming'], $cjB);
 check('bob joins #gaming', $s === 200, "$s $b");
+
+// ── Offline message delivery: a recipient who is offline when a DM or channel
+// message is sent sees both the moment they next poll.
+dbq("UPDATE users SET last_seen = datetime('now', '-1 hour') WHERE username = 'bob'");
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2]), 'recipient' => 'bob', 'content' => 'offline delivery dm'], $cjA);
+check('alice sends a DM to an offline bob', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2]), 'channel' => 'gaming', 'content' => 'offline delivery channel'], $cjA);
+check('alice posts to a channel offline bob is in', $s === 200 && jsonDecode($b)['ok'] === true, $b);
+// Bob comes online and polls — both messages arrive.
+[$s, , $b] = req('GET', '/api/poll?dm=alice&since=0', [], $cjB);
+$j = jsonDecode($b);
+$dmGot = false;
+foreach (($j['messages'] ?? []) as $m) {
+    if (($m['content'] ?? '') === 'offline delivery dm') $dmGot = true;
+}
+check('offline DM delivered to bob on his next poll', $s === 200 && $dmGot, $b);
+[$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0', [], $cjB);
+$j = jsonDecode($b);
+$chGot = false;
+foreach (($j['messages'] ?? []) as $m) {
+    if (($m['content'] ?? '') === 'offline delivery channel') $chGot = true;
+}
+check('offline channel message delivered to bob on his next poll', $s === 200 && $chGot, $b);
+dbq("UPDATE users SET last_seen = datetime('now') WHERE username = 'bob'");
+
 [$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2]), 'channel' => 'gaming', 'content' => 'report me please'], $cjA);
 $reportMsgId = jsonDecode($b)['message']['id'] ?? 0;
 check('alice posts reportable message', $s === 200 && $reportMsgId > 0, "$s $b");

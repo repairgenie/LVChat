@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
   vhost TEXT,
   away TEXT,
   away_at TEXT,
+  status_mode TEXT NOT NULL DEFAULT 'online',
+  custom_status TEXT NOT NULL DEFAULT '',
   bot INTEGER NOT NULL DEFAULT 0,
   banned INTEGER NOT NULL DEFAULT 0,
   ban_reason TEXT,

@@ -158,7 +158,7 @@ final class FriendService
     public static function getFriends(int $userId): array
     {
         return Database::all(
-            "SELECT u.id, u.username, u.avatar, u.role, u.away, u.last_seen, f.updated_at AS friends_since
+            "SELECT u.id, u.username, u.avatar, u.role, u.away, u.status_mode, u.custom_status, u.last_seen, f.updated_at AS friends_since
              FROM friendships f
              JOIN users u ON u.id = CASE WHEN f.user_id = ? THEN f.friend_id ELSE f.user_id END
              WHERE ((f.user_id = ? AND f.friend_id != ?) OR (f.friend_id = ? AND f.user_id != ?))
@@ -172,7 +172,7 @@ final class FriendService
     {
         $friends = self::getFriends($userId);
         foreach ($friends as &$f) {
-            $f['is_online'] = Auth::isOnline($f) ? 1 : 0;
+            $f = array_merge($f, Auth::statusInfo($f));
         }
         return $friends;
     }

@@ -1,4 +1,12 @@
-<?php $title = $user['username']; ?>
+<?php $title = $user['username'];
+$pMode = (string) ($user['status_mode'] ?? '');
+if (!in_array($pMode, ['online', 'away', 'dnd', 'invisible', 'custom'], true)) { $pMode = !empty($user['away']) ? 'away' : 'online'; }
+$pLabels = ['online' => 'Online', 'away' => 'Away', 'dnd' => 'Do Not Disturb', 'invisible' => 'Appear Offline', 'custom' => 'Custom status'];
+$stLabel = $pLabels[$pMode] ?? 'Online';
+$stText = trim((string) ($user['custom_status'] ?? ''));
+if ($stText === '' && $pMode === 'away') { $stText = trim((string) ($user['away'] ?? '')); }
+$stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-400', 'invisible' => 'bg-discord-500', default => 'bg-green-500' };
+?>
 <!-- X button: return to the chat -->
 <div class="flex justify-end mb-2">
   <button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost !p-2" title="Back to chat" aria-label="Close profile">✕</button>
@@ -29,9 +37,11 @@
       <?php else: ?>
       <span class="text-discord-400 font-medium">Registered</span>
       <?php endif; ?>
-      <span class="text-discord-400"> · <?= $isOnline ? 'online' : 'offline' ?></span>
+      <span class="text-discord-400"> ·
+        <span class="inline-block w-2 h-2 rounded-full align-middle <?= $stDot ?>"></span>
+        <?= h($stLabel) ?><?= $stText !== '' ? ' — ' . h($stText) : '' ?>
+      </span>
     </div>
-    <?php if ($user['away']): ?><div class="mt-2 text-sm text-amber-400">💤 <?= h($user['away']) ?></div><?php endif; ?>
     <?php if ($user['bot']): ?><div class="mt-2 text-sm text-blurple">Bot</div><?php endif; ?>
     <div class="mt-4 text-xs text-discord-400">Registered <?= date('M j, Y', strtotime($user['registered_at'] . ' UTC')) ?></div>
 

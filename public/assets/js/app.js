@@ -9,9 +9,37 @@
   const MY_ID = parseInt(body.dataset.myId || '0', 10);
   const MY_NICK = (body.dataset.myNick || '').toLowerCase();
   const IS_GUEST = body.dataset.myGuest === '1';
+  // Do Not Disturb: the caller chose to silence alerts (sound + OS + toasts).
+  const ME_DND = (body.dataset.meStatus || 'online') === 'dnd';
   const VAPID_KEY = body.dataset.vapidKey || '';
   const MY_LEVEL = body.dataset.myLevel || 'normal';
   const CAN_OP = body.dataset.canOp === '1';
+
+  // Presence rendering helpers for the rich statuses (online/away/dnd/invisible/custom).
+  function presenceDot(u) {
+    if (!u) return 'bg-discord-500';
+    if (u.invisible || !u.is_online) return 'bg-discord-500';
+    if (u.status_mode === 'dnd') return 'bg-red-500';
+    if (u.status_mode === 'away' || u.away) return 'bg-amber-400';
+    return 'bg-green-500';
+  }
+  function presenceStatus(u) {
+    if (!u) return '';
+    const t = String((u.custom_status != null ? u.custom_status : u.away) || '').trim();
+    return t.length > 60 ? t.slice(0, 59) + '…' : t;
+  }
+  const STATUS_LABELS = { online: 'Online', away: 'Away', dnd: 'Do Not Disturb', invisible: 'Appear Offline', custom: 'Custom status' };
+  // Native-title tooltip for a contact: nick + status + status text.
+  function contactTitle(u) {
+    const name = u && u.username ? u.username : '?';
+    if (u && u.invisible) return name + ' — Appear Offline';
+    if (u && !u.is_online && !u.away) return name + ' — Offline';
+    const mode = (u && u.status_mode) || (u && u.away ? 'away' : 'online');
+    let t = name + ' — ' + (STATUS_LABELS[mode] || 'Online');
+    const st = presenceStatus(u);
+    if (st) t += ' — ' + st;
+    return t;
+  }
   const CAN_ADMIN = body.dataset.canAdmin === '1';
   const COMMANDS = JSON.parse(body.dataset.commands || '[]');
   let CHANNEL_SLUGS = {};
@@ -731,6 +759,7 @@
       if (!bgSeeded) return;
       if (parseInt(m.sender_id, 10) === MY_ID) return;
       if (m.username && m.username.toLowerCase() === MY_NICK) return;
+      if (ME_DND) return;
       const sid = resolveSound(parseInt(m.sender_id, 10) || null, SOUND_DATA.channel);
       if (sid) playSound(sid);
       if (PUSH_PREFS.channels) {
@@ -751,6 +780,7 @@
       if (!id || mentionSeen.has(id)) return;
       mentionSeen.add(id);
       if (!mentionSeeded || n.kind !== 'mention') return;
+      if (ME_DND) return;
       const sid = resolveSound(parseInt(n.sender_id, 10) || null, SOUND_DATA.channel);
       if (sid) playSound(sid);
     });
@@ -814,17 +844,22 @@
     const cur = DM && d.username && d.username.toLowerCase() === DM.toLowerCase();
     const isAdmin = d.role === 'admin';
     const guestTag = d.guest ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
-    const online = !!d.last_seen && !d.away && (Date.now() - timeTs(d.last_seen)) < 90000;
-    const dot = d.away ? 'bg-amber-400' : (online ? 'bg-green-500' : 'bg-discord-500');
+    const dot = presenceDot(d);
     const nameCls = isAdmin ? 'text-red-400' : '';
     const unreadCls = d.unread ? ' font-semibold' + (isAdmin ? '' : ' text-white') : '';
+    const online = presenceDot(d) !== 'bg-discord-500';
+    const st = presenceStatus(d);
     return `<a href="/app?dm=${encodeURIComponent(d.username)}"
          data-ctx-user="${esc(d.username)}"
          data-user-id="${d.user_id || d.id || ''}"
          data-guest="${d.guest ? '1' : '0'}"
+         title="${esc(contactTitle(d))}"
          class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${cur ? 'bg-discord-600/50 text-white' : 'text-discord-300 hover:bg-discord-600/40 hover:text-white'} ${online ? '' : 'italic opacity-70'}">
       <span class="w-2 h-2 rounded-full ${dot}"></span>
-      <span class="truncate ${nameCls}${unreadCls}">${esc(d.username)}${guestTag}</span>
+      <span class="min-w-0">
+        <span class="block truncate ${nameCls}${unreadCls}">${esc(d.username)}${guestTag}</span>
+        ${st ? `<span class="block truncate text-[11px] text-discord-500">${esc(st)}</span>` : ''}
+      </span>
       ${d.unread ? `<span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">${d.unread > 99 ? '99+' : d.unread}</span>` : ''}
       <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
     </a>`;
@@ -848,7 +883,7 @@
     } else {
       list.forEach((d) => {
         const prev = dmSeen[d.user_id] || 0;
-        if (d.last_id > prev && d.unread > 0 && DM !== d.username && !d.muted) {
+        if (d.last_id > prev && d.unread > 0 && DM !== d.username && !d.muted && !ME_DND) {
           showDmToast(d);
           const sid = resolveSound(parseInt(d.user_id, 10) || null, SOUND_DATA.dm);
           if (sid) playSound(sid);
@@ -965,10 +1000,12 @@
       const on = !!m.is_online;
       const rs = (m.role !== 'admin' && m.role_color) ? ' style="color:' + esc(m.role_color) + '"' : '';
       const cc = m.role === 'admin' ? 'text-red-400' : (on ? (COLORS[m.level] || COLORS.normal) : 'text-discord-400');
-      return `<a href="/app?dm=${encodeURIComponent(m.username)}" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ${cc}"${rs} data-username="${esc(m.username)}" data-level="${esc(m.level || 'normal')}">
+      const st = presenceStatus(m);
+      return `<a href="/app?dm=${encodeURIComponent(m.username)}" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ${cc}"${rs} data-username="${esc(m.username)}" data-level="${esc(m.level || 'normal')}" title="${esc(contactTitle(m))}">
         <span class="text-[10px] font-bold w-3">${SYMBOL[m.level] || ''}</span>
         ${m.avatar ? `<img src="${esc(m.avatar)}" alt="" loading="lazy" class="w-6 h-6 rounded-full object-cover">` : ''}
-        <span class="truncate">${esc(m.username)}</span>${m.away ? '<span class="text-xs">💤</span>' : ''}${m.role === 'admin' ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-400">admin</span>' : (m.role === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '')}</a>`;
+        <span class="w-2 h-2 rounded-full shrink-0 ${presenceDot(m)}"></span>
+        <span class="min-w-0"><span class="block truncate">${esc(m.username)}</span>${st ? `<span class="block truncate text-[11px] text-discord-500">${esc(st)}</span>` : ''}</span>${m.role === 'admin' ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-400">admin</span>' : (m.role === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '')}</a>`;
     }).join('');
     let shown = 0;
     groups.forEach((g) => { shown += g[1].length; });
@@ -1026,11 +1063,12 @@
     if (online.length) {
       html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Online — ' + online.length + '</div>';
       online.forEach(f => {
-        const dot = f.away ? 'bg-amber-400' : 'bg-green-500';
-        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="' + esc(f.username) + '" data-user-id="' + (f.id || '') + '" data-friend="1">';
+        const dot = presenceDot(f);
+        const st = presenceStatus(f);
+        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-200" data-ctx-user="' + esc(f.username) + '" data-user-id="' + (f.id || '') + '" data-friend="1" title="' + esc(contactTitle(f)) + '">';
         html += '<span class="w-2 h-2 rounded-full ' + dot + '"></span>';
         html += friendAvatar(f);
-        html += '<span class="truncate">' + esc(f.username) + '</span>';
+        html += '<span class="min-w-0"><span class="block truncate">' + esc(f.username) + '</span>' + (st ? '<span class="block truncate text-[11px] text-discord-500">' + esc(st) + '</span>' : '') + '</span>';
         html += '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button></a>';
       });
       html += '</div>';
@@ -1038,7 +1076,7 @@
     if (offline.length) {
       html += '<div class="px-2 pt-2 pb-1"><div class="px-2 text-xs font-semibold text-discord-400 uppercase tracking-wide mb-1">Offline — ' + offline.length + '</div>';
       offline.forEach(f => {
-        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="' + esc(f.username) + '" data-user-id="' + (f.id || '') + '" data-friend="1">';
+        html += '<a href="/app?dm=' + encodeURIComponent(f.username) + '" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm text-discord-400 italic opacity-70" data-ctx-user="' + esc(f.username) + '" data-user-id="' + (f.id || '') + '" data-friend="1" title="' + esc(contactTitle(f)) + '">';
         html += '<span class="w-2 h-2 rounded-full bg-discord-500"></span>';
         html += friendAvatar(f);
         html += '<span class="truncate">' + esc(f.username) + '</span>';
@@ -2071,12 +2109,29 @@
   const menuBtn = document.getElementById('user-menu-btn');
   const menu = document.getElementById('user-menu');
   if (menuBtn) menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); });
+  // The header avatar and underlined status line open the same status menu.
+  ['me-header-avatar', 'me-status-line'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', (e) => { e.stopPropagation(); if (menu) menu.classList.toggle('hidden'); });
+  });
   document.addEventListener('click', () => { if (menu) menu.classList.add('hidden'); });
   const awayBtn = document.getElementById('set-away-btn');
   if (awayBtn) awayBtn.addEventListener('click', () => {
     const msg = prompt('Away message (leave empty to come back):', '');
     if (msg === null) return;
     post('/api/profile', { away: msg.trim() }, () => { window.location.reload(); });
+  });
+  // Rich status picker (Online / Away / DND / Appear Offline / Custom).
+  document.querySelectorAll('[data-status]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const body = { status_mode: btn.dataset.status };
+      if (btn.dataset.status === 'custom') {
+        const text = prompt('Custom status:', '');
+        if (text === null) return;
+        body.custom_status = text.trim();
+      }
+      post('/api/status', body, () => { window.location.reload(); });
+    });
   });
 
   // ── Right-click context menus ──────────────────────────────────────────────

@@ -244,7 +244,7 @@ final class PushService
         $senderName = (string) ($msg['username'] ?? '');
 
         $rows = Database::all(
-            'SELECT cm.user_id, u.username,
+            'SELECT cm.user_id, u.username, u.status_mode,
                     COALESCE(cn.mode, "all") AS notify_mode,
                     COALESCE(pp.channels, 1) AS push_on,
                     (SELECT 1 FROM user_mutes um
@@ -263,6 +263,10 @@ final class PushService
         $userIds = [];
         $mention = [];
         foreach ($rows as $r) {
+            // Do Not Disturb silences push for channel messages too.
+            if ((string) ($r['status_mode'] ?? '') === 'dnd') {
+                continue;
+            }
             $uid = (int) $r['user_id'];
             if (!self::channelDecision(
                 (int) $r['push_on'],

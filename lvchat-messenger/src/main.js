@@ -36,19 +36,29 @@ function trayImage () {
 }
 
 /* Show an OS notification via the main process. Windows toasts need the app's
- * AppUserModelID to be registered (set at startup); failure to create/show is
- * surfaced through the 'failed' event and logged, never thrown. */
-function showOsNotification (record, title, body, conv) {
+ * AppUserModelID to be registered (set at startup) and use the AUMID-registered
+ * app icon — a custom image can make the toast fail there, so it's skipped on
+ * Windows. failure to create/show is surfaced through the 'failed' event and
+ * logged, never thrown. $done (optional) reports the outcome for the test path. */
+function showOsNotification (record, title, body, conv, done) {
+  const report = (state) => {
+    if (typeof done === 'function') {
+      try { done(state) } catch (err) { /* ignore */ }
+    }
+  }
   try {
     if (!Notification.isSupported()) {
       console.warn('[notify] OS notifications unsupported on this system')
+      report('unsupported')
       return false
     }
     let icon
-    try {
-      const img = nativeImage.createFromPath(APP_ICON)
-      icon = img.isEmpty() ? undefined : img.resize({ width: 64, height: 64 })
-    } catch (err) { icon = undefined }
+    if (process.platform !== 'win32') {
+      try {
+        const img = nativeImage.createFromPath(APP_ICON)
+        icon = img.isEmpty() ? undefined : img.resize({ width: 64, height: 64 })
+      } catch (err) { icon = undefined }
+    }
     const options = { title: String(title || 'LVChat Messenger'), body: String(body || '') }
     if (icon) options.icon = icon
     const notification = new Notification(options)
@@ -62,14 +72,48 @@ function showOsNotification (record, title, body, conv) {
         record.win.webContents.send('msg:open-conv', conv)
       }
     })
-    notification.on('show', () => console.log('[notify] shown:', title))
-    notification.on('failed', (_e, err) => console.warn('[notify] failed:', err || 'unknown error'))
+    notification.on('show', () => {
+      console.log('[notify] shown:', title)
+      report('shown')
+    })
+    notification.on('failed', (_e, err) => {
+      console.warn('[notify] failed:', err || 'unknown error')
+      report('failed: ' + ((err && err.message) || err || 'unknown error'))
+    })
     notification.show()
     return true
   } catch (err) {
     // A broken notification daemon must never take the app down.
     console.warn('[notify] error:', err.message)
+    report('error: ' + err.message)
     return false
+  }
+}
+
+/* On Windows, toast notifications are only registered once the app has a Start
+ * Menu shortcut carrying its AppUserModelID. Installing the Setup exe creates
+ * one; when running an unpacked/portable build we create it at startup so the
+ * app still shows up in Windows notification settings and toasts can fire. */
+function ensureWindowsNotificationShortcut () {
+  if (process.platform !== 'win32') return
+  try {
+    const exe = process.execPath
+    const startMenu = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+    const lnk = path.join(startMenu, 'LVChat Messenger.lnk')
+    if (fs.existsSync(lnk)) return
+    fs.mkdirSync(startMenu, { recursive: true })
+    const esc1 = (s) => String(s).replace(/'/g, "''")
+    const ps = [
+      '$ws = New-Object -ComObject WScript.Shell',
+      "$s = $ws.CreateShortcut('" + esc1(lnk) + "')",
+      "$s.TargetPath = '" + esc1(exe) + "'",
+      "$s.WorkingDirectory = '" + esc1(path.dirname(exe)) + "'",
+      "$s.IconLocation = '" + esc1(exe) + ",0'",
+      '$s.Save()'
+    ].join('; ')
+    require('child_process').execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 20000, stdio: 'ignore' })
+  } catch (err) {
+    console.warn('[notify] could not create the Windows start-menu shortcut:', err.message)
   }
 }
 
@@ -351,6 +395,10 @@ function buildTray () {
 function rebuildTrayMenu () {
   if (!tray) return
   const items = []
+  // "Open Messenger…" first: bring the app back up (or the Profile Manager if
+  // nothing is open) without hunting through the per-profile submenus.
+  items.push({ label: 'Open Messenger…', click: () => showMessengerOrLauncher() })
+  items.push({ type: 'separator' })
   for (const p of profiles.list()) {
     const record = [...messengerWindows.values()].find((r) => r.profileId === p.id && !r.win.isDestroyed())
     items.push({
@@ -492,7 +540,9 @@ function registerIpc () {
 
   ipcMain.handle('msg:openExternal', (_e, url) => {
     if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url)
-    return { ok: true }
+    // Windows deep links (e.g. ms-settings:notifications) so we can send the
+    // user straight to the OS notification settings when toasts don't appear.
+    else if (process.platform === 'win32' && typeof url === 'string' && /^ms-settings:/i.test(url)) shell.openExternal(url)
   })
 
   // Native OS notifications requested by the messenger renderer. Shown by the
@@ -505,8 +555,20 @@ function registerIpc () {
   })
 
   ipcMain.handle('notify:test', () => {
-    const shown = showOsNotification(null, 'LVChat Messenger', 'Test notification — desktop alerts are working.')
-    return { ok: shown }
+    // Resolve with the real outcome so the settings button can show feedback.
+    return new Promise((resolve) => {
+      let done = false
+      const finish = (state) => {
+        if (done) return
+        done = true
+        resolve({ ok: state === 'shown', state })
+      }
+      const shown = showOsNotification(null, 'LVChat Messenger', 'Test notification — desktop alerts are working.', null, finish)
+      if (shown === false) finish('unsupported')
+      // Some platforms suppress toasts silently — surface that as "sent" after a
+      // grace period instead of hanging forever.
+      setTimeout(() => finish('sent'), 4000)
+    })
   })
 
   ipcMain.handle('notify:stats', () => {
@@ -587,6 +649,7 @@ app.whenReady().then(async () => {
   registerIpc()
   buildMenu()
   buildTray()
+  ensureWindowsNotificationShortcut()
 
   // The Profile Manager is only ever auto-opened when there is nothing to
   // connect to (first run). Once a profile exists it is never shown on its own

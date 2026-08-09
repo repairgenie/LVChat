@@ -62,9 +62,9 @@ final class ChatController
             [$user['id'], $user['id']]
         );
         $onlineUsers = Database::all(
-            "SELECT id, username, role, guest FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND away IS NULL
+            "SELECT id, username, role, guest, away, status_mode FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND status_mode != 'invisible'
              UNION ALL
-             SELECT id, nick, 'user', 1 FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
+             SELECT id, nick, 'user', 1, NULL, 'online' FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
              ORDER BY username"
         );
         // Name -> slug for every channel, so #channel references in messages can
@@ -91,7 +91,7 @@ final class ChatController
             $messages = MessageService::hydrateReactions(MessageService::history((int) $channel['id']), $user);
             $members = ChannelService::members((string) $channel['id']);
             foreach ($members as &$m) {
-                $m['is_online'] = Auth::isOnline($m) ? 1 : 0;
+                $m = array_merge($m, Auth::statusInfo($m));
             }
             unset($m);
             // Viewing a channel marks its unread badge read.
@@ -548,14 +548,12 @@ final class ChatController
                     MessageService::markDmRead($user, $t);
                 }
                 $out['dm'] = $t['username'];
-                $out['presence'][] = [
+                $out['presence'][] = array_merge([
                     'username' => $t['username'],
-                    'is_online' => Auth::isOnline($t) ? 1 : 0,
-                    'away' => $t['away'] ?: null,
                     'level' => 'normal',
                     'role' => $t['role'],
                     'guest' => MessageService::isGuest($t) ? 1 : 0,
-                ];
+                ], Auth::statusInfo($t));
             }
             return $out;
         }
@@ -573,10 +571,8 @@ final class ChatController
             $out['channel'] = $channel['slug'];
             $out['topic'] = $channel['topic'];
             foreach (ChannelService::members((string) $channel['id']) as $m) {
-                $out['presence'][] = [
+                $out['presence'][] = array_merge([
                     'username' => $m['username'],
-                    'is_online' => Auth::isOnline($m) ? 1 : 0,
-                    'away' => $m['away'] ?: null,
                     'level' => $m['level'],
                     'role' => $m['role'],
                     'bot' => (int) $m['bot'],
@@ -584,7 +580,7 @@ final class ChatController
                     'role_helper' => (int) ($m['role_helper'] ?? 0),
                     'role_color' => $m['role_color'] ?? null,
                     'avatar' => $m['avatar'] ?? null,
-                ];
+                ], Auth::statusInfo($m));
             }
             // Recent notifications for this channel to surface mentions/invites in a toast.
             $out['mentions'] = Database::all(

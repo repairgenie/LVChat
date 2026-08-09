@@ -225,7 +225,7 @@ final class ChannelService
     {
         return Database::all(
             "SELECT COALESCE(u.id, g.id) AS id, COALESCE(u.username, g.nick) AS username,
-                    u.away, u.away_at, COALESCE(u.last_seen, g.last_seen) AS last_seen,
+                    u.away, u.away_at, u.status_mode, u.custom_status, COALESCE(u.last_seen, g.last_seen) AS last_seen,
                     COALESCE(u.role, 'user') AS role, COALESCE(u.bot, 0) AS bot,
                     u.avatar,
                     CASE WHEN g.id IS NOT NULL THEN 1 ELSE 0 END AS guest,
@@ -243,13 +243,13 @@ final class ChannelService
         );
     }
 
-    /** Count of registered members who are currently present (not guests, not offline). */
+    /** Count of registered members who are currently present (not guests, not invisible). */
     public static function memberCount(int|string $channelId): int
     {
         return (int) Database::scalar(
             "SELECT COUNT(*) FROM channel_members cm
              JOIN users u ON u.id = cm.user_id
-             WHERE cm.channel_id = ? AND u.away IS NULL
+             WHERE cm.channel_id = ? AND u.status_mode != 'invisible'
                AND u.last_seen >= datetime('now', '-30 seconds')",
             [$channelId]
         );
@@ -260,7 +260,7 @@ final class ChannelService
         $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color, c.bg_fit, c.bg_overlay';
         // Online chatter count: members (users + guests) seen within 30s, users not away.
         $onlineSql = '((SELECT COUNT(*) FROM channel_members om JOIN users ou ON ou.id = om.user_id
-                         WHERE om.channel_id = c.id AND ou.away IS NULL AND ou.last_seen >= datetime("now", "-30 seconds"))
+                         WHERE om.channel_id = c.id AND ou.status_mode != \'invisible\' AND ou.last_seen >= datetime("now", "-30 seconds"))
                         + (SELECT COUNT(*) FROM channel_members om JOIN guests og ON og.id = om.guest_id
                          WHERE om.channel_id = c.id AND og.last_seen >= datetime("now", "-30 seconds")))';
         if (Auth::isGuest($actor)) {

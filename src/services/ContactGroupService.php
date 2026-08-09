@@ -136,7 +136,7 @@ final class ContactGroupService
     public static function members(int $groupId): array
     {
         $rows = Database::all(
-            'SELECT u.id, u.username, u.avatar, u.role, u.away, u.last_seen
+            'SELECT u.id, u.username, u.avatar, u.role, u.away, u.status_mode, u.custom_status, u.last_seen
              FROM contact_group_members m
              JOIN users u ON u.id = m.friend_id
              WHERE m.group_id = ?
@@ -144,7 +144,7 @@ final class ContactGroupService
             [$groupId]
         );
         foreach ($rows as &$m) {
-            $m['is_online'] = Auth::isOnline($m) ? 1 : 0;
+            $m = array_merge($m, Auth::statusInfo($m));
         }
         return $rows;
     }

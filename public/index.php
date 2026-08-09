@@ -78,6 +78,7 @@ $router->get('/api/csrf', [UserController::class, 'csrf']);
 $router->get('/api/online', [UserController::class, 'online']);
 $router->post('/api/password', [UserController::class, 'changePassword']);
 $router->post('/api/profile', [UserController::class, 'updateProfile']);
+$router->post('/api/status', [UserController::class, 'status']);
 $router->post('/api/avatar', [UserController::class, 'uploadAvatar']);
 $router->post('/api/avatar/remove', [UserController::class, 'removeAvatar']);
 $router->post('/api/mfa/begin', [UserController::class, 'mfaBegin']);
@@ -105,6 +106,7 @@ $router->post('/api/groups/member/add', [ContactGroupController::class, 'addMemb
 $router->post('/api/groups/member/remove', [ContactGroupController::class, 'removeMember']);
 
 // Sound alerts (user settings)
+$router->get('/api/sounds', [SoundController::class, 'sounds']);
 $router->post('/api/sound/prefs', [SoundController::class, 'prefs']);
 $router->post('/api/sound/override', [SoundController::class, 'setOverride']);
 $router->post('/api/sound/override/remove', [SoundController::class, 'removeOverride']);

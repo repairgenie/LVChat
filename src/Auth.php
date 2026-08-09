@@ -82,6 +82,8 @@ final class Auth
             'vhost' => null,
             'away' => null,
             'away_at' => null,
+            'status_mode' => 'online',
+            'custom_status' => '',
             'bot' => 0,
             'banned' => 0,
             'ban_reason' => null,
@@ -438,6 +440,68 @@ final class Auth
     public static function isOnline(array $user, int $within = 30): bool
     {
         return $user['away'] === null && !empty($user['last_seen']) && (time() - strtotime($user['last_seen'] . ' UTC')) <= $within;
+    }
+
+    public const STATUS_MODES = ['online', 'away', 'dnd', 'invisible', 'custom'];
+
+    /** Effective status mode. A legacy away flag (with no mode set) maps to 'away'. */
+    public static function statusMode(array $user): string
+    {
+        if (self::isGuest($user)) {
+            return 'online';
+        }
+        $m = (string) ($user['status_mode'] ?? '');
+        if (!in_array($m, self::STATUS_MODES, true)) {
+            $m = !empty($user['away']) ? 'away' : 'online';
+        }
+        return $m;
+    }
+
+    /** The status text shown next to the nick: custom text wins, else the away message. */
+    public static function statusText(array $user): string
+    {
+        $custom = mb_substr((string) ($user['custom_status'] ?? ''), 0, 80);
+        if ($custom !== '') {
+            return $custom;
+        }
+        if (self::statusMode($user) === 'away') {
+            return (string) ($user['away'] ?? '');
+        }
+        return '';
+    }
+
+    /** Actually connected right now, regardless of the chosen status mode. */
+    public static function actuallyOnline(array $user, int $within = 30): bool
+    {
+        return !empty($user['last_seen']) && (time() - strtotime($user['last_seen'] . ' UTC')) <= $within;
+    }
+
+    /** Whether this user appears online to others. 'invisible' hides them. */
+    public static function appearsOnline(array $user, int $within = 30): bool
+    {
+        return self::actuallyOnline($user, $within) && self::statusMode($user) !== 'invisible';
+    }
+
+    /** Whether the user set Do Not Disturb (silences their notifications). */
+    public static function isDnd(array $user): bool
+    {
+        return self::statusMode($user) === 'dnd';
+    }
+
+    /** The presence object clients render: mode, text, and the online flags. */
+    public static function statusInfo(array $user, int $within = 30): array
+    {
+        $mode = self::statusMode($user);
+        $text = self::statusText($user);
+        $appears = self::appearsOnline($user, $within);
+        return [
+            'status_mode' => $mode,
+            'custom_status' => $text,
+            'away' => $mode === 'away' ? ($text !== '' ? $text : null) : null,
+            'is_online' => $appears ? 1 : 0,
+            'dnd' => $mode === 'dnd' ? 1 : 0,
+            'invisible' => $mode === 'invisible' ? 1 : 0,
+        ];
     }
 
     /** Nick colour forced on Helper-role users (they always show green). */

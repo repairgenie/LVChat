@@ -13,7 +13,7 @@ final class UserController
         }
         json_out([
             'ok' => true,
-            'user' => [
+            'user' => array_merge([
                 'id' => (int) $u['id'],
                 'username' => $u['username'],
                 'avatar' => $u['avatar'] ?? null,
@@ -21,8 +21,28 @@ final class UserController
                 'guest' => (int) ($u['guest'] ?? 0),
                 'away' => $u['away'] ?? null,
                 'status' => $u['status'] ?? 'active',
-            ],
+            ], Auth::statusInfo($u)),
         ]);
+    }
+
+    /** POST /api/status — set the caller's presence status (online/away/dnd/invisible/custom). */
+    public static function status(): void
+    {
+        $user = Auth::require();
+        Csrf::verify();
+        $mode = (string) ($_POST['status_mode'] ?? '');
+        if (!in_array($mode, Auth::STATUS_MODES, true)) {
+            json_out(['error' => 'Invalid status mode.'], 400);
+        }
+        $custom = mb_substr(trim((string) ($_POST['custom_status'] ?? '')), 0, 80);
+        $away = $mode === 'away' ? ($custom !== '' ? $custom : null) : null;
+        Database::query(
+            'UPDATE users SET status_mode = ?, custom_status = ?, away = ?, away_at = ? WHERE id = ?',
+            [$mode, $custom, $away, $away !== null ? now() : null, $user['id']]
+        );
+        log_audit('status_set', $user['username'], $mode . ($custom !== '' ? ' — ' . $custom : ''));
+        $row = Database::row('SELECT * FROM users WHERE id = ?', [$user['id']]);
+        json_out(['ok' => true, 'status' => Auth::statusInfo($row), 'away' => $row['away']]);
     }
 
     /** GET /api/csrf — the session's CSRF token for app clients that post JSON/form bodies. */
@@ -75,8 +95,8 @@ final class UserController
     {
         $user = Auth::require();
         $rows = Database::all(
-            'SELECT id, username, away FROM users
-             WHERE last_seen >= datetime("now", "-30 seconds") AND away IS NULL AND id != ?
+            'SELECT id, username, away, status_mode, custom_status FROM users
+             WHERE last_seen >= datetime("now", "-30 seconds") AND status_mode != \'invisible\' AND id != ?
              ORDER BY username COLLATE NOCASE',
             [$user['id']]
         );

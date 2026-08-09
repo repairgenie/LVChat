@@ -11,6 +11,14 @@ final class SoundController
         return $id > 0 ? $id : null;
     }
 
+    /** GET /api/sounds — everything a client needs to play alerts: the enabled
+     *  sounds, the user's DM/channel choices, and per-sender overrides. */
+    public static function sounds(): void
+    {
+        $user = Auth::require();
+        json_out(['ok' => true] + SoundService::soundsForClient($user));
+    }
+
     /** POST /api/sound/prefs — set the DM and channel sounds (0/empty = off). */
     public static function prefs(): void
     {

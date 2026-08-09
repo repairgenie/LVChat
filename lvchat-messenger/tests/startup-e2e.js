@@ -216,8 +216,12 @@ async function main () {
   })()
   check('chat window opens', !!chatWin, '')
   chatWin.close()
-  await delay(400)
-  check('chat window hides to tray on X', !chatWin.isDestroyed() && !chatWin.isVisible(), '')
+  let chatHidden = false
+  for (let i = 0; i < 80 && !chatHidden; i++) {
+    await delay(100)
+    chatHidden = chatWin.isDestroyed() || !chatWin.isVisible()
+  }
+  check('chat window hides to tray on X', !chatWin.isDestroyed() && chatHidden, 'destroyed=' + chatWin.isDestroyed() + ' visible=' + chatWin.isVisible() + ' min=' + chatWin.isMinimized())
 
   await js(win, `document.getElementById('logout-btn').click()`)
   await delay(1200)

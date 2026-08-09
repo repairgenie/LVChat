@@ -26,7 +26,13 @@ const state = {
   dirTimer: null,
   chatWindow: false, // this window is a dedicated conversation window (Compact)
   viewMode: 'compact', // 'compact' | 'advanced' (persisted in prefs)
-  _chatTarget: null
+  _chatTarget: null,
+  offline: false, // the messenger has no connection to the server
+  sendQueue: [], // offline-sent messages, delivered in order on reconnect
+  _localId: 0, // counter for locally-pending (unsent) message ids
+  flushing: false,
+  sounds: null, // { list:{id:{name,url}}, dm:id|null, channel:id|null, overrides:{uid:id|null} }
+  audioEl: null
 }
 
 /* OS-notification engine state. Only the buddy-list window alerts; dedicated
@@ -94,9 +100,42 @@ function avatarEl (name, avatar, size) {
 }
 
 function statusClass (user) {
-  if (user && user.away) return 'away'
-  if (user && user.is_online) return 'online'
-  return 'offline'
+  if (!user) return 'offline'
+  if (user.invisible || !user.is_online) return 'offline'
+  if (user.status_mode === 'dnd') return 'dnd'
+  if (user.status_mode === 'away' || user.away) return 'away'
+  return 'online'
+}
+
+/* Short status text (custom status or away message) to show under a nick. */
+function statusText (user) {
+  const t = String((user && (user.custom_status != null ? user.custom_status : user.away)) || '').trim()
+  return t.length > 60 ? t.slice(0, 59) + '…' : t
+}
+
+function statusLabel (mode) {
+  return ({ online: 'Online', away: 'Away', dnd: 'Do Not Disturb', invisible: 'Appear Offline', custom: 'Custom status' })[mode || 'online'] || 'Online'
+}
+
+/* The avatar status-dot color for a mode: green online, yellow away/custom,
+ * red DND, grey appear-offline. */
+function statusDotClass (mode) {
+  if (mode === 'dnd') return 'dnd'
+  if (mode === 'away' || mode === 'custom') return 'away'
+  if (mode === 'invisible') return 'offline'
+  return 'online'
+}
+
+/* Native-title tooltip for a contact: nick + status + status text. */
+function contactTitle (user) {
+  const name = user && user.username ? user.username : '?'
+  if (user && user.invisible) return name + ' — Appear Offline'
+  if (user && !user.is_online && !user.away) return name + ' — Offline'
+  const mode = (user && user.status_mode) || (user && user.away ? 'away' : 'online')
+  let t = name + ' — ' + statusLabel(mode)
+  const st = statusText(user)
+  if (st) t += ' — ' + st
+  return t
 }
 
 /* ── Modal dialogs (prompt / confirm / alert) ─────────────── */
@@ -306,12 +345,23 @@ async function startMain (me) {
   state.me = me
   $('#me-name').textContent = me.username
   $('#me-avatar').replaceChildren(avatarEl(me.username, me.avatar))
-  $('#me-status').textContent = 'online'
+  const stDot = document.createElement('span')
+  stDot.className = 'avatar-status'
+  $('#me-avatar').appendChild(stDot)
+  updateMeStatus()
 
   // Session is live — close the profile manager window.
   window.msg.loginComplete()
 
   showView('main')
+
+  // Restore any messages queued while the messenger was offline, and watch for
+  // connectivity changes so queued sends flush the moment we're back online.
+  loadSendQueue()
+  window.addEventListener('online', () => setOffline(false))
+  window.addEventListener('offline', () => setOffline(true))
+  if (navigator.onLine) flushSendQueue()
+  else setOffline(true)
 
   if (state.chatWindow && state._chatTarget) {
     try {
@@ -325,6 +375,7 @@ async function startMain (me) {
   } catch (err) { /* keep going; the poll loop re-renders */ }
   await startPoll()
   await initNotifications()
+  await initSounds()
   initWs()
   try {
     renderAll()
@@ -377,7 +428,16 @@ async function pollTick () {
       showLoginError('Your session has expired. Please sign in again.')
       return
     }
-    if (!j.ok || !j.body) return
+    // status 0 = the fetch failed (offline / server unreachable).
+    if (j.status === 0) {
+      setOffline(true)
+      return
+    }
+    if (!j.ok || !j.body) {
+      setOffline(false)
+      return
+    }
+    setOffline(false)
     handlePoll(j.body)
     // A dedicated room window keeps the server-side unread watermark advanced
     // so the buddy-list window's badge stays clear while this window is open.
@@ -386,6 +446,7 @@ async function pollTick () {
     }
   } catch (err) {
     /* transient network error — keep polling */
+    setOffline(true)
   } finally {
     state.pollBusy = false
   }
@@ -460,6 +521,7 @@ function checkAlerts (body) {
   if (state.chatWindow) return
   try { window.msg.setUnread(totalUnread()) } catch (err) { /* ignore */ }
   const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true
+  const meDnd = !!(state.me && state.me.status_mode === 'dnd')
 
   // First poll: seed the watermark/prev state silently so pre-existing unread
   // messages, invites and background chatter never fire an alert.
@@ -481,8 +543,13 @@ function checkAlerts (body) {
       const now = Number(d.unread) || 0
       notif.prevDm[key] = now
       if (now <= prev || now === 0) continue
-      if (notif.prefs.dms !== 1) continue
       if (focused && state.open && state.open.type === 'dm' && String(state.open.id).toLowerCase() === key) continue
+      // Do Not Disturb silences the audio + OS alert for this user.
+      if (meDnd) continue
+      // Audio alert fires whenever a new DM lands; the OS notification is a
+      // separate toggle so users can mute one without the other.
+      playSound(effectiveSound(d.user_id, state.sounds && state.sounds.dm))
+      if (notif.prefs.dms !== 1) continue
       const content = truncateNotify(d.last_content)
       notify({
         title: 'DM from ' + d.username,
@@ -497,8 +564,10 @@ function checkAlerts (body) {
       const id = Number(m.id) || 0
       if (id <= notif.bgMax) continue
       notif.bgMax = id
-      if (notif.prefs.channels !== 1) continue
       if (focused && state.open && state.open.type === 'room' && String(state.open.id).toLowerCase() === String(m.channel_slug || '').toLowerCase()) continue
+      if (meDnd) continue
+      playSound(effectiveSound(m.sender_id, state.sounds && state.sounds.channel))
+      if (notif.prefs.channels !== 1) continue
       const slug = m.channel_slug || 'channel'
       notify({
         title: '#' + slug,
@@ -524,6 +593,8 @@ async function pollNotificationsFeed () {
     if (notif.feedSeen.has(n.id)) continue
     notif.feedSeen.add(n.id)
     if (seed) continue
+    // Do Not Disturb silences these alerts too.
+    if (state.me && state.me.status_mode === 'dnd') continue
     if (kind === 'friend_request') {
       notify({ title: 'Friend request', body: (n.sender || 'Someone') + ' sent you a friend request', conv: { type: 'dm', id: n.sender } })
     } else if (kind === 'friend_accepted') {
@@ -533,6 +604,7 @@ async function pollNotificationsFeed () {
       notify({ title: 'Channel invite', body: 'You were invited to ' + (n.channel_name || 'a channel') + (n.sender ? ' by ' + n.sender : '') })
     } else if (kind === 'mention') {
       if (notif.prefs.channels !== 1) continue
+      playSound(effectiveSound(n.sender_id, state.sounds && state.sounds.channel))
       notify({ title: 'Mentioned you', body: (n.sender ? '@' + n.sender : 'Someone') + (n.channel_name ? ' in ' + n.channel_name : '') })
     }
   }
@@ -540,13 +612,16 @@ async function pollNotificationsFeed () {
 }
 
 async function initNotifications () {
+  let prefs = loadLocalNotifyPrefs()
   try {
     const j = await LvApi.getJson('/api/push/prefs')
     if (j.ok && j.body && j.body.prefs) {
       const p = j.body.prefs
-      notif.prefs = { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 }
+      prefs = { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 }
+      persistLocalNotifyPrefs(prefs)
     }
-  } catch (err) { /* defaults stay on */ }
+  } catch (err) { /* server endpoint unavailable — local prefs stand */ }
+  notif.prefs = prefs
   notif.feedTimer = setInterval(pollNotificationsFeed, 4000)
   pollNotificationsFeed()
 }
@@ -556,6 +631,125 @@ function stopNotifications () {
     clearInterval(notif.feedTimer)
     notif.feedTimer = null
   }
+}
+
+/* ── Audio alerts (sound notifications) ──────────────────────
+ * Loads the server's sound list + the user's DM/channel choices and per-sender
+ * overrides once at startup, and ALWAYS ships three built-in tones so audio
+ * alerts work even when the server hasn't deployed the sounds endpoint yet.
+ * A per-sender override wins over the context default; a null override means
+ * that sender is muted. */
+
+/* Synthesize a tiny PCM WAV (16-bit mono) as a data URL — no binary assets. */
+function wavDataUrl (freq, dur) {
+  const rate = 22050
+  const n = Math.round(dur * rate)
+  const samples = new Uint8Array(n * 2)
+  for (let i = 0; i < n; i++) {
+    const t = i / rate
+    const env = Math.exp(-3.2 * (t / dur))
+    const v = Math.sin(2 * Math.PI * freq * t) * env * 0.45
+    const val = Math.round(Math.max(-1, Math.min(1, v)) * 32767) & 0xFFFF
+    samples[i * 2] = val & 0xFF
+    samples[i * 2 + 1] = (val >> 8) & 0xFF
+  }
+  const dataSize = samples.length
+  const buf = new ArrayBuffer(44 + dataSize)
+  const dv = new DataView(buf)
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)) }
+  str(0, 'RIFF'); dv.setUint32(4, 36 + dataSize, true); str(8, 'WAVE')
+  str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true)
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true)
+  str(36, 'data'); dv.setUint32(40, dataSize, true)
+  new Uint8Array(buf, 44).set(samples)
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return 'data:audio/wav;base64,' + btoa(bin)
+}
+
+function builtinSounds () {
+  return {
+    'builtin-ding': { name: 'Ding', url: wavDataUrl(880, 0.4) },
+    'builtin-pop': { name: 'Pop', url: wavDataUrl(1175, 0.18) },
+    'builtin-chime': { name: 'Chime', url: wavDataUrl(660, 0.55) }
+  }
+}
+
+function soundPrefsKey () {
+  return 'lvcmsg.sound.' + (state.profile ? state.profile.id : '')
+}
+
+function loadLocalSoundPrefs () {
+  try {
+    const j = JSON.parse(localStorage.getItem(soundPrefsKey()) || '{}')
+    return { dm: j.dm, channel: j.channel }
+  } catch (err) {
+    return { dm: null, channel: null }
+  }
+}
+
+function persistLocalSoundPrefs (dm, channel) {
+  try {
+    localStorage.setItem(soundPrefsKey(), JSON.stringify({ dm, channel }))
+  } catch (err) { /* ignore */ }
+}
+
+async function initSounds () {
+  const builtin = builtinSounds()
+  const local = loadLocalSoundPrefs()
+  let server = null
+  try {
+    const j = await LvApi.getJson('/api/sounds')
+    if (j.ok && j.body && j.body.sounds && Object.keys(j.body.sounds).length) server = j.body
+  } catch (err) { server = null }
+
+  const list = {}
+  if (server) {
+    for (const id of Object.keys(server.sounds)) list[id] = server.sounds[id]
+  }
+  for (const id of Object.keys(builtin)) {
+    if (!list[id]) list[id] = builtin[id]
+  }
+
+  // Server prefs win when the server has sounds; otherwise use local choices,
+  // defaulting to a built-in tone so audio alerts work out of the box.
+  let dm = local.dm || 'builtin-ding'
+  let channel = local.channel || 'builtin-pop'
+  if (server) {
+    if (server.dm_sound_id != null) dm = Number(server.dm_sound_id) > 0 ? String(server.dm_sound_id) : null
+    if (server.channel_sound_id != null) channel = Number(server.channel_sound_id) > 0 ? String(server.channel_sound_id) : null
+  }
+  if (dm && !list[dm]) dm = 'builtin-ding'
+  if (channel && !list[channel]) channel = 'builtin-pop'
+
+  state.sounds = { list, dm, channel, overrides: (server && server.overrides) || {} }
+}
+
+function soundUrl (soundId) {
+  const s = state.sounds && state.sounds.list[soundId]
+  return s ? LvApi.abs(s.url) : ''
+}
+
+function playSound (soundId) {
+  if (soundId == null) return
+  const url = soundUrl(soundId)
+  if (!url) return
+  try {
+    if (!state.audioEl) state.audioEl = new Audio()
+    state.audioEl.src = url
+    state.audioEl.currentTime = 0
+    state.audioEl.play().catch(() => {})
+  } catch (err) { /* audio unavailable — never crash on an alert */ }
+}
+
+/* The sound to play for a message from $senderUid: a per-sender override wins
+ * (null = that sender is muted); otherwise the context default. */
+function effectiveSound (senderUid, fallback) {
+  if (!state.sounds) return null
+  const ov = senderUid != null ? state.sounds.overrides[senderUid] : undefined
+  if (ov !== undefined) return ov == null ? null : Number(ov)
+  return fallback
 }
 
 /* ── WebSocket real-time ─────────────────────────────────────
@@ -676,7 +870,7 @@ function applyMessages (messages) {
     changed = true
   }
   if (changed) {
-    state.messages.sort((a, b) => Number(a.id) - Number(b.id))
+    sortMessages()
     renderStream()
   }
 }
@@ -684,6 +878,7 @@ function applyMessages (messages) {
 /* ── Conversation switching ───────────────────────────────── */
 
 async function openConversation (type, id) {
+  hidePickers()
   state.open = {
     type,
     id,
@@ -752,16 +947,26 @@ function friendAvatar (username) {
 function makeContact (user, opts) {
   const wrap = document.createElement('div')
   wrap.className = 'contact' + (user.is_online || user.away ? '' : ' off') + (opts.selected ? ' selected' : '')
-  wrap.title = user.username
+  wrap.title = contactTitle(user)
 
   const dot = document.createElement('div')
   dot.className = 'dot ' + statusClass(user)
   const avatar = avatarEl(user.username, user.avatar, '28px')
+  const info = document.createElement('div')
+  info.className = 'contact-name-col'
   const name = document.createElement('div')
   name.className = 'contact-name'
   name.textContent = user.username
+  info.appendChild(name)
+  const st = statusText(user)
+  if (st) {
+    const sub = document.createElement('div')
+    sub.className = 'contact-status'
+    sub.textContent = st
+    info.appendChild(sub)
+  }
 
-  wrap.append(dot, avatar, name)
+  wrap.append(dot, avatar, info)
 
   const unread = unreadFor(user.username)
   if (unread > 0) {
@@ -1411,8 +1616,9 @@ function renderChat () {
   if (open.type === 'dm') {
     title.textContent = open.id
     const p = open.presence || {}
-    const online = p.is_online ? 'online' : (p.away ? 'away' : 'offline')
-    sub.textContent = online
+    const st = statusText(p)
+    const label = p.status_mode ? statusLabel(p.status_mode) : (p.is_online ? 'Online' : (p.away ? 'Away' : 'Offline'))
+    sub.textContent = label + (st ? ' — ' + st : '')
     membersBtn.hidden = true
     $('#members').hidden = true
   } else {
@@ -1441,13 +1647,24 @@ function renderMembers () {
   for (const m of members) {
     const row = document.createElement('div')
     row.className = 'contact'
+    row.title = contactTitle(m)
     const dot = document.createElement('div')
-    dot.className = 'dot online'
+    dot.className = 'dot ' + statusClass(m)
     const avatar = avatarEl(m.username, m.avatar, '28px')
+    const info = document.createElement('div')
+    info.className = 'contact-name-col'
     const name = document.createElement('div')
     name.className = 'contact-name'
-    name.textContent = m.username + (m.away ? ' (away)' : '')
-    row.append(dot, avatar, name)
+    name.textContent = m.username
+    info.appendChild(name)
+    const st = statusText(m)
+    if (st) {
+      const sub = document.createElement('div')
+      sub.className = 'contact-status'
+      sub.textContent = st
+      info.appendChild(sub)
+    }
+    row.append(dot, avatar, info)
     row.addEventListener('click', () => openConversationOrWindow('dm', m.username))
     panel.appendChild(row)
   }
@@ -1503,7 +1720,7 @@ function buildMessageEl (m) {
   }
 
   const mine = isMine(m)
-  wrap.className = 'msg' + (mine ? ' mine' : '') + (kind === 'action' ? ' action' : '')
+  wrap.className = 'msg' + (mine ? ' mine' : '') + (kind === 'action' ? ' action' : '') + (m.pending ? ' pending' : '')
 
   const avatar = avatarEl(m.username, friendAvatar(m.username), '30px')
   const body = document.createElement('div')
@@ -1518,6 +1735,12 @@ function buildMessageEl (m) {
   time.className = 'msg-time'
   time.textContent = formatTime(m.created_at)
   meta.append(author, time)
+  if (m.pending) {
+    const pend = document.createElement('span')
+    pend.className = 'msg-pending'
+    pend.textContent = 'Pending'
+    meta.appendChild(pend)
+  }
   body.appendChild(meta)
 
   const bubble = document.createElement('div')
@@ -1695,6 +1918,274 @@ function mentionAcOpen () {
   return !$('#mention-ac').hidden
 }
 
+/* ── Offline message queue ──────────────────────────────────
+ * While the messenger has no connection, messages the user sends (text, GIF or
+ * image) are shown immediately as "Pending" and queued in localStorage (per
+ * profile). On reconnect the queue is flushed in order — each message is only
+ * dropped once the server accepts it — so nothing sent while offline is lost,
+ * and messages delivered to the server while the user was away are pulled in by
+ * the normal poll. */
+
+function queueStorageKey () {
+  return 'lvcmsg.offline.queue.' + (state.profile ? state.profile.id : '')
+}
+
+function loadSendQueue () {
+  try {
+    state.sendQueue = JSON.parse(localStorage.getItem(queueStorageKey()) || '[]') || []
+  } catch (err) {
+    state.sendQueue = []
+  }
+}
+
+function persistSendQueue () {
+  try {
+    localStorage.setItem(queueStorageKey(), JSON.stringify(state.sendQueue))
+  } catch (err) { /* quota exceeded / storage unavailable — keep going */ }
+}
+
+function setOffline (off) {
+  off = !!off
+  if (state.offline === off) return
+  state.offline = off
+  const banner = $('#offline-banner')
+  if (banner) banner.hidden = !off
+  updateMeStatus()
+  if (!off) flushSendQueue()
+}
+
+/* Reflect the caller's chosen status (or connectivity) in the sidebar header. */
+function updateMeStatus () {
+  const el = $('#me-status')
+  if (!el) return
+  el.classList.remove('online', 'away', 'dnd', 'offline')
+  let mode = (state.me && state.me.status_mode) || 'online'
+  if (state.offline) mode = 'invisible'
+  el.textContent = state.offline ? 'Offline' : statusLabel(mode) + (statusText(state.me) ? ' — ' + statusText(state.me) : '')
+  el.classList.add(mode === 'invisible' ? 'offline' : (mode === 'dnd' ? 'dnd' : (mode === 'away' || mode === 'custom' ? 'away' : 'online')))
+  const dot = $('#me-avatar .avatar-status')
+  if (dot) {
+    dot.classList.remove('online', 'away', 'dnd', 'offline')
+    dot.classList.add(state.offline ? 'offline' : statusDotClass(mode))
+  }
+}
+
+function openStatusMenu () {
+  const menu = $('#status-menu')
+  if (!menu) return
+  menu.replaceChildren()
+  const modes = [
+    ['online', 'Online'],
+    ['away', 'Away'],
+    ['dnd', 'Do Not Disturb'],
+    ['invisible', 'Appear Offline'],
+    ['custom', 'Custom status…']
+  ]
+  const current = (state.me && state.me.status_mode) || 'online'
+  for (const [mode, label] of modes) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'ctx-item' + (mode === current ? ' checked' : '')
+    b.textContent = label
+    b.addEventListener('click', () => {
+      menu.hidden = true
+      if (mode === 'custom') setCustomStatus()
+      else setMyStatus(mode)
+    })
+    menu.appendChild(b)
+  }
+  menu.hidden = false
+}
+
+async function setMyStatus (mode, custom) {
+  const body = { status_mode: mode }
+  if (custom != null) body.custom_status = custom
+  const r = await LvApi.postForm('/api/status', body)
+  if (r.ok && r.body && r.body.status) {
+    const s = r.body.status
+    if (state.me) {
+      state.me.status_mode = s.status_mode
+      state.me.custom_status = s.custom_status
+      state.me.away = s.away
+      state.me.dnd = s.dnd
+      state.me.invisible = s.invisible
+      state.me.is_online = s.is_online
+    }
+    updateMeStatus()
+  } else {
+    await appAlert((r.body && r.body.error) || 'Could not update your status.')
+  }
+}
+
+async function setCustomStatus () {
+  const text = await appPrompt('Custom status:', state.me && state.me.custom_status ? state.me.custom_status : '', 'e.g. busy, streaming, sleeping…')
+  if (text === null) return
+  setMyStatus('custom', text)
+}
+
+function fileToDataUrl (file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result))
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(file)
+  })
+}
+
+function dataUrlToFile (dataUrl, name) {
+  return new Promise((resolve, reject) => {
+    try {
+      const parts = String(dataUrl).split(',')
+      const mime = /^data:([^;]+);/.exec(parts[0])
+      const bin = atob(parts[1] || '')
+      const buf = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
+      resolve(new File([buf], name || 'image.png', { type: mime ? mime[1] : 'image/png' }))
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+/* Keep pending (unsent) messages at the end of the stream; everything else is
+ * ordered by server id. */
+function sortMessages () {
+  state.messages.sort((a, b) => {
+    const ap = a.pending ? 1 : 0
+    const bp = b.pending ? 1 : 0
+    if (ap !== bp) return ap - bp
+    return Number(a.id) - Number(b.id)
+  })
+}
+
+function pendingMsg (desc, localId) {
+  return {
+    id: -localId,
+    pending: true,
+    kind: desc.kind,
+    content: desc.content || '',
+    created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    username: state.me ? state.me.username : 'me',
+    sender_id: state.me ? state.me.id : 0,
+    role: 'user',
+    guest: 0,
+    is_pm: state.open ? state.open.type === 'dm' : false,
+    channel: state.open && state.open.type === 'room' ? state.open.id : undefined
+  }
+}
+
+function removePending (localId) {
+  const idx = state.messages.findIndex((m) => m.id === -localId)
+  if (idx !== -1) {
+    state.messages.splice(idx, 1)
+    renderStream()
+  }
+}
+
+/* Post a message (or upload an image). Returns the LvApi result object; a
+ * network failure surfaces as { status: 0 }. */
+async function postFromDesc (desc) {
+  if (desc.kind === 'image') {
+    if (!desc.image) return { status: 0 }
+    const file = await dataUrlToFile(desc.image, desc.fileName)
+    const fd = new FormData()
+    fd.set('file', file, file.name)
+    if (desc.payload.recipient) fd.set('dm', desc.payload.recipient)
+    else fd.set('channel', desc.payload.channel)
+    return LvApi.upload('/api/upload', fd)
+  }
+  return LvApi.postForm('/api/send', desc.payload)
+}
+
+/* Show the message as pending, then deliver it now if we're online (removing
+ * the pending bubble once the server confirms) or queue it if we're offline. */
+async function deliverOrQueue (desc) {
+  if (!state.open) return false
+  const localId = ++state._localId
+  if (desc.kind === 'gif') {
+    desc.content = desc.payload.gif_url + (desc.payload.gif_title ? '\n' + desc.payload.gif_title : '')
+  } else if (desc.kind === 'image') {
+    desc.content = desc.image || ''
+  } else {
+    desc.content = desc.payload.content || ''
+  }
+  state.messages.push(pendingMsg(desc, localId))
+  sortMessages()
+  renderStream()
+  scrollStream()
+
+  if (state.offline || navigator.onLine === false) {
+    enqueueSend(desc, localId)
+    return false
+  }
+  const r = await postFromDesc(desc)
+  if (r.status === 0) {
+    enqueueSend(desc, localId)
+    setOffline(true)
+    return false
+  }
+  if (r.ok && r.body && r.body.message) {
+    removePending(localId)
+    applyMessages([r.body.message])
+    return true
+  }
+  removePending(localId)
+  await appAlert((r.body && r.body.error) || 'Message failed to send.')
+  return false
+}
+
+function enqueueSend (desc, localId) {
+  const item = { id: localId, at: Date.now(), payload: desc.payload }
+  if (desc.kind === 'image' && desc.image) {
+    item.payload._image = desc.image
+    item.payload._fileName = desc.fileName
+  }
+  state.sendQueue.push(item)
+  persistSendQueue()
+  setOffline(true)
+}
+
+/* Flush the queue in order on reconnect. A network blip keeps the item queued;
+ * a server rejection drops it after surfacing the error. */
+async function flushSendQueue () {
+  if (state.flushing || !state.sendQueue.length || navigator.onLine === false) return
+  state.flushing = true
+  try {
+    while (state.sendQueue.length) {
+      const item = state.sendQueue[0]
+      let r
+      if (item.payload._image) {
+        try {
+          r = await postFromDesc({ kind: 'image', image: item.payload._image, fileName: item.payload._fileName, payload: item.payload })
+        } catch (err) {
+          r = { status: 0 }
+        }
+      } else {
+        r = await postFromDesc({ kind: 'message', payload: item.payload })
+      }
+      if (r.status === 0) {
+        setOffline(true)
+        return
+      }
+      state.sendQueue.shift()
+      persistSendQueue()
+      if (r.ok && r.body && r.body.message) {
+        removePending(item.id)
+        const sentTo = item.payload.recipient || item.payload.channel
+        if (state.open && sentTo && String(state.open.id).toLowerCase() === String(sentTo).toLowerCase()) {
+          applyMessages([r.body.message])
+        }
+      } else if (r.body && r.body.error) {
+        removePending(item.id)
+        await appAlert('A queued message could not be delivered: ' + r.body.error)
+      }
+    }
+    setOffline(false)
+  } finally {
+    state.flushing = false
+  }
+}
+
 /* ── Composer ─────────────────────────────────────────────── */
 
 async function sendMessage (content) {
@@ -1704,13 +2195,7 @@ async function sendMessage (content) {
   const data = { content: trimmed }
   if (state.open.type === 'dm') data.recipient = state.open.id
   else data.channel = state.open.id
-  const r = await LvApi.postForm('/api/send', data)
-  if (r.ok && r.body && r.body.message) {
-    applyMessages([r.body.message])
-  } else {
-    const err = (r.body && r.body.error) || 'Message failed to send.'
-    await appAlert(err)
-  }
+  await deliverOrQueue({ kind: 'message', payload: data })
 }
 
 async function sendGif (gif) {
@@ -1718,27 +2203,20 @@ async function sendGif (gif) {
   const data = { gif_url: gif.url, gif_title: gif.title || '' }
   if (state.open.type === 'dm') data.recipient = state.open.id
   else data.channel = state.open.id
-  const r = await LvApi.postForm('/api/send', data)
-  if (r.ok && r.body && r.body.message) {
-    applyMessages([r.body.message])
-    hidePickers()
-  } else {
-    await appAlert((r.body && r.body.error) || 'Could not send the GIF.')
-  }
+  const ok = await deliverOrQueue({ kind: 'gif', payload: data })
+  if (ok) hidePickers()
 }
 
 async function sendImage (file) {
   if (!state.open || !file) return
-  const fd = new FormData()
-  fd.set('file', file, file.name || 'image')
-  if (state.open.type === 'dm') fd.set('dm', state.open.id)
-  else fd.set('channel', state.open.id)
-  const r = await LvApi.upload('/api/upload', fd)
-  if (r.ok && r.body && r.body.message) {
-    applyMessages([r.body.message])
-  } else {
-    await appAlert((r.body && r.body.error) || 'Image upload failed.')
-  }
+  let dataUrl = null
+  try {
+    dataUrl = await fileToDataUrl(file)
+  } catch (err) { /* fall through with null — pending bubble shows a placeholder */ }
+  const payload = {}
+  if (state.open.type === 'dm') payload.recipient = state.open.id
+  else payload.channel = state.open.id
+  await deliverOrQueue({ kind: 'image', image: dataUrl, fileName: file.name || 'image.png', payload })
 }
 
 function hidePickers () {
@@ -1877,9 +2355,138 @@ async function toggleHeadMenu (force) {
   }
 
   add('Profile manager', () => window.msg.showLauncher())
+  add('Settings', openSettings)
   add('Sign out', doLogout, true)
   add('Quit LVChat Messenger', () => window.msg.quit(), true)
   menu.hidden = false
+}
+
+/* ── Settings (notification + sound preferences) ───────────── */
+
+/* Notifications preference store. The server is authoritative when it answers;
+ * these local copies keep the toggles working on servers that haven't deployed
+ * the push-prefs endpoint yet. */
+function notifyPrefsKey () {
+  return 'lvcmsg.notify.' + (state.profile ? state.profile.id : '')
+}
+
+function loadLocalNotifyPrefs () {
+  try {
+    const j = JSON.parse(localStorage.getItem(notifyPrefsKey()) || '{}')
+    return {
+      channels: j.channels === 0 ? 0 : 1,
+      dms: j.dms === 0 ? 0 : 1,
+      invites: j.invites === 0 ? 0 : 1
+    }
+  } catch (err) {
+    return { channels: 1, dms: 1, invites: 1 }
+  }
+}
+
+function persistLocalNotifyPrefs (p) {
+  try {
+    localStorage.setItem(notifyPrefsKey(), JSON.stringify({ channels: p.channels, dms: p.dms, invites: p.invites }))
+  } catch (err) { /* ignore */ }
+}
+
+function fillSoundSelect (select, chosenId) {
+  const cur = String(select.value || '0')
+  select.replaceChildren()
+  const off = document.createElement('option')
+  off.value = '0'
+  off.textContent = 'Off'
+  select.appendChild(off)
+  const list = (state.sounds && state.sounds.list) || {}
+  for (const id of Object.keys(list)) {
+    const opt = document.createElement('option')
+    opt.value = id
+    opt.textContent = list[id].name || 'Sound ' + id
+    select.appendChild(opt)
+  }
+  const wanted = chosenId != null ? String(chosenId) : cur
+  select.value = list[wanted] ? wanted : (list[cur] ? cur : '0')
+  if (!list[select.value]) select.value = '0'
+}
+
+function openSettings () {
+  $('#set-notify-dms').checked = notif.prefs.dms === 1
+  $('#set-notify-channels').checked = notif.prefs.channels === 1
+  $('#set-notify-invites').checked = notif.prefs.invites === 1
+  $('#settings-status').hidden = true
+
+  const sounds = state.sounds
+  const dmOn = !!sounds && sounds.dm != null
+  const chOn = !!sounds && sounds.channel != null
+  $('#set-sound-dm-on').checked = dmOn
+  $('#set-sound-channel-on').checked = chOn
+  fillSoundSelect($('#set-sound-dm'), sounds ? sounds.dm : null)
+  fillSoundSelect($('#set-sound-channel'), sounds ? sounds.channel : null)
+  $('#set-sound-dm').disabled = !dmOn
+  $('#set-sound-channel').disabled = !chOn
+  $('#settings-modal').hidden = false
+}
+
+function closeSettings () {
+  $('#settings-modal').hidden = true
+}
+
+/* Whether the messenger is running on Windows (for OS notification guidance). */
+function isWindows () {
+  try { return /win/i.test(String(window.msg.platform)) } catch (err) { return /win/i.test(navigator.platform) }
+}
+
+function openSettings () {
+  $('#set-notify-dms').checked = notif.prefs.dms === 1
+  $('#set-notify-channels').checked = notif.prefs.channels === 1
+  $('#set-notify-invites').checked = notif.prefs.invites === 1
+  $('#settings-status').hidden = true
+  // Windows toasts depend on an OS-level toggle we can't read — always point
+  // the user at the right place.
+  const winHint = $('#win-notify-hint')
+  if (winHint) winHint.hidden = !isWindows()
+
+  const sounds = state.sounds
+  const dmOn = !!sounds && sounds.dm != null
+  const chOn = !!sounds && sounds.channel != null
+  $('#set-sound-dm-on').checked = dmOn
+  $('#set-sound-channel-on').checked = chOn
+  fillSoundSelect($('#set-sound-dm'), sounds ? sounds.dm : null)
+  fillSoundSelect($('#set-sound-channel'), sounds ? sounds.channel : null)
+  $('#set-sound-dm').disabled = !dmOn
+  $('#set-sound-channel').disabled = !chOn
+  $('#settings-modal').hidden = false
+}
+
+async function saveNotifyPrefs () {
+  const prefs = {
+    channels: $('#set-notify-channels').checked ? 1 : 0,
+    dms: $('#set-notify-dms').checked ? 1 : 0,
+    invites: $('#set-notify-invites').checked ? 1 : 0
+  }
+  notif.prefs = prefs
+  persistLocalNotifyPrefs(prefs)
+  try {
+    await LvApi.postForm('/api/push/prefs', { channels: String(prefs.channels), dms: String(prefs.dms), invites: String(prefs.invites) })
+  } catch (err) { /* server endpoint unavailable — local prefs stand */ }
+}
+
+async function saveSoundPrefs () {
+  const dmOn = $('#set-sound-dm-on').checked
+  const chOn = $('#set-sound-channel-on').checked
+  const dmVal = dmOn ? $('#set-sound-dm').value : '0'
+  const chVal = chOn ? $('#set-sound-channel').value : '0'
+  $('#set-sound-dm').disabled = !dmOn
+  $('#set-sound-channel').disabled = !chOn
+  const dm = dmOn && dmVal !== '0' ? dmVal : null
+  const channel = chOn && chVal !== '0' ? chVal : null
+  if (state.sounds) {
+    state.sounds.dm = dm
+    state.sounds.channel = channel
+  }
+  persistLocalSoundPrefs(dm, channel)
+  try {
+    await LvApi.postForm('/api/sound/prefs', { dm_sound: dmVal, channel_sound: chVal })
+  } catch (err) { /* server endpoint unavailable — local prefs stand */ }
 }
 
 /* ── Resizable sidebar ────────────────────────────────────── */
@@ -1997,12 +2604,76 @@ function wireEvents () {
   })
 
   $('#theme-toggle').addEventListener('click', toggleTheme)
+  $('#me-status').addEventListener('click', (e) => {
+    e.stopPropagation()
+    $('#head-menu').hidden = true
+    const menu = $('#status-menu')
+    if (menu.hidden) openStatusMenu()
+    else menu.hidden = true
+  })
+  $('#me-avatar').addEventListener('click', (e) => {
+    e.stopPropagation()
+    $('#head-menu').hidden = true
+    const menu = $('#status-menu')
+    if (menu.hidden) openStatusMenu()
+    else menu.hidden = true
+  })
   $('#view-mode-btn').addEventListener('click', toggleViewMode)
   $('#profile-manager').addEventListener('click', () => window.msg.showLauncher())
   $('#logout-btn').addEventListener('click', doLogout)
   $('#menu-btn').addEventListener('click', (e) => {
     e.stopPropagation()
     toggleHeadMenu()
+  })
+
+  // Settings modal.
+  $('#settings-close').addEventListener('click', closeSettings)
+  $('#settings-modal .modal-backdrop').addEventListener('click', closeSettings)
+  $('#win-notify-settings').addEventListener('click', () => {
+    try { window.msg.openExternal('ms-settings:notifications') } catch (err) { /* bridge missing */ }
+  })
+  $('#set-notify-dms').addEventListener('change', saveNotifyPrefs)
+  $('#set-notify-channels').addEventListener('change', saveNotifyPrefs)
+  $('#set-notify-invites').addEventListener('change', saveNotifyPrefs)
+  $('#set-sound-dm-on').addEventListener('change', () => {
+    $('#set-sound-dm').disabled = !$('#set-sound-dm-on').checked
+    saveSoundPrefs()
+  })
+  $('#set-sound-channel-on').addEventListener('change', () => {
+    $('#set-sound-channel').disabled = !$('#set-sound-channel-on').checked
+    saveSoundPrefs()
+  })
+  $('#set-sound-dm').addEventListener('change', saveSoundPrefs)
+  $('#set-sound-channel').addEventListener('change', saveSoundPrefs)
+  $('#set-notify-test').addEventListener('click', async () => {
+    const status = $('#settings-status')
+    status.hidden = false
+    status.textContent = 'Sending…'
+    try {
+      const r = await window.msg.testNotification()
+      const stats = await window.msg.notifyStats()
+      const state = (r && r.state) || ''
+      if (r && r.ok === false && (state === 'unsupported' || (stats && stats.supported === false))) {
+        status.textContent = isWindows()
+          ? 'Notifications are not supported on this system. Install via the Setup installer so they can be registered, then enable them in Windows notification settings.'
+          : 'Notifications are not supported on this system.'
+      } else if (r && r.ok === false && state.startsWith('failed')) {
+        status.textContent = 'Notification failed: ' + state.slice('failed: '.length)
+      } else if (r && r.ok === false && state.startsWith('error')) {
+        status.textContent = 'Notification error: ' + state.slice('error: '.length)
+      } else {
+        status.textContent = 'Notification sent — check your operating system.'
+        if (isWindows()) {
+          status.textContent += ' On Windows, if you didn’t see it, open the notification settings (below) and make sure notifications are enabled for LVChat Messenger.'
+        }
+      }
+    } catch (err) {
+      status.textContent = 'Could not send a test notification.'
+    }
+  })
+  $('#set-sound-test').addEventListener('click', () => {
+    const id = $('#set-sound-dm-on').checked ? $('#set-sound-dm').value : '0'
+    if (id && id !== '0') playSound(id)
   })
 
   $('#tab-buddy').addEventListener('click', () => setTab('buddy'))
@@ -2103,6 +2774,7 @@ function wireEvents () {
   document.addEventListener('click', (e) => {
     if (ctxMenu && !e.target.closest('.ctx-menu')) closeContextMenu()
     if (!e.target.closest('#head-menu') && !e.target.closest('#menu-btn')) $('#head-menu').hidden = true
+    if (!e.target.closest('#status-menu') && !e.target.closest('#me-status')) $('#status-menu').hidden = true
     if (!e.target.closest('#emoji-panel') && !e.target.closest('#btn-emoji')) $('#emoji-panel').hidden = true
     if (!e.target.closest('#gif-panel') && !e.target.closest('#btn-gif') && !e.target.closest('#gif-search-input')) $('#gif-panel').hidden = true
     if (!e.target.closest('#mention-ac') && !e.target.closest('#composer-input')) hideMentionAc()
