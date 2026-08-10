@@ -1,6 +1,6 @@
 {
   "name": "lvchat-desktop",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "LVChat Desktop client — connect to your LVChat servers",
   "main": "src/main.js",
   "author": {

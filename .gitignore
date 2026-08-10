@@ -7,3 +7,6 @@ public/assets/avatars/
 .DS_Store
 desktop/dist/
 lvchat-messenger/dist/
+messenger-web/.env
+messenger-web/dist/
+messenger-web/node_modules/

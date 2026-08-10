@@ -191,7 +191,8 @@ async function boot () {
   LvApi.init(new URL(state.profile.url).origin)
   LvApi.resetCsrf()
 
-  $('#login-server').value = state.profile.url
+  const loginServerName = $('#login-server-name')
+  if (loginServerName) loginServerName.textContent = state.profile.name
   $('#login-server-url').textContent = new URL(state.profile.url).origin
   $('#login-username').value = state.profile.username || ''
   $('#login-target').hidden = false
@@ -338,6 +339,7 @@ async function doLogout () {
   stopNotifications()
   stopWs()
   LvApi.resetCsrf()
+  try { await window.msg.teardownWebPush() } catch (err) { /* ignore */ }
   await window.msg.logout()
 }
 
@@ -379,9 +381,30 @@ async function startMain (me) {
   await initNotifications()
   await initSounds()
   initWs()
+  initWebPush()
   try {
     renderAll()
   } catch (err) { /* leave whatever rendered */ }
+}
+
+/* Best-effort Web Push setup. The browser is only prompted once (tracked in
+ * localStorage); after that, if permission was already granted we (re)subscribe
+ * silently on each login, and otherwise the Settings button is the opt-in. */
+async function initWebPush () {
+  try {
+    if (!window.msg.pushStatus || !window.msg.setupWebPush) return
+    const st = await window.msg.pushStatus()
+    if (!st.supported) return
+    let asked = false
+    try { asked = localStorage.getItem('lvcmsg.push.asked') === '1' } catch (err) { /* ignore */ }
+    if (st.permission === 'granted') {
+      await window.msg.setupWebPush()
+      return
+    }
+    if (asked) return
+    try { localStorage.setItem('lvcmsg.push.asked', '1') } catch (err) { /* ignore */ }
+    await window.msg.setupWebPush()
+  } catch (err) { /* push is best-effort — never break the app on it */ }
 }
 
 async function refreshBuddyData () {
@@ -2558,10 +2581,10 @@ async function toggleHeadMenu (force) {
     }
   }
 
-  add('Profile manager', () => window.msg.showLauncher())
+  add('Open server in browser', () => window.msg.openExternal(new URL('/app', LvApi.origin()).toString()))
   add('Settings', openSettings)
   add('Sign out', doLogout, true)
-  add('Quit LVChat Messenger', () => window.msg.quit(), true)
+  add('Close window', () => window.msg.quit(), true)
   menu.hidden = false
 }
 
@@ -2616,20 +2639,11 @@ function closeSettings () {
   $('#settings-modal').hidden = true
 }
 
-/* Whether the messenger is running on Windows (for OS notification guidance). */
-function isWindows () {
-  try { return /win/i.test(String(window.msg.platform)) } catch (err) { return /win/i.test(navigator.platform) }
-}
-
 function openSettings () {
   $('#set-notify-dms').checked = notif.prefs.dms === 1
   $('#set-notify-channels').checked = notif.prefs.channels === 1
   $('#set-notify-invites').checked = notif.prefs.invites === 1
   $('#settings-status').hidden = true
-  // Windows toasts depend on an OS-level toggle we can't read — always point
-  // the user at the right place.
-  const winHint = $('#win-notify-hint')
-  if (winHint) winHint.hidden = !isWindows()
 
   const sounds = state.sounds
   const dmOn = !!sounds && sounds.dm != null
@@ -2641,6 +2655,37 @@ function openSettings () {
   $('#set-sound-dm').disabled = !dmOn
   $('#set-sound-channel').disabled = !chOn
   $('#settings-modal').hidden = false
+  refreshWebPushUi()
+}
+
+/* Web Push status line in the Settings modal. */
+async function refreshWebPushUi () {
+  const pushStatusEl = $('#web-push-status')
+  const pushToggle = $('#set-push-toggle')
+  if (!pushStatusEl || !pushToggle) return
+  try {
+    const st = await window.msg.pushStatus()
+    if (!st.supported) {
+      pushStatusEl.hidden = true
+      pushToggle.hidden = true
+      return
+    }
+    pushStatusEl.hidden = false
+    pushToggle.hidden = false
+    if (st.enabled) {
+      pushStatusEl.textContent = 'Web Push is on — you get notifications even when this window is closed.'
+      pushToggle.textContent = 'Turn off browser notifications'
+    } else if (st.permission === 'denied') {
+      pushStatusEl.textContent = 'Notifications are blocked in your browser settings for this site.'
+      pushToggle.textContent = 'Enable browser notifications'
+    } else {
+      pushStatusEl.textContent = 'Web Push sends notifications even when this window is closed.'
+      pushToggle.textContent = 'Enable browser notifications'
+    }
+  } catch (err) {
+    pushStatusEl.hidden = true
+    pushToggle.hidden = true
+  }
 }
 
 async function saveNotifyPrefs () {
@@ -2748,18 +2793,6 @@ function wireEvents () {
     attemptLogin(username, password, save)
   })
 
-  $('#login-server').addEventListener('change', () => {
-    const url = $('#login-server').value.trim()
-    if (url) {
-      try {
-        const origin = new URL(url).origin
-        state.profile = Object.assign({}, state.profile, { url })
-        LvApi.init(origin)
-        $('#login-server-url').textContent = origin
-      } catch (err) { /* keep existing */ }
-    }
-  })
-
   $('#login-forgot').addEventListener('click', (e) => {
     e.preventDefault()
     window.msg.openExternal(new URL('/forgot-password', LvApi.origin()).toString())
@@ -2805,7 +2838,6 @@ function wireEvents () {
     else menu.hidden = true
   })
   $('#view-mode-btn').addEventListener('click', toggleViewMode)
-  $('#profile-manager').addEventListener('click', () => window.msg.showLauncher())
   $('#logout-btn').addEventListener('click', doLogout)
   $('#menu-btn').addEventListener('click', (e) => {
     e.stopPropagation()
@@ -2815,9 +2847,6 @@ function wireEvents () {
   // Settings modal.
   $('#settings-close').addEventListener('click', closeSettings)
   $('#settings-modal .modal-backdrop').addEventListener('click', closeSettings)
-  $('#win-notify-settings').addEventListener('click', () => {
-    try { window.msg.openExternal('ms-settings:notifications') } catch (err) { /* bridge missing */ }
-  })
   $('#set-notify-dms').addEventListener('change', saveNotifyPrefs)
   $('#set-notify-channels').addEventListener('change', saveNotifyPrefs)
   $('#set-notify-invites').addEventListener('change', saveNotifyPrefs)
@@ -2837,26 +2866,48 @@ function wireEvents () {
     status.textContent = 'Sending…'
     try {
       const r = await window.msg.testNotification()
-      const stats = await window.msg.notifyStats()
       const state = (r && r.state) || ''
-      if (r && r.ok === false && (state === 'unsupported' || (stats && stats.supported === false))) {
-        status.textContent = isWindows()
-          ? 'Notifications are not supported on this system. Install via the Setup installer so they can be registered, then enable them in Windows notification settings.'
-          : 'Notifications are not supported on this system.'
-      } else if (r && r.ok === false && state.startsWith('failed')) {
-        status.textContent = 'Notification failed: ' + state.slice('failed: '.length)
+      if (r && r.ok === false && state === 'unsupported') {
+        status.textContent = 'Browser notifications are not supported here.'
+      } else if (r && r.ok === false && state === 'denied') {
+        status.textContent = 'Notifications are blocked in your browser settings. Allow this site and try again.'
       } else if (r && r.ok === false && state.startsWith('error')) {
         status.textContent = 'Notification error: ' + state.slice('error: '.length)
       } else {
-        status.textContent = 'Notification sent — check your operating system.'
-        if (isWindows()) {
-          status.textContent += ' On Windows, if you didn’t see it, open the notification settings (below) and make sure notifications are enabled for LVChat Messenger.'
-        }
+        status.textContent = 'Notification sent — look for it in your operating system.'
       }
     } catch (err) {
       status.textContent = 'Could not send a test notification.'
     }
   })
+
+  // Web Push status + opt-in/out in the Settings modal.
+  const pushStatusEl = $('#web-push-status')
+  const pushToggle = $('#set-push-toggle')
+  pushToggle.addEventListener('click', async () => {
+    try {
+      const st = await window.msg.pushStatus()
+      if (st.enabled) {
+        pushToggle.disabled = true
+        await window.msg.teardownWebPush()
+        pushToggle.disabled = false
+      } else if (st.permission === 'denied') {
+        pushStatusEl.hidden = false
+        pushStatusEl.textContent = 'Notifications are blocked. Allow this site in your browser settings, then click again to enable.'
+      } else {
+        pushToggle.disabled = true
+        pushToggle.textContent = 'Asking…'
+        const r = await window.msg.setupWebPush()
+        pushToggle.disabled = false
+        if (!r.enabled && r.reason === 'no-vapid') {
+          pushStatusEl.hidden = false
+          pushStatusEl.textContent = 'This LVChat server is running an older build without Web Push. Deploy the latest LVChat and try again.'
+        }
+      }
+      refreshWebPushUi()
+    } catch (err) { /* ignore */ }
+  })
+
   $('#set-sound-test').addEventListener('click', () => {
     const id = $('#set-sound-dm-on').checked ? $('#set-sound-dm').value : '0'
     if (id && id !== '0') playSound(id)

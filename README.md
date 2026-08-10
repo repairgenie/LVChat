@@ -562,6 +562,29 @@ Contact groups live in `contact_groups` + `contact_group_members` (see `schema.s
 membership is enforced to accepted friends. Directory search + groups + the read endpoint
 are exercised in `tests/http_test.php`.
 
+### LVChat Messenger Web (`messenger-web/`) — the messenger as a PWA
+
+A web build of the messenger that runs in any browser and is installable as a
+Progressive Web App. Like the desktop apps it is a **pure client**; unlike the
+multi-profile launcher it connects to a **single** LVChat server that the admin
+sets in `messenger-web/.env` (`LVCHAT_SERVER_URL`). It reuses the messenger's
+IM-first UI (buddy list, groups, DMs, rooms, offline send queue) and adds
+Web Push for closed-tab notifications.
+
+```bash
+cd messenger-web
+cp .env.example .env       # set LVCHAT_SERVER_URL
+npm run build              # static dist/ (config baked in) — host anywhere
+npm run preview            # local preview on http://127.0.0.1:8080
+npm test                   # build + bridge + API-login smoke suite
+```
+
+The client talks to the server cross-origin with the browser session's cookies,
+so the messenger's origin must be allowlisted: set `CHAT_CORS_ORIGINS` (or the
+`app_origins` config key) to e.g. `https://msg.example.com`. HTTPS is required
+on both ends. Web Push uses the server's VAPID key exposed via `/api/me`
+(`vapidPublicKey`). See `messenger-web/README.md`.
+
 ## Layout
 
 ```

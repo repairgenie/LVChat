@@ -22,6 +22,10 @@ final class UserController
                 'away' => $u['away'] ?? null,
                 'status' => $u['status'] ?? 'active',
             ], Auth::statusInfo($u)),
+            // Web Push clients (the messenger-web PWA) subscribe with the
+            // server's VAPID public key; it's embedded in HTML pages but only
+            // exposed through the API here.
+            'vapidPublicKey' => PushService::publicKey(),
         ]);
     }
 

@@ -1,0 +1,16 @@
+{
+  "name": "lvchat-messenger-web",
+  "version": "1.0.0",
+  "description": "LVChat Messenger Web — PWA client that connects to a single LVChat server (configured in .env)",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "preview": "node preview.js",
+    "icons": "node scripts/generate-icons.js",
+    "test": "bash tests/run.sh"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT"
+}
