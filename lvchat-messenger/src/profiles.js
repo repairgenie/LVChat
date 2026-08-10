@@ -115,7 +115,38 @@ function probeServer (url) {
       if (!body || typeof body.version !== 'string' || typeof body.site !== 'string') {
         throw new Error('Not an LVChat server')
       }
-      return { ok: true, url: base, version: body.version, site: body.site }
+      return {
+        ok: true,
+        url: base,
+        version: body.version,
+        site: body.site,
+        // The server's recommended update feed ('' = none). Used for the
+        // white-label opt-in and for showing the server's own download links.
+        updaterUrl: typeof body.updater_url === 'string' ? body.updater_url : ''
+      }
+    })
+    .catch((err) => {
+      if (err && err.name === 'AbortError') return { ok: false, error: 'Server did not respond in time' }
+      return { ok: false, error: err.message || 'Could not reach server' }
+    })
+    .finally(() => clearTimeout(timer))
+}
+
+/**
+ * Fetch a server's /api/updater payload (the download links + versions THIS
+ * server recommends its users, white-label aware). Main-process only (no CORS).
+ * Returns { ok, apps } or { ok:false, error }.
+ */
+function getServerUpdater (profile) {
+  const base = normalizeUrl(profile && profile.url)
+  if (!base) return Promise.resolve({ ok: false, error: 'Invalid server URL' })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT)
+  return fetch(new URL('/api/updater', base).toString(), { signal: controller.signal })
+    .then(async (res) => {
+      if (!res.ok) throw new Error('Server responded ' + res.status)
+      const body = await res.json()
+      return { ok: true, updaterUrl: body.updater_url || '', apps: body.apps || {} }
     })
     .catch((err) => {
       if (err && err.name === 'AbortError') return { ok: false, error: 'Server did not respond in time' }
@@ -140,7 +171,7 @@ function find (id) {
   return load().profiles.find((p) => p.id === id) || null
 }
 
-function add ({ name, url, username, autoConnect, siteName }) {
+function add ({ name, url, username, autoConnect, siteName, serverUpdaterUrl, useServerUpdates }) {
   const normalized = normalizeUrl(url)
   if (!normalized) return { ok: false, error: 'Invalid URL' }
   const user = (username || '').trim() || null
@@ -159,6 +190,8 @@ function add ({ name, url, username, autoConnect, siteName }) {
     name: (name || '').trim() || (user ? user + '@' + hostname : stripTrailingSlash(normalized)),
     url: normalized,
     siteName: (siteName || '').trim() || null,
+    serverUpdaterUrl: (serverUpdaterUrl || '').trim() || null,
+    useServerUpdates: !!useServerUpdates,
     username: user,
     autoConnect: !!autoConnect,
     createdAt: new Date().toISOString(),
@@ -169,7 +202,7 @@ function add ({ name, url, username, autoConnect, siteName }) {
   return { ok: true, profile }
 }
 
-function update (id, { name, url, username, autoConnect, siteName }) {
+function update (id, { name, url, username, autoConnect, siteName, serverUpdaterUrl, useServerUpdates }) {
   const data = load()
   const profile = data.profiles.find((p) => p.id === id)
   if (!profile) return { ok: false, error: 'Not found' }
@@ -184,6 +217,8 @@ function update (id, { name, url, username, autoConnect, siteName }) {
   profile.url = normalized
   if (typeof name === 'string') profile.name = name.trim() || stripTrailingSlash(profile.url)
   if (typeof siteName === 'string') profile.siteName = siteName.trim() || null
+  if (typeof serverUpdaterUrl === 'string') profile.serverUpdaterUrl = serverUpdaterUrl.trim() || null
+  if (typeof useServerUpdates === 'boolean') profile.useServerUpdates = useServerUpdates
   if (typeof username === 'string') profile.username = nextUser
   if (typeof autoConnect === 'boolean') profile.autoConnect = autoConnect
   persist(data)
@@ -280,6 +315,7 @@ module.exports = {
   getCredentials,
   deleteCredentials,
   probeServer,
+  getServerUpdater,
   normalizeUrl,
   canonicalKey,
   profileKey,

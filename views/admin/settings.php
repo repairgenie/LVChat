@@ -27,8 +27,24 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     <p class="text-xs text-discord-400 mt-1">Shown in place of the site name in the header and login pages. Leave empty to use the default mark.</p>
   </div>
   <div class="pt-4 border-t border-discord-700">
+    <div class="text-sm font-medium text-white mb-1">Updates</div>
+    <p class="text-xs text-discord-400 mb-3">Point this server at an LVChat Update Server (or your own mirror) so the <a href="/admin/updates" class="text-blurple-300 hover:underline">Updates page</a>, your chat's download modal and the desktop clients can resolve the latest versions. Leave disabled to keep today's fully-manual behavior.</p>
+    <div class="flex items-center justify-between card p-4">
+      <div>
+        <div class="text-sm font-medium text-white">Enable update feed</div>
+        <div class="text-xs text-discord-400">Check upstream for newer versions of the web app and desktop clients</div>
+      </div>
+      <input type="checkbox" name="updater_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['updater_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+    </div>
+    <div class="mt-3">
+      <label class="label">Update server URL</label>
+      <input class="input font-mono text-xs" name="updater_url" value="<?= h($settings['updater_url'] ?? '') ?>" placeholder="https://updates.example.com" autocomplete="off" spellcheck="false">
+      <p class="text-xs text-discord-400 mt-1">Base URL of the update server. It must serve <code>/manifest.json</code> (the LVChat Update Server does).</p>
+    </div>
+  </div>
+  <div class="pt-4 border-t border-discord-700">
     <div class="text-sm font-medium text-white mb-1">Desktop apps &amp; downloads</div>
-    <p class="text-xs text-discord-400 mb-3">Download links shown in the chat's "Download the desktop app" modal. Leave a URL empty to hide that platform's button; the version is displayed next to each download.</p>
+    <p class="text-xs text-discord-400 mb-3">Custom download links shown in the chat's "Download the desktop app" modal. These <strong>override the upstream feed</strong> — ideal for white-labelled builds tailored to this community. Leave a URL empty to fall back to the upstream link (or hide the button when no feed is configured); the version shown comes from the feed unless you type one.</p>
     <?php
     $dlApps = [
         'desktop' => ['name' => 'LVChat Desktop', 'desc' => 'A full desktop version of the regular LVChat experience — the whole web chat in its own window with native notifications.'],

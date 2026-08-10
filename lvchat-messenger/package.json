@@ -1,6 +1,6 @@
 {
   "name": "lvchat-messenger",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "LVChat Messenger — IM-first desktop client for LVChat",
   "main": "src/main.js",
   "author": {
@@ -34,6 +34,12 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.lasvegasbestinternet.com/messenger"
+      }
+    ],
     "mac": {
       "target": [
         "dmg"
@@ -62,5 +68,8 @@
   "devDependencies": {
     "electron": "43.2.0",
     "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }

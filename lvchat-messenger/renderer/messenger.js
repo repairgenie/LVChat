@@ -11,6 +11,7 @@ const state = {
   friends: [],
   incoming: [],
   outgoing: [],
+  blocked: [],
   channelInvites: [],
   groups: [],
   dmList: [],
@@ -104,6 +105,7 @@ function statusClass (user) {
   if (user.invisible || !user.is_online) return 'offline'
   if (user.status_mode === 'dnd') return 'dnd'
   if (user.status_mode === 'away' || user.away) return 'away'
+  if (user.status_mode === 'custom') return 'away'
   return 'online'
 }
 
@@ -391,6 +393,7 @@ async function refreshBuddyData () {
     state.friends = f.body.friends || []
     state.incoming = f.body.incoming || []
     state.outgoing = f.body.outgoing || []
+    state.blocked = f.body.blocked || []
   }
   if (g.ok && g.body) {
     state.groups = g.body.groups || []
@@ -460,6 +463,7 @@ function handlePoll (body) {
   if (Array.isArray(body.dm_list)) state.dmList = body.dm_list
   if (Array.isArray(body.friends)) state.friends = body.friends
   if (Array.isArray(body.friend_requests)) state.incoming = body.friend_requests
+  if (Array.isArray(body.blocked)) state.blocked = body.blocked
   if (Array.isArray(body.channel_invites)) state.channelInvites = body.channel_invites
   if (body.channel_unread && Array.isArray(body.channel_unread)) {
     const map = {}
@@ -517,6 +521,11 @@ function totalUnread () {
 /* Detect new DMs + background channel messages from a poll payload, and keep
  * the tray tooltip's unread total fresh. Only the buddy-list window alerts;
  * dedicated conversation windows never do. */
+function mutedSender (id) {
+  if (id == null || !state.sounds || !state.sounds.overrides) return false
+  return Object.prototype.hasOwnProperty.call(state.sounds.overrides, id) && state.sounds.overrides[id] === null
+}
+
 function checkAlerts (body) {
   if (state.chatWindow) return
   try { window.msg.setUnread(totalUnread()) } catch (err) { /* ignore */ }
@@ -546,6 +555,8 @@ function checkAlerts (body) {
       if (focused && state.open && state.open.type === 'dm' && String(state.open.id).toLowerCase() === key) continue
       // Do Not Disturb silences the audio + OS alert for this user.
       if (meDnd) continue
+      // A per-user mute silences this person's sound + OS alert.
+      if (d.muted) continue
       // Audio alert fires whenever a new DM lands; the OS notification is a
       // separate toggle so users can mute one without the other.
       playSound(effectiveSound(d.user_id, state.sounds && state.sounds.dm))
@@ -566,6 +577,8 @@ function checkAlerts (body) {
       notif.bgMax = id
       if (focused && state.open && state.open.type === 'room' && String(state.open.id).toLowerCase() === String(m.channel_slug || '').toLowerCase()) continue
       if (meDnd) continue
+      // A per-user mute silences this person's sound + OS alert.
+      if (mutedSender(m.sender_id)) continue
       playSound(effectiveSound(m.sender_id, state.sounds && state.sounds.channel))
       if (notif.prefs.channels !== 1) continue
       const slug = m.channel_slug || 'channel'
@@ -705,11 +718,21 @@ async function initSounds () {
   } catch (err) { server = null }
 
   const list = {}
+  const serverNames = new Set()
   if (server) {
-    for (const id of Object.keys(server.sounds)) list[id] = server.sounds[id]
+    for (const id of Object.keys(server.sounds)) {
+      list[id] = server.sounds[id]
+      if (server.sounds[id] && server.sounds[id].name) serverNames.add(String(server.sounds[id].name).trim().toLowerCase())
+    }
   }
+  // The server seeds the same tones (Ding/Pop/Chime), so only fall back to the
+  // local built-ins when the server has no sound with that name — keeps the
+  // settings picker free of duplicate entries while older servers (no sounds
+  // endpoint) still get audio alerts out of the box.
   for (const id of Object.keys(builtin)) {
-    if (!list[id]) list[id] = builtin[id]
+    if (list[id]) continue
+    if (serverNames.has(String(builtin[id].name).trim().toLowerCase())) continue
+    list[id] = builtin[id]
   }
 
   // Server prefs win when the server has sounds; otherwise use local choices,
@@ -1037,6 +1060,9 @@ function renderBuddyList () {
     list.appendChild(node)
   }
 
+  const blockedNode = renderBlockedGroup()
+  if (blockedNode) list.appendChild(blockedNode)
+
   if (state.friends.length === 0 && state.groups.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'empty'
@@ -1108,6 +1134,78 @@ function renderGroup (g) {
 
   node.append(head, members)
   return node
+}
+
+/* Collapsible "Blocked users" group at the bottom of the buddy list. Each row
+ * carries an Unblock button so a block can be lifted without leaving the app. */
+function renderBlockedGroup () {
+  if (!state.blocked.length) return null
+  const node = document.createElement('div')
+  node.className = 'group' + (state.collapsed.has('g:blocked') ? ' collapsed' : '')
+
+  const head = document.createElement('div')
+  head.className = 'group-head'
+  const caret = document.createElement('span')
+  caret.className = 'caret'
+  caret.textContent = '▼'
+  const title = document.createElement('span')
+  title.textContent = 'Blocked users'
+  const count = document.createElement('span')
+  count.className = 'count'
+  count.textContent = state.blocked.length
+  head.append(caret, title, count)
+  head.addEventListener('click', () => {
+    if (state.collapsed.has('g:blocked')) state.collapsed.delete('g:blocked')
+    else state.collapsed.add('g:blocked')
+    node.classList.toggle('collapsed')
+  })
+
+  const members = document.createElement('div')
+  members.className = 'group-members'
+  for (const b of state.blocked) {
+    const row = document.createElement('div')
+    row.className = 'contact'
+    row.title = contactTitle(Object.assign({ is_online: 0, away: null, status_mode: 'invisible' }, b))
+    const dot = document.createElement('div')
+    dot.className = 'dot offline'
+    const avatar = avatarEl(b.username, b.avatar, '28px')
+    const info = document.createElement('div')
+    info.className = 'contact-name-col'
+    const name = document.createElement('div')
+    name.className = 'contact-name'
+    name.textContent = b.username
+    info.appendChild(name)
+    const sub = document.createElement('div')
+    sub.className = 'contact-status'
+    sub.textContent = 'Blocked'
+    info.appendChild(sub)
+    const un = document.createElement('button')
+    un.type = 'button'
+    un.className = 'ghost small'
+    un.textContent = 'Unblock'
+    un.title = 'Unblock ' + b.username
+    un.addEventListener('click', (e) => {
+      e.stopPropagation()
+      unblockUser(b)
+    })
+    row.append(dot, avatar, info, un)
+    row.addEventListener('dblclick', () => openChatWindow('dm', b.username))
+    members.appendChild(row)
+  }
+
+  node.append(head, members)
+  return node
+}
+
+async function unblockUser (user) {
+  if (!user || !user.username) return
+  const r = await LvApi.postForm('/api/friend/unblock', { username: user.username })
+  if (!r.ok) {
+    await appAlert((r.body && r.body.error) || 'Could not unblock ' + user.username + '.')
+    return
+  }
+  await refreshBuddyData()
+  await pollTick()
 }
 
 function renderRoomsList () {
@@ -1374,6 +1472,78 @@ function closeContextMenu () {
   if (ctxMenu) { ctxMenu.remove(); ctxMenu = null }
 }
 
+/* ── Mute / block ──────────────────────────────────────────
+ * Mute = per-user notification mute (user_mutes): silences that person's
+ * sound + OS alerts across every surface. Block = the friendship becomes
+ * 'blocked' and the user leaves the friends list (kept under "Blocked users"
+ * so the block can be lifted from the messenger). */
+
+function isMuted (user) {
+  if (!user) return false
+  if (Number(user.muted) === 1) return true
+  // Friends carry a `muted` flag; everyone else falls back to the sounds
+  // overrides, where a push-muted sender is forced to a null sound.
+  if (user.id != null && state.sounds && state.sounds.overrides) {
+    const ov = state.sounds.overrides[user.id]
+    return Object.prototype.hasOwnProperty.call(state.sounds.overrides, user.id) && ov === null
+  }
+  return false
+}
+
+function isBlocked (user) {
+  if (!user || !user.username) return false
+  const key = String(user.username).toLowerCase()
+  return state.blocked.some((b) => String(b.username || '').toLowerCase() === key)
+}
+
+async function setUserMuted (user, currentlyMuted) {
+  if (!user || user.id == null) return
+  const path = currentlyMuted ? '/api/push/unmute' : '/api/push/mute'
+  const r = await LvApi.postForm(path, { user_id: user.id })
+  if (!r.ok) {
+    await appAlert((r.body && r.body.error) || 'Could not update the mute.')
+    return
+  }
+  // Refetch sounds so the sender's overrides (and therefore alerts) update.
+  await initSounds()
+  await refreshBuddyData()
+}
+
+async function setUserBlocked (user, currentlyBlocked) {
+  if (!user || !user.username) return
+  const path = currentlyBlocked ? '/api/friend/unblock' : '/api/friend/block'
+  const r = await LvApi.postForm(path, { username: user.username })
+  if (!r.ok) {
+    await appAlert((r.body && r.body.error) || 'Could not update the block.')
+    return
+  }
+  await refreshBuddyData()
+  await pollTick()
+}
+
+/* Add a Mute/Unmute + Block/Unblock pair to a context menu. */
+function addMuteBlockItems (menu, user) {
+  const muted = isMuted(user)
+  const blockItem = menuItem(muted ? 'Unmute notifications' : 'Mute notifications', async () => {
+    await setUserMuted(user, muted)
+    closeContextMenu()
+  })
+  menu.appendChild(blockItem)
+
+  const blocked = isBlocked(user)
+  const item = menuItem(blocked ? 'Unblock' : 'Block', async () => {
+    if (!blocked) {
+      closeContextMenu()
+      const ok = await appConfirm('Block ' + (user.username || 'this user') + '? They will be removed from your friends list.')
+      if (!ok) return
+    }
+    await setUserBlocked(user, blocked)
+    closeContextMenu()
+  })
+  item.classList.add('danger')
+  menu.appendChild(item)
+}
+
 function openContextMenu (x, y, user) {
   const menu = document.createElement('div')
   menu.className = 'ctx-menu'
@@ -1413,6 +1583,10 @@ function openContextMenu (x, y, user) {
   }
   const newGroup = menuItem('New group…', () => { closeContextMenu(); promptNewGroupFor(user) })
   menu.appendChild(newGroup)
+  menu.appendChild(menuSeparator())
+
+  addMuteBlockItems(menu, user)
+
   menu.appendChild(menuSeparator())
 
   const remove = menuItem('Remove friend', async () => {
@@ -1521,6 +1695,8 @@ function openMemberContextMenu (x, y, user, group) {
     window.msg.openExternal(new URL('/u/' + encodeURIComponent(user.username), LvApi.origin()).toString())
     closeContextMenu()
   }))
+  menu.appendChild(menuSeparator())
+  addMuteBlockItems(menu, user)
   menu.appendChild(menuSeparator())
   const remove = menuItem('Remove from ' + group.name, async () => {
     await LvApi.postForm('/api/groups/member/remove', { group_id: group.id, friend_id: user.id })
@@ -2406,24 +2582,6 @@ function fillSoundSelect (select, chosenId) {
   const wanted = chosenId != null ? String(chosenId) : cur
   select.value = list[wanted] ? wanted : (list[cur] ? cur : '0')
   if (!list[select.value]) select.value = '0'
-}
-
-function openSettings () {
-  $('#set-notify-dms').checked = notif.prefs.dms === 1
-  $('#set-notify-channels').checked = notif.prefs.channels === 1
-  $('#set-notify-invites').checked = notif.prefs.invites === 1
-  $('#settings-status').hidden = true
-
-  const sounds = state.sounds
-  const dmOn = !!sounds && sounds.dm != null
-  const chOn = !!sounds && sounds.channel != null
-  $('#set-sound-dm-on').checked = dmOn
-  $('#set-sound-channel-on').checked = chOn
-  fillSoundSelect($('#set-sound-dm'), sounds ? sounds.dm : null)
-  fillSoundSelect($('#set-sound-channel'), sounds ? sounds.channel : null)
-  $('#set-sound-dm').disabled = !dmOn
-  $('#set-sound-channel').disabled = !chOn
-  $('#settings-modal').hidden = false
 }
 
 function closeSettings () {

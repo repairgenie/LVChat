@@ -18,5 +18,16 @@ contextBridge.exposeInMainWorld('lvchat', {
   refreshMenus: () => ipcRenderer.send('app:refresh-menus'),
   testNotification: () => ipcRenderer.invoke('notify:test'),
   notifyStats: () => ipcRenderer.invoke('notify:stats'),
-  openExternal: (url) => ipcRenderer.invoke('msg:openExternal', url)
+  openExternal: (url) => ipcRenderer.invoke('msg:openExternal', url),
+  // Updates
+  updatesCheck: (opts) => ipcRenderer.invoke('updates:check', opts),
+  updatesStatus: () => ipcRenderer.invoke('updates:status'),
+  updatesFeed: () => ipcRenderer.invoke('updates:feed'),
+  updatesServer: (payload) => ipcRenderer.invoke('updates:server', payload),
+  updatesQuitAndInstall: () => ipcRenderer.invoke('updates:quit-and-install'),
+  onUpdateStatus: (cb) => {
+    const listener = (_e, status) => cb(status)
+    ipcRenderer.on('updates:status', listener)
+    return () => ipcRenderer.removeListener('updates:status', listener)
+  }
 })

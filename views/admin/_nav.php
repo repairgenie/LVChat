@@ -31,6 +31,7 @@ function admin_nav(string $active, array $user): void {
     'openclaw' => ['/admin/openclaw', 'OpenClaw', $isAdmin],
     'invites' => ['/admin/invites', 'Invites', $isAdmin],
     'legal' => ['/admin/legal', 'Terms & Privacy', $isAdmin],
+    'updates' => ['/admin/updates', 'Updates', $isAdmin],
     'settings' => ['/admin/settings', 'Settings', $isAdmin],
   ];
   echo '<div class="flex flex-wrap gap-1 mb-6 bg-discord-850 border border-discord-700 rounded-lg p-1">';

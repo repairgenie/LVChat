@@ -9,6 +9,44 @@ final class ChatController
         json_out([
             'version' => LVC_VERSION,
             'site' => config_get('site_name', 'LVChat'),
+            // Where desktop/messenger clients can learn the recommended update
+            // feed for this community (white-label aware). '' = not configured.
+            'updater_url' => UpdaterService::enabled() ? UpdaterService::baseUrl() : '',
+        ]);
+    }
+
+    /**
+     * The community's recommended update feed, used by the desktop/messenger
+     * clients. Lists what THIS server actually serves its users (custom
+     * white-label overrides win over upstream), plus the upstream latest
+     * versions so a stock client can still detect that an update exists.
+     */
+    public static function updater(): void
+    {
+        $apps = [];
+        foreach (UpdaterService::APPS as $app) {
+            $row = ['installed' => UpdaterService::installedVersion($app)];
+            if ($app === 'web') {
+                $row['latest'] = UpdaterService::latestVersion('web');
+                $row['url'] = UpdaterService::effectiveUrl('web');
+                $row['sha256'] = UpdaterService::latestSha256('web');
+            } else {
+                $row['latest'] = UpdaterService::latestVersion($app);
+                $row['platforms'] = [];
+                foreach (UpdaterService::PLATFORMS as $plat) {
+                    $row['platforms'][$plat] = [
+                        'url' => UpdaterService::effectiveUrl($app, $plat),
+                        'version' => UpdaterService::effectiveVersion($app, $plat),
+                    ];
+                }
+            }
+            $row['update_available'] = UpdaterService::status($app)['update_available'] ?? false;
+            $apps[$app] = $row;
+        }
+        json_out([
+            'updater_url' => UpdaterService::enabled() ? UpdaterService::baseUrl() : '',
+            'site' => config_get('site_name', 'LVChat'),
+            'apps' => $apps,
         ]);
     }
 
@@ -527,6 +565,7 @@ final class ChatController
             $out['friends'] = FriendService::getFriendsWithStatus((int) $user['id']);
             $out['friend_requests'] = FriendService::getPendingIncoming((int) $user['id']);
             $out['channel_invites'] = ChannelService::pendingInvites((int) $user['id']);
+            $out['blocked'] = FriendService::getBlocked((int) $user['id']);
         }
         // Background channel messages since the client's global watermark — the
         // fuel for channel audio alerts. Excludes the channel being viewed.

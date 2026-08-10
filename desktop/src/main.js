@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, shell, session, nativeImage, Notification } = require('electron')
 const path = require('path')
 const profiles = require('./profiles')
+const updater = require('./updater')
 
 app.setName('LVChat Desktop')
 // Required for Windows toast notifications to appear.
@@ -11,6 +12,8 @@ let tray = null
 let isQuitting = false
 let desktopNotifications = 0
 const chatWindows = new Map()
+
+let appUpdater = null
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.png')
 const SPLASH = path.join(__dirname, 'renderer', 'splash.html')
@@ -458,7 +461,16 @@ function buildMenu () {
     },
     { role: 'editMenu' },
     { role: 'viewMenu' },
-    { role: 'windowMenu' }
+    { role: 'windowMenu' },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Check for Updates…',
+          click: () => { checkForUpdates({ manual: true }) }
+        }
+      ]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -618,6 +630,54 @@ function registerIpc () {
   })
 }
 
+// ── Updates ─────────────────────────────────────────────────────────────────
+
+function feedUrlFor () {
+  return updater.resolveFeedUrl(profiles.list())
+}
+
+function broadcastUpdateStatus () {
+  if (launcherWindow && !launcherWindow.isDestroyed()) {
+    launcherWindow.webContents.send('updates:status', appUpdater ? appUpdater.getState() : { state: 'idle' })
+  }
+}
+
+function checkForUpdates ({ manual, quiet } = {}) {
+  if (!appUpdater) return Promise.resolve({ state: 'idle' })
+  broadcastUpdateStatus()
+  const p = appUpdater.checkNow({ quiet: manual ? false : quiet })
+  if (p && typeof p.then === 'function') {
+    p.catch((err) => console.warn('update check failed:', err && err.message))
+  }
+  return p
+}
+
+function setupUpdater () {
+  if (appUpdater) return appUpdater
+  appUpdater = updater.createUpdater({
+    currentVersion: app.getVersion(),
+    feedUrl: feedUrlFor,
+    onStatus: broadcastUpdateStatus
+  })
+  ipcMain.handle('updates:check', (_e, opts) => checkForUpdates({ manual: true, quiet: !!(opts && opts.quiet) }))
+  ipcMain.handle('updates:status', () => appUpdater.getState())
+  ipcMain.handle('updates:feed', () => ({
+    url: appUpdater.feedUrl(),
+    currentVersion: appUpdater.currentVersion
+  }))
+  ipcMain.handle('updates:server', (_e, { id }) => {
+    const profile = profiles.find(id)
+    if (!profile) return { ok: false, error: 'Profile not found' }
+    return profiles.getServerUpdater(profile)
+  })
+  ipcMain.handle('updates:quit-and-install', () => { appUpdater.quitAndInstall(); return { ok: true } })
+  // Quiet background auto-check on startup (delayed so windows can come up),
+  // then once every 12h while the app runs.
+  setTimeout(() => checkForUpdates({ quiet: true }), 15000)
+  setInterval(() => checkForUpdates({ quiet: true }), 12 * 3600 * 1000)
+  return appUpdater
+}
+
 app.on('web-contents-created', (_e, contents) => {
   contents.setWindowOpenHandler(({ url: target }) => {
     const opener = chatWindows.get(contents.id)
@@ -660,6 +720,7 @@ app.on('web-contents-created', (_e, contents) => {
 
 app.whenReady().then(() => {
   registerIpc()
+  setupUpdater()
   buildMenu()
   createLauncherWindow()
   buildTray()
@@ -683,4 +744,4 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => { isQuitting = true })
 
-module.exports = { createLauncherWindow, connectProfile, disconnectProfile, chatWindows, registerIpc, sameSite, getNotifyCount: () => desktopNotifications }
+module.exports = { createLauncherWindow, connectProfile, disconnectProfile, chatWindows, registerIpc, sameSite, getNotifyCount: () => desktopNotifications, setupUpdater, checkForUpdates, getAppUpdater: () => appUpdater }

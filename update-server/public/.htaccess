@@ -1,0 +1,11 @@
+# LVChat Update Server — front-controller rewrite.
+# Routes clean URLs (/manifest.json, /api/..., /downloads/..., /desktop/*.yml, /admin)
+# to index.php. Existing files (none shipped) would be served directly.
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>

@@ -1339,6 +1339,97 @@ check('ws reconnect requires auth', $s === 302, (string) $s);
 [$s, , $j] = req('GET', '/api/poll?since=0', [], $cjA);
 check('reconnect flag surfaces in poll', (jsonDecode($j)['reconnect'] ?? 0) === 1, $j);
 
+// ── Update feed (updater) ────────────────────────────────────────────────────
+echo "== updater ==\n";
+// A tiny scratch manifest served by the built-in server (real static files).
+$updDir = '/tmp/opencode/updtest';
+@mkdir($updDir, 0777, true);
+file_put_contents("$updDir/manifest.json", json_encode([
+    'apps' => [
+        'web' => ['version' => '9.9.9', 'url' => 'http://127.0.0.1:8099/web.zip', 'sha256' => '', 'notes' => 'https://example.com/web-notes'],
+        'desktop' => ['version' => '0.5.0', 'notes' => '', 'platforms' => [
+            'win' => ['url' => 'http://127.0.0.1:8099/desktop-win.exe', 'sha256' => 'aa', 'sha512' => '', 'size' => '1'],
+            'mac' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'linux_deb' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'linux_rpm' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'linux_appimage' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+        ]],
+        'messenger' => ['version' => '0.3.0', 'notes' => '', 'platforms' => [
+            'win' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'mac' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'linux_deb' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'linux_rpm' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+            'linux_appimage' => ['url' => '', 'sha256' => '', 'sha512' => '', 'size' => ''],
+        ]],
+    ],
+], JSON_UNESCAPED_SLASHES));
+$updSrv = proc_open(
+    ['php', '-S', '127.0.0.1:8099', '-t', $updDir],
+    [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/updtest-server.log', 'w'], 2 => ['file', '/tmp/opencode/updtest-server.log', 'a']],
+    $updPipes
+);
+sleep(1);
+$updCache = __DIR__ . '/../data/cache/updater-manifest.json';
+@unlink($updCache);
+
+[$s, , $j] = req('GET', '/api/version', [], $cjA);
+check('api/version has updater_url when disabled = empty', ($s === 200) && (jsonDecode($j)['updater_url'] ?? 'x') === '', $j);
+
+// Enable the feed via the settings form.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'updater_enabled' => '1', 'updater_url' => 'http://127.0.0.1:8099', 'back' => '/admin/settings'], $cjA);
+check('settings_save stores updater config', $s === 302, (string) $s);
+check('updater url persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'updater_url'")->fetchColumn() === 'http://127.0.0.1:8099', '');
+check('updater enabled persisted', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'updater_enabled'")->fetchColumn() === '1', '');
+
+[$s, , $b] = req('GET', '/api/version', [], $cjA);
+check('api/version advertises updater_url', ($s === 200) && (jsonDecode($b)['updater_url'] ?? '') === 'http://127.0.0.1:8099', $b);
+
+[$s, , $b] = req('GET', '/api/updater', [], $cjA);
+$upd = jsonDecode($b);
+check('api/updater resolves upstream web version', ($s === 200) && ($upd['apps']['web']['latest'] ?? '') === '9.9.9' && ($upd['apps']['web']['update_available'] ?? null) === true, $b);
+check('api/updater resolves upstream desktop platform', ($upd['apps']['desktop']['latest'] ?? '') === '0.5.0' && ($upd['apps']['desktop']['platforms']['win']['url'] ?? '') === 'http://127.0.0.1:8099/desktop-win.exe', $b);
+check('api/updater public (no auth)', $s === 200, (string) $s);
+
+// Chat download modal falls back to the upstream feed when no custom URL set.
+[$s, , $dlPage] = req('GET', '/app', [], $cjA);
+check('chat modal shows upstream win link', str_contains($dlPage, 'http://127.0.0.1:8099/desktop-win.exe') && str_contains($dlPage, 'v0.5.0'), '');
+
+// Admin Updates page renders status + checks feed.
+[$s, , $b] = req('GET', '/admin/updates', [], $cjA);
+check('GET /admin/updates 200', $s === 200, (string) $s);
+check('updates page flags the web update', str_contains($b, '9.9.9') && str_contains($b, 'Update available'), '');
+[$s] = req('GET', '/admin/updates', [], $cjB);
+check('non-admin denied /admin/updates', $s === 403, (string) $s);
+
+// Force-refresh endpoint requires CSRF + admin.
+[$s] = req('POST', '/admin/updates/check', ['csrf' => 'bogus'], $cjA);
+check('updates/check requires valid csrf', $s === 419, (string) $s);
+$tA = csrf(req('GET', '/admin/updates', [], $cjA)[2]);
+[$s] = req('POST', '/admin/updates/check', ['csrf' => $tA], $cjA);
+check('updates/check refreshes feed', $s === 302, (string) $s);
+
+// Pin upstream → custom fields for desktop.
+$tA = csrf(req('GET', '/admin/updates', [], $cjA)[2]);
+[$s] = req('POST', '/admin/updates/pin', ['csrf' => $tA, 'app' => 'desktop'], $cjA);
+check('updates/pin copies upstream into custom fields', $s === 302, (string) $s);
+check('pinned win url stored', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'download_desktop_win_url'")->fetchColumn() === 'http://127.0.0.1:8099/desktop-win.exe', '');
+check('pinned win version stored', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'download_desktop_win_version'")->fetchColumn() === '0.5.0', '');
+[$s] = req('POST', '/admin/updates/pin', ['csrf' => 'bogus', 'app' => 'desktop'], $cjA);
+check('updates/pin requires valid csrf', $s === 419, (string) $s);
+
+// Web update download is admin+csrf gated (full sha256 flow exercised in CLI tests).
+[$s] = req('POST', '/admin/updates/download-web', ['csrf' => 'bogus'], $cjA);
+check('download-web requires valid csrf', $s === 419, (string) $s);
+[$s] = req('POST', '/admin/updates/download-web', ['csrf' => $tA]);
+check('download-web requires auth', $s === 302, (string) $s);
+
+// Reset the feed so the rest of the suite sees the default behavior.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'updater_enabled' => '0', 'updater_url' => '', 'back' => '/admin/settings'], $cjA);
+@unlink($updCache);
+if (is_resource($updSrv)) proc_terminate($updSrv);
+
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);
 check('logout redirects', $s === 302 && ($h['location'] ?? '') === '/login', "$s " . ($h['location'] ?? ''));

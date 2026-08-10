@@ -400,7 +400,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'registration_rate_limit', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user', 'download_update_url'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'registration_rate_limit', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user', 'download_update_url', 'updater_enabled', 'updater_url'];
         foreach (self::DOWNLOAD_APPS as $dlApp) {
             foreach (self::DOWNLOAD_PLATFORMS as $dlPlat) {
                 $keys[] = "download_{$dlApp}_{$dlPlat}_url";
@@ -415,6 +415,127 @@ final class AdminController
         // whether one is already stored so admins can leave the field blank.
         $settings['smtp_has_password'] = trim((string) (config_get('smtp_password', '') ?? '')) !== '';
         render_view('admin/settings', ['admin' => $admin, 'settings' => $settings]);
+    }
+
+    /** GET /admin/updates — installed vs upstream latest for all three apps. */
+    public static function updates(): void
+    {
+        $admin = self::require();
+        render_view('admin/updates', [
+            'admin' => $admin,
+            'status' => UpdaterService::statusAll(),
+            'updaterUrl' => UpdaterService::enabled() ? UpdaterService::baseUrl() : '',
+            'enabled' => UpdaterService::enabled(),
+            'cachedAt' => UpdaterService::cachedAt(),
+            'lastDownload' => self::lastWebDownload(),
+        ]);
+    }
+
+    /** POST /admin/updates/check — force a manifest refetch. */
+    public static function updatesCheck(): void
+    {
+        $admin = self::require();
+        Csrf::verify();
+        $ok = UpdaterService::enabled();
+        if ($ok) {
+            UpdaterService::fetchManifest(true);
+            $ok = UpdaterService::cachedAt() !== 0;
+        }
+        flash($ok ? 'Update feed refreshed.' : 'Could not reach the update server — check the URL in Admin → Settings → Updates.');
+        redirect('/admin/updates');
+    }
+
+    /** POST /admin/updates/pin — copy upstream values into the custom download
+     *  fields so an admin can freeze the current upstream state (or edit it). */
+    public static function updatesPin(): void
+    {
+        $admin = self::require();
+        Csrf::verify();
+        $app = (string) ($_POST['app'] ?? '');
+        if (!in_array($app, UpdaterService::APPS, true) || $app === 'web') {
+            flash('That app cannot be pinned here.');
+            redirect('/admin/updates');
+        }
+        if (!UpdaterService::enabled()) {
+            flash('Enable the update feed first (Admin → Settings → Updates).');
+            redirect('/admin/updates');
+        }
+        UpdaterService::fetchManifest(true);
+        $latest = UpdaterService::latestVersion($app);
+        if ($latest === '') {
+            flash('No upstream version published for ' . h($app) . '.');
+            redirect('/admin/updates');
+        }
+        $pinned = 0;
+        foreach (UpdaterService::PLATFORMS as $plat) {
+            $url = UpdaterService::latestUrl($app, $plat);
+            if ($url === '') {
+                continue;
+            }
+            config_set("download_{$app}_{$plat}_url", $url);
+            config_set("download_{$app}_{$plat}_version", $latest);
+            $pinned++;
+        }
+        if ($pinned === 0) {
+            flash('The upstream feed has no download links for ' . h($app) . '.');
+        } else {
+            log_audit('updates_pin', $app);
+            flash("Pinned {$pinned} platform link(s) for " . h($app) . ' v' . h($latest) . ' into the custom download fields.');
+        }
+        redirect('/admin/updates');
+    }
+
+    /** POST /admin/updates/download-web — fetch + sha256-verify the web tarball. */
+    public static function updatesDownloadWeb(): void
+    {
+        $admin = self::require();
+        Csrf::verify();
+        $result = UpdaterService::downloadWebUpdate();
+        if (!empty($result['ok'])) {
+            log_audit('updates_download', 'web ' . ($result['version'] ?? ''), $result['filename'] ?? null);
+            $_SESSION['last_web_download'] = $result;
+            flash('Downloaded and verified v' . h($result['version'] ?? '') . ' — ' . h($result['filename'] ?? '') . ' (' . number_format((int) ($result['size'] ?? 0)) . ' bytes). ' . h($result['instructions'] ?? ''));
+        } else {
+            flash('Update download failed: ' . h($result['error'] ?? 'unknown error'));
+        }
+        redirect('/admin/updates');
+    }
+
+    /** The last verified web-update download (if any) for the Updates page. */
+    private static function lastWebDownload(): ?array
+    {
+        $v = $_SESSION['last_web_download'] ?? null;
+        if (!is_array($v)) {
+            return null;
+        }
+        if (!empty($v['path']) && !is_file($v['path'])) {
+            unset($_SESSION['last_web_download']);
+            return null;
+        }
+        return $v;
+    }
+
+    /** GET /admin/updates/download?file=… — stream a verified web-update archive. */
+    public static function updatesDownload(): void
+    {
+        $admin = self::require();
+        $file = basename((string) ($_GET['file'] ?? ''));
+        if ($file === '' || $file === '.' || $file === '..') {
+            http_response_code(404);
+            echo 'Not found';
+            return;
+        }
+        $path = ROOT . '/data/updates/' . $file;
+        if (!is_file($path)) {
+            http_response_code(404);
+            echo 'Not found';
+            return;
+        }
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="' . h($file) . '"');
+        header('Content-Length: ' . (string) filesize($path));
+        readfile($path);
+        exit;
     }
 
     /** GET /admin/theme — server-wide appearance: preset library + chat background. */
@@ -966,6 +1087,11 @@ final class AdminController
                         config_set("download_{$dlApp}_{$dlPlat}_version", trim((string) ($_POST["download_{$dlApp}_{$dlPlat}_version"] ?? '')));
                     }
                 }
+                // Update feed (Admin → Settings → Updates). Enabling clears the
+                // cached manifest so the next page view re-fetches from upstream.
+                config_set('updater_enabled', ($_POST['updater_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('updater_url', rtrim(trim((string) ($_POST['updater_url'] ?? '')), '/'));
+                @unlink(UpdaterService::manifestPath());
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 $newWsPort = (int) (config_get('ws_port', '8080') ?? 8080);

@@ -1,6 +1,6 @@
 {
   "name": "lvchat-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "LVChat Desktop client — connect to your LVChat servers",
   "main": "src/main.js",
   "author": {
@@ -33,6 +33,12 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.lasvegasbestinternet.com/desktop"
+      }
+    ],
     "mac": {
       "target": [
         "dmg"
@@ -61,5 +67,8 @@
   "devDependencies": {
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }

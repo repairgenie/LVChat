@@ -21,6 +21,7 @@
     if (u.invisible || !u.is_online) return 'bg-discord-500';
     if (u.status_mode === 'dnd') return 'bg-red-500';
     if (u.status_mode === 'away' || u.away) return 'bg-amber-400';
+    if (u.status_mode === 'custom') return 'bg-amber-400';
     return 'bg-green-500';
   }
   function presenceStatus(u) {

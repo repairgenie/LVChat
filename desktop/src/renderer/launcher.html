@@ -58,6 +58,12 @@
           <span>Connect automatically when LVChat Desktop starts</span>
         </label>
 
+        <label class="check" id="server-updates-wrap" hidden>
+          <input type="checkbox" id="server-use-updates" />
+          <span>Use this server's update feed for this app</span>
+        </label>
+        <p class="hint" id="server-updates-hint" hidden></p>
+
         <p id="server-error" class="error" hidden></p>
       </form>
 
@@ -77,6 +83,12 @@
 
   <footer class="footer">
     <span>LVChat Desktop <span id="version"></span></span>
+    <span id="update-status" class="update-status" hidden>
+      <span class="update-dot"></span>
+      <span id="update-status-text"></span>
+      <button id="update-install" class="ghost" hidden>Install now</button>
+      <button id="update-check" class="ghost">Check for updates</button>
+    </span>
     <span id="notify-count" class="badge" hidden></span>
     <button id="test-notification" class="ghost" title="Verify OS notifications work on this machine">Test notification</button>
   </footer>

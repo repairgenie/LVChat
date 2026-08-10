@@ -342,6 +342,8 @@ final class Database
             }
         }
         $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('download_update_url', '')");
+        $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('updater_enabled', '0')");
+        $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('updater_url', '')");
 
         $pdo->exec("INSERT OR REPLACE INTO server_config (key, value) VALUES ('schema_version', '" . self::SCHEMA_VERSION . "')");
 
@@ -558,6 +560,8 @@ final class Database
             }
         }
         $config['download_update_url'] = '';
+        $config['updater_enabled'] = '0';
+        $config['updater_url'] = '';
         $ins = $db->prepare('INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)');
         foreach ($config as $k => $v) {
             $ins->execute([$k, $v]);

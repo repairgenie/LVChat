@@ -246,6 +246,39 @@ every run and migrates an older `../data/chat.db` location into place automatica
 If `.htaccess` is ever missing, the app still responds at `index.php/<path>` — but clean
 URLs come back as soon as you run `bin/deploy.sh`.
 
+## Update system
+
+LVChat ships with an update feed so admins and users always know the latest
+version of everything, and so desktop clients can self-update.
+
+- **`update-server/`** is a small, zero-dependency PHP web app that publishes the
+  current versions + download links for all three apps (web, desktop, messenger).
+  `data/releases.json` is the single source of truth; it serves a JSON manifest
+  (`/manifest.json`), stable `/downloads/<app>/<platform>` redirects, and the
+  electron-updater `latest*.yml` feeds. See `update-server/README.md`.
+- **Upstream vs custom.** A server admin points their install at an update server
+  under **Admin → Settings → Updates** (`updater_url`, on by default when set).
+  The chat's download modal and the **Admin → Updates** page then resolve latest
+  versions and links from that feed. The existing per-platform **custom** download
+  fields still win when filled in — that's the white-label mechanism (community
+  builds with their own URLs, or a mirror). Empty fields fall back to upstream.
+- **Web app updates.** **Admin → Updates** compares the installed version against
+  the feed, shows release notes, and can download the verified archive
+  (sha256-checked) into `data/updates/` for a manual upload + `bash bin/deploy.sh`.
+  One-click auto-swap is deliberately not automatic. A cron-friendly check:
+  `php bin/check-updates.php` (exits `1` when something is outdated).
+- **Desktop & Messenger updates.** Both Electron apps use `electron-updater`
+  against the upstream feed (set at build time via `build.publish`). A quiet
+  background check runs on launch and every 12h; the Profile Manager footer shows
+  the status with a **Check for updates** button and install prompts. A server
+  that advertises its own feed (`updater_url` in `/api/version`) can be opted into
+  per profile ("Use this server's updates") for white-labelled builds. **Note:**
+  silent auto-install on macOS/Windows needs code-signed artifacts; unsigned
+  builds fall back to download prompts.
+- **API.** `GET /api/version` now includes `updater_url`; `GET /api/updater`
+  returns the effective per-app versions + links this server serves its users
+  (custom overrides win).
+
 ## Default channels
 
 On a fresh database the following channels are created automatically:
@@ -424,15 +457,15 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **899 automated assertions** in three layers:
+Runs **957 automated assertions** in three layers:
 
-- **`tests/smoke.php`** (545) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (546) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
   share links, guests, webhooks, account invites + SMTP, age verification, the
   moderation queue (filter hits, kicks, *lines), pending/suspended account status,
   staff notes, support tickets, and legal-page sanitisation.
-- **`tests/http_test.php`** (342) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (399) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
@@ -538,6 +571,7 @@ views/           layout, auth, chat app, browse, admin pages
 bin/deploy.sh    post-upload restore + sanity check
 bin/ws-server.php   Workerman realtime gateway (WebSocket + internal push endpoint)
 bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
+bin/check-updates.php  CLI update check against the configured feed (cron-friendly)
 bin/test.sh      run the full automated test suite
 tests/smoke.php  545 command/service assertions
 tests/http_test.php  342 HTTP assertions
@@ -547,6 +581,7 @@ schema.sql       SQLite schema (applied on boot)
 data/            SQLite database (beside public/, never web-served)
 desktop/         LVChat Desktop — the web app as a native Electron client (see above)
 lvchat-messenger/   LVChat Messenger — IM-first Electron client (see above)
+update-server/   the update feed web app (versions + download links + electron feeds)
 ```
 
 The **PWA layer** ships as committed files — `public/sw.js` (service worker),

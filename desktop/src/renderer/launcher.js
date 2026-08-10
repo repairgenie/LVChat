@@ -26,6 +26,61 @@ const connectionsRefresh = document.getElementById('connections-refresh')
 const testNotificationBtn = document.getElementById('test-notification')
 const notifyCountEl = document.getElementById('notify-count')
 
+// Updates
+const updateStatusEl = document.getElementById('update-status')
+const updateStatusText = document.getElementById('update-status-text')
+const updateDot = updateStatusEl.querySelector('.update-dot')
+const updateCheckBtn = document.getElementById('update-check')
+const updateInstallBtn = document.getElementById('update-install')
+const serverUpdatesWrap = document.getElementById('server-updates-wrap')
+const serverUpdatesHint = document.getElementById('server-updates-hint')
+const serverUseUpdates = document.getElementById('server-use-updates')
+
+function renderUpdateStatus (status) {
+  const s = status || { state: 'idle' }
+  const dot = updateDot
+  updateInstallBtn.hidden = true
+  switch (s.state) {
+    case 'checking':
+      show(updateStatusEl, true)
+      updateStatusEl.classList.remove('is-update', 'is-ready', 'is-error')
+      updateStatusText.textContent = 'Checking for updates…'
+      break
+    case 'uptodate':
+      show(updateStatusEl, true)
+      updateStatusEl.classList.remove('is-update', 'is-ready', 'is-error')
+      updateStatusText.textContent = "You're up to date"
+      break
+    case 'available':
+      show(updateStatusEl, true)
+      updateStatusEl.classList.add('is-update')
+      updateStatusText.textContent = `v${s.version} available — downloading…`
+      break
+    case 'downloading':
+      show(updateStatusEl, true)
+      updateStatusEl.classList.add('is-update')
+      updateStatusText.textContent = `Downloading v${s.version || ''}… ${s.percent || 0}%`
+      break
+    case 'downloaded':
+      show(updateStatusEl, true)
+      updateStatusEl.classList.add('is-ready')
+      updateStatusText.textContent = `v${s.version} ready to install`
+      updateInstallBtn.hidden = false
+      break
+    case 'error':
+      show(updateStatusEl, true)
+      updateStatusEl.classList.add('is-error')
+      updateStatusText.textContent = 'Update check failed'
+      break
+    default:
+      show(updateStatusEl, false)
+  }
+}
+
+api.onUpdateStatus(renderUpdateStatus)
+updateCheckBtn.addEventListener('click', () => api.updatesCheck({ quiet: false }))
+updateInstallBtn.addEventListener('click', () => api.updatesQuitAndInstall())
+
 testNotificationBtn.addEventListener('click', async () => {
   await api.testNotification()
 })
@@ -191,6 +246,11 @@ function startEdit (profile) {
   probed = null
   show(serverCheckResult, false)
   setError(serverError, '')
+  // The feed opt-in is shown for already-saved servers that advertise a feed.
+  const hasStoredFeed = !!profile.serverUpdaterUrl
+  serverUseUpdates.checked = !!profile.useServerUpdates
+  show(serverUpdatesWrap, hasStoredFeed)
+  show(serverUpdatesHint, false)
   openForm('Save')
   api.hasCredentials({ id: profile.id }).then((has) => {
     if (!has) {
@@ -216,6 +276,9 @@ function resetForm () {
   serverUsername.value = ''
   serverPassword.value = ''
   serverAutoConnect.checked = false
+  serverUseUpdates.checked = false
+  show(serverUpdatesWrap, false)
+  show(serverUpdatesHint, false)
   savePassword.checked = true
   show(serverCheckResult, false)
   show(serverForm, false)
@@ -247,7 +310,7 @@ serverCheck.addEventListener('click', async () => {
   serverCheck.disabled = false
   serverCheck.textContent = 'Check server'
   if (res.ok) {
-    probed = { url: res.url, site: res.site, version: res.version }
+    probed = { url: res.url, site: res.site, version: res.version, updaterUrl: res.updaterUrl || '' }
     serverCheckResult.className = 'hint ok'
     serverCheckResult.textContent = `LVChat server found: ${res.site} (v${res.version})`
   } else {
@@ -256,7 +319,22 @@ serverCheck.addEventListener('click', async () => {
     serverCheckResult.textContent = res.error || 'Not a valid LVChat server.'
   }
   show(serverCheckResult, true)
+  refreshServerUpdatesUi()
 })
+
+function refreshServerUpdatesUi () {
+  // Only offer the feed opt-in when the server actually advertises an update
+  // feed, and when the URL hasn't been changed since it was probed.
+  const matchesProbed = probed && normalizeForCompare(serverUrl.value.trim()) === normalizeForCompare(probed.url)
+  const hasFeed = matchesProbed && !!probed.updaterUrl
+  show(serverUpdatesWrap, hasFeed)
+  if (hasFeed) {
+    serverUpdatesHint.textContent = `This server publishes app updates (${probed.updaterUrl}). Enabling makes this app check that feed instead of the default upstream.`
+    show(serverUpdatesHint, true)
+  } else {
+    show(serverUpdatesHint, false)
+  }
+}
 
 addToggle.addEventListener('click', () => {
   editingId = null
@@ -288,7 +366,9 @@ serverForm.addEventListener('submit', async (e) => {
     url,
     username,
     autoConnect: serverAutoConnect.checked,
-    siteName: probed ? probed.site : null
+    siteName: probed ? probed.site : null,
+    serverUpdaterUrl: probed ? probed.updaterUrl : null,
+    useServerUpdates: serverUseUpdates.checked
   }
   const res = editingId
     ? await api.updateProfile({ id: editingId, ...payload })
@@ -321,6 +401,7 @@ async function loadAll () {
   document.getElementById('version').textContent = 'v' + data.version
   renderServers()
   renderConnections()
+  api.updatesStatus().then(renderUpdateStatus).catch(() => {})
 }
 
 connectionsRefresh.addEventListener('click', loadConnections)

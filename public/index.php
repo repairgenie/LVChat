@@ -44,6 +44,7 @@ $router->get('/embed/{slug}', [ChannelController::class, 'embed']);
 
 // Chat API
 $router->get('/api/version', [ChatController::class, 'version']);
+$router->get('/api/updater', [ChatController::class, 'updater']);
 $router->post('/api/send', [ChatController::class, 'send']);
 $router->post('/api/upload', [ChatController::class, 'upload']);
 $router->post('/api/command', [ChatController::class, 'command']);
@@ -169,6 +170,11 @@ $router->get('/admin/logs', [AdminController::class, 'logs']);
 $router->get('/admin/logs/day', [AdminController::class, 'logDay']);
 $router->get('/admin/logs/export', [AdminController::class, 'logDayExport']);
 $router->get('/admin/settings', [AdminController::class, 'settings']);
+$router->get('/admin/updates', [AdminController::class, 'updates']);
+$router->post('/admin/updates/check', [AdminController::class, 'updatesCheck']);
+$router->post('/admin/updates/pin', [AdminController::class, 'updatesPin']);
+$router->post('/admin/updates/download-web', [AdminController::class, 'updatesDownloadWeb']);
+$router->get('/admin/updates/download', [AdminController::class, 'updatesDownload']);
 $router->get('/admin/theme', [AdminController::class, 'theme']);
 $router->get('/admin/invites', [AdminController::class, 'invites']);
 $router->get('/admin/openclaw', [AdminController::class, 'openclaw']);

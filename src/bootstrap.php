@@ -48,6 +48,7 @@ require ROOT . '/src/services/PushService.php';
 require ROOT . '/src/services/CommandRunner.php';
 require ROOT . '/src/services/TotpService.php';
 require ROOT . '/src/services/AnalyticsService.php';
+require ROOT . '/src/services/UpdaterService.php';
 require ROOT . '/src/services/CommandParser.php';
 require ROOT . '/src/services/CommandRegistry.php';
 require ROOT . '/src/services/commands/CoreCommands.php';

@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, shel
 const path = require('path')
 const fs = require('fs')
 const profiles = require('./profiles')
+const updater = require('./updater')
 const { createStaticServer } = require('./server')
 
 app.setName('LVChat Messenger')
@@ -15,6 +16,8 @@ let messengerNotifications = 0
 let staticServer = null
 let appOrigin = 'http://127.0.0.1'
 const messengerWindows = new Map()
+
+let appUpdater = null
 
 const APP_ICON = path.join(__dirname, '..', 'build', 'icon.png')
 
@@ -344,7 +347,16 @@ function buildMenu () {
     },
     { role: 'editMenu' },
     { role: 'viewMenu' },
-    { role: 'windowMenu' }
+    { role: 'windowMenu' },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Check for Updates…',
+          click: () => { checkForUpdates({ manual: true }) }
+        }
+      ]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -628,6 +640,54 @@ function registerIpc () {
   })
 }
 
+// ── Updates ─────────────────────────────────────────────────────────────────
+
+function feedUrlFor () {
+  return updater.resolveFeedUrl(profiles.list())
+}
+
+function broadcastUpdateStatus () {
+  if (launcherWindow && !launcherWindow.isDestroyed()) {
+    launcherWindow.webContents.send('updates:status', appUpdater ? appUpdater.getState() : { state: 'idle' })
+  }
+}
+
+function checkForUpdates ({ manual, quiet } = {}) {
+  if (!appUpdater) return Promise.resolve({ state: 'idle' })
+  broadcastUpdateStatus()
+  const p = appUpdater.checkNow({ quiet: manual ? false : quiet })
+  if (p && typeof p.then === 'function') {
+    p.catch((err) => console.warn('update check failed:', err && err.message))
+  }
+  return p
+}
+
+function setupUpdater () {
+  if (appUpdater) return appUpdater
+  appUpdater = updater.createUpdater({
+    currentVersion: app.getVersion(),
+    feedUrl: feedUrlFor,
+    onStatus: broadcastUpdateStatus
+  })
+  ipcMain.handle('updates:check', (_e, opts) => checkForUpdates({ manual: true, quiet: !!(opts && opts.quiet) }))
+  ipcMain.handle('updates:status', () => appUpdater.getState())
+  ipcMain.handle('updates:feed', () => ({
+    url: appUpdater.feedUrl(),
+    currentVersion: appUpdater.currentVersion
+  }))
+  ipcMain.handle('updates:server', (_e, { id }) => {
+    const profile = profiles.find(id)
+    if (!profile) return { ok: false, error: 'Profile not found' }
+    return profiles.getServerUpdater(profile)
+  })
+  ipcMain.handle('updates:quit-and-install', () => { appUpdater.quitAndInstall(); return { ok: true } })
+  // Quiet background auto-check on startup (delayed so windows can come up),
+  // then once every 12h while the app runs.
+  setTimeout(() => checkForUpdates({ quiet: true }), 15000)
+  setInterval(() => checkForUpdates({ quiet: true }), 12 * 3600 * 1000)
+  return appUpdater
+}
+
 app.on('web-contents-created', (_e, contents) => {
   contents.setWindowOpenHandler(({ url: target }) => {
     if (/^https?:/i.test(target)) shell.openExternal(target)
@@ -647,6 +707,7 @@ app.whenReady().then(async () => {
   appOrigin = serving.origin
 
   registerIpc()
+  setupUpdater()
   buildMenu()
   buildTray()
   ensureWindowsNotificationShortcut()
@@ -696,4 +757,4 @@ app.on('will-quit', () => {
   if (staticServer) staticServer.close()
 })
 
-module.exports = { createLauncherWindow, connectProfile, disconnectProfile, messengerWindows, registerIpc, trayPresent, trayImage, appOrigin: () => appOrigin }
+module.exports = { createLauncherWindow, connectProfile, disconnectProfile, messengerWindows, registerIpc, trayPresent, trayImage, appOrigin: () => appOrigin, setupUpdater, checkForUpdates, getAppUpdater: () => appUpdater }

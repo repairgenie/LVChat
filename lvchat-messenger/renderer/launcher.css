@@ -155,5 +155,12 @@ button.danger:hover:not(:disabled) { background: var(--danger-hover); color: #ff
   align-items: center;
   justify-content: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .footer button { padding: 4px 10px; font-size: 12px; }
+.update-status { display: flex; align-items: center; gap: 8px; }
+.update-status .update-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.update-status.is-update .update-dot { background: var(--accent); }
+.update-status.is-ready .update-dot { background: var(--green); }
+.update-status.is-error .update-dot { background: var(--danger); }
+.server-update { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; margin-top: 6px; }

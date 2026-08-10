@@ -14,6 +14,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lvchat-messenger-test-'))
 app.setPath('userData', tmp)
 
 const messengerMain = require('../src/main')
+const updater = require('../src/updater')
+const profiles = require('../src/profiles')
 
 // Intercept external-browser opens so registration URLs can be asserted without
 // launching a real browser. main.js references the same `shell` singleton.
@@ -145,6 +147,11 @@ function mockLvchatServer () {
     soundPrefs: null,
     pushPrefs: null,
     meStatus: null,
+    mutedUsers: new Set(), // user ids muted by the viewer (user_mutes)
+    blockedUsers: new Set(), // usernames blocked by the viewer
+    onlineFriends: new Set(['bob']), // usernames currently online
+    friendModes: {}, // username -> status_mode override (issue #6)
+    friendStatus: {}, // username -> custom_status override
     invites: [
       { id: 5, channel_id: 9, channel_name: 'Dev Lounge', slug: 'dev', inviter: 'bob', created_at: '2026-08-06 07:00:00' },
       { id: 6, channel_id: 10, channel_name: 'Gamers Den', slug: 'gamers', inviter: 'carol', created_at: '2026-08-06 07:05:00' }
@@ -155,6 +162,14 @@ function mockLvchatServer () {
     { id: 2, username: 'bob', avatar: null, role: 'user', away: null, last_seen: '2026-08-06 09:59:00', friends_since: '2026-07-01 00:00:00', is_online: 1 },
     { id: 3, username: 'carol', avatar: null, role: 'user', away: null, last_seen: '2026-08-01 00:00:00', friends_since: '2026-07-01 00:00:00', is_online: 0 }
   ])
+    // Blocking deletes the friendship server-side, so blocked users leave the list.
+    .filter((u) => !state.blockedUsers.has(u.username))
+    .map((u) => Object.assign({}, u, {
+      is_online: state.onlineFriends.has(u.username) ? 1 : 0,
+      status_mode: state.friendModes[u.username] || 'online',
+      custom_status: state.friendStatus[u.username] || '',
+      muted: state.mutedUsers.has(u.id) ? 1 : 0
+    }))
   const incoming = () => ([{ id: 4, username: 'eve', avatar: null, created_at: '2026-08-06 08:00:00' }])
   const outgoing = () => (state.directoryDanStatus === 'outgoing'
     ? [{ id: 9, username: 'dan', avatar: null, created_at: '2026-08-06 08:30:00' }]
@@ -167,6 +182,8 @@ function mockLvchatServer () {
           ? { id: 2, username: 'bob', avatar: null, role: 'user', away: null, last_seen: '2026-08-06 09:59:00' }
           : { id: 3, username: 'carol', avatar: null, role: 'user', away: null, last_seen: '2026-08-01 00:00:00' }
         u.is_online = u.id === 2 ? 1 : 0
+        u.status_mode = state.friendModes[u.username] || 'online'
+        u.custom_status = state.friendStatus[u.username] || ''
         return u
       })
       return { id: g.id, name: g.name, position: g.position, members }
@@ -182,12 +199,13 @@ function mockLvchatServer () {
       messages: [],
       presence: [],
       notify_count: 1,
-      dm_list: [{ user_id: 3, username: 'carol', role: 'user', guest: 0, away: null, last_seen: '2026-08-01 00:00:00', unread: state.dmUnread, last_content: 'hey', last_id: 3, muted: 0 }],
+      dm_list: [{ user_id: 3, username: 'carol', role: 'user', guest: 0, away: null, last_seen: '2026-08-01 00:00:00', unread: state.dmUnread, last_content: 'hey', last_id: 3, muted: state.mutedUsers.has(3) ? 1 : 0 }],
       friends: friends(),
       friend_requests: incoming(),
       channel_invites: state.invites,
       channel_unread: state.joinedChannels.map((c) => ({ slug: c.slug, unread: c.unread })),
-      channel_presence: state.joinedChannels.map((c) => ({ slug: c.slug, online: c.online }))
+      channel_presence: state.joinedChannels.map((c) => ({ slug: c.slug, online: c.online })),
+      blocked: [...state.blockedUsers].map((username) => ({ id: username === 'carol' ? 3 : 2, username, avatar: null }))
     }
     if (dm) {
       payload.dm = dm
@@ -214,6 +232,8 @@ function mockLvchatServer () {
       (error ? '<div class="text-red-400">' + error + '</div>' : '') +
       '<title>' + title + '</title></body></html>'
   }
+
+  const serverBase = () => `http://127.0.0.1:${server.address().port}`
 
   const server = http.createServer((req, res) => {
     if (process.env.MOCK_LOG) console.log('[mock]', req.method, req.url)
@@ -244,7 +264,20 @@ function mockLvchatServer () {
     }
 
     if (url.pathname === '/api/version') {
-      json(200, { version: '1.0.0-test', site: 'Test Chat' })
+      json(200, { version: '1.0.0-test', site: 'Test Chat', updater_url: serverBase() })
+      return
+    }
+
+    if (url.pathname === '/api/updater') {
+      json(200, {
+        updater_url: serverBase(),
+        site: 'Test Chat',
+        apps: {
+          web: { installed: '1.0.0', latest: '1.0.0', url: serverBase() + '/web.zip', sha256: '', update_available: false },
+          messenger: { installed: '9.9.9', latest: '9.9.9', update_available: false, platforms: { win: { url: serverBase() + '/messenger.exe', version: '9.9.9' } } },
+          desktop: { installed: '1.0.0', latest: '1.0.0', update_available: false, platforms: {} }
+        }
+      })
       return
     }
 
@@ -334,7 +367,29 @@ function mockLvchatServer () {
       return
     }
     if (url.pathname === '/api/friends') {
-      json(200, { ok: true, friends: friends(), incoming: incoming(), outgoing: outgoing(), blocked: [] })
+      json(200, { ok: true, friends: friends(), incoming: incoming(), outgoing: outgoing(), blocked: [...state.blockedUsers].map((username) => ({ id: username === 'carol' ? 3 : 2, username, avatar: null })) })
+      return
+    }
+    if (url.pathname === '/api/push/mute' || url.pathname === '/api/push/unmute') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const uid = Number(new URLSearchParams(body).get('user_id'))
+        if (url.pathname === '/api/push/mute') state.mutedUsers.add(uid)
+        else state.mutedUsers.delete(uid)
+        json(200, { ok: true })
+      })
+      return
+    }
+    if (url.pathname === '/api/friend/block' || url.pathname === '/api/friend/unblock') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const username = new URLSearchParams(body).get('username')
+        if (url.pathname === '/api/friend/block') state.blockedUsers.add(username)
+        else state.blockedUsers.delete(username)
+        json(200, { ok: true })
+      })
       return
     }
     if (url.pathname === '/api/groups') {
@@ -497,7 +552,21 @@ function mockLvchatServer () {
       return
     }
     if (url.pathname === '/api/sounds') {
-      json(200, { ok: true, sounds: { 1: { name: 'Ding', url: '/assets/sounds/ding.wav' } }, dm_sound_id: 1, channel_sound_id: 1, overrides: {} })
+      // Server-seeded tones (Ding/Pop/Chime) — the messenger must NOT add its
+      // own local built-ins of the same names, or the picker lists them twice.
+      const overrides = {}
+      for (const uid of state.mutedUsers) overrides[uid] = null
+      json(200, {
+        ok: true,
+        sounds: {
+          1: { name: 'Ding', url: '/assets/sounds/ding.wav' },
+          2: { name: 'Pop', url: '/assets/sounds/pop.wav' },
+          3: { name: 'Chime', url: '/assets/sounds/chime.wav' }
+        },
+        dm_sound_id: 1,
+        channel_sound_id: 1,
+        overrides
+      })
       return
     }
     if (url.pathname === '/api/sound/prefs') {
@@ -770,6 +839,7 @@ async function main () {
   await js(win, `(() => { const m = document.getElementById('head-menu'); const b = [...m.querySelectorAll('button')].find((x) => x.textContent.includes('Settings')); if (b) b.click(); return !!b })()`)
   check('settings modal opens from the menu', await waitJs(win, `!document.getElementById('settings-modal').hidden && 'ok'`))
   check('settings load current prefs', await waitJs(win, `document.getElementById('set-notify-dms').checked && document.getElementById('set-notify-channels').checked && document.getElementById('set-sound-dm-on').checked && document.getElementById('set-sound-dm').value === '1' && 'ok'`))
+  check('sound picker lists each tone once (no dupes)', await waitJs(win, `(() => { const s = document.getElementById('set-sound-dm'); const names = [...s.options].map((o) => o.textContent.trim()); return names.length === 4 && new Set(names).size === names.length && 'ok' })()`))
   // Toggle DM notifications off -> saved to the server + reflected in prefs.
   await js(win, `(() => { const c = document.getElementById('set-notify-dms'); c.checked = false; c.dispatchEvent(new Event('change')); return 'ok' })()`)
   await new Promise((r) => setTimeout(r, 400))
@@ -804,6 +874,42 @@ async function main () {
   check('custom status saved to the server', !!mock.state.meStatus && mock.state.meStatus.status_mode === 'custom' && mock.state.meStatus.custom_status === 'streaming', JSON.stringify(mock.state.meStatus))
   check('custom status shown in header', await waitJs(win, `document.getElementById('me-status').textContent.includes('Custom status') && document.getElementById('me-status').textContent.includes('streaming') && 'ok'`))
 
+  // Issue #6: a friend using a custom status must show the away-colored dot to
+  // other users (not a plain green "online"). Carol is an ungrouped friend, so
+  // her row re-renders from the poll's friend data.
+  mock.state.onlineFriends.add('carol')
+  mock.state.friendModes['carol'] = 'custom'
+  mock.state.friendStatus['carol'] = 'streaming'
+  check('custom-status friend shows the away dot', await waitJs(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); return !!c && c.querySelector('.dot').classList.contains('away') && 'ok' })()`))
+  mock.state.onlineFriends.delete('carol')
+  mock.state.friendModes['carol'] = 'online'
+  mock.state.friendStatus['carol'] = ''
+
+  // Issue #8: mute + block from the buddy context menu.
+  // Grouped member bob: mute, verify the label flips to Unmute, then unmute.
+  await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
+  check('context menu offers Mute + Block', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Mute notifications') && m.textContent.includes('Block') && 'ok' })()`))
+  await js(win, `(() => { const b = [...document.querySelectorAll('.ctx-menu .ctx-item')].find((x) => x.textContent.includes('Mute notifications')); if (b) b.click(); return !!b })()`)
+  await new Promise((r) => setTimeout(r, 800))
+  check('mute posted /api/push/mute', mock.state.mutedUsers.has(2), [...mock.state.mutedUsers])
+  // Reopen the menu: the item should now read Unmute notifications.
+  await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (c) c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
+  check('muted friend shows Unmute', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Unmute notifications') && !m.textContent.includes('Mute notifications') && 'ok' })()`))
+  await js(win, `(() => { const b = [...document.querySelectorAll('.ctx-menu .ctx-item')].find((x) => x.textContent.includes('Unmute notifications')); if (b) b.click(); return !!b })()`)
+  await new Promise((r) => setTimeout(r, 800))
+  check('unmute posted /api/push/unmute', !mock.state.mutedUsers.has(2), [...mock.state.mutedUsers])
+
+  // A muted sender must not fire an OS notification even when their unread
+  // count grows (previously only the sound was silenced).
+  const n2 = await js(win, `window.msg.notifyStats()`)
+  mock.state.mutedUsers.add(3) // carol
+  mock.state.dmUnread = 4
+  await new Promise((r) => setTimeout(r, 2600))
+  const n3 = await js(win, `window.msg.notifyStats()`)
+  check('muted sender fires no OS notification', (n3.count || 0) === (n2.count || 0), `${JSON.stringify(n2)} -> ${JSON.stringify(n3)}`)
+  mock.state.mutedUsers.delete(3)
+  mock.state.dmUnread = 2
+
   // Buddy context menu (grouped member: window/profile/remove-from-group).
   await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
   check('grouped member context menu has window + profile + remove-from-group', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Open in new window') && m.textContent.includes('View profile') && m.textContent.includes('Remove from Friends') && 'ok' })()`))
@@ -811,6 +917,20 @@ async function main () {
   // Buddy context menu (ungrouped friend: window/profile/remove-friend).
   await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
   check('buddy context menu shows window + profile + remove friend', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Open in new window') && m.textContent.includes('View profile') && m.textContent.includes('Remove friend') && 'ok' })()`))
+
+  // Issue #8: block carol from the context menu → she leaves the friends list
+  // and lands under "Blocked users"; unblocking brings her back.
+  await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
+  await js(win, `(() => { const b = [...document.querySelectorAll('.ctx-menu .ctx-item')].find((x) => x.textContent === 'Block'); if (b) b.click(); return !!b })()`)
+  check('block confirm modal appears', await waitJs(win, `!document.getElementById('modal').hidden && 'ok'`))
+  await js(win, `document.getElementById('modal-ok').click()`)
+  await new Promise((r) => setTimeout(r, 800))
+  check('block posted /api/friend/block', mock.state.blockedUsers.has('carol'), [...mock.state.blockedUsers])
+  check('blocked friend moves to the Blocked users group', await waitJs(win, `(() => { const t = document.getElementById('buddy-list'); const g = [...t.querySelectorAll('.group')].find((x) => x.querySelector('.group-head') && x.querySelector('.group-head').textContent.includes('Blocked users')); return !!g && g.textContent.includes('carol') && 'ok' })()`))
+  await js(win, `(() => { const b = [...document.querySelectorAll('#buddy-list button')].find((x) => x.textContent === 'Unblock'); if (b) b.click(); return !!b })()`)
+  await new Promise((r) => setTimeout(r, 800))
+  check('unblock restores carol to the buddy list', await waitJs(win, `(() => { const t = document.getElementById('buddy-list'); const g = [...t.querySelectorAll('.group')].find((x) => x.querySelector('.group-head') && x.querySelector('.group-head').textContent.includes('Blocked users')); return !g && t.textContent.includes('carol') && 'ok' })()`))
+  check('unblock posted /api/friend/unblock', !mock.state.blockedUsers.has('carol'), [...mock.state.blockedUsers])
 
   // Room view: gaming with members.
   await js(win, `document.getElementById('tab-rooms').click()`)
@@ -846,6 +966,33 @@ async function main () {
   check('auto-login with saved creds reaches MFA', await waitJs(win, `!document.getElementById('view-mfa').hidden`))
   await js(win, `document.getElementById('mfa-code').value = '123456'; document.getElementById('mfa-form').requestSubmit()`)
   check('auto-login completes back to main', await waitJs(win, `!document.getElementById('view-main').hidden`))
+
+  // ── updater (pure logic + server feed discovery) ──────────────────────────
+  console.log('== updater ==')
+  check('compareVersions newer', updater.compareVersions('1.10.0', '1.9.0') > 0)
+  check('compareVersions older', updater.compareVersions('0.9.9', '1.0.0') < 0)
+  check('parseFeedVersion yml', updater.parseFeedVersion('version: 0.2.0\nfiles:\n  - url: x\n') === '0.2.0')
+  check('feedFileName win', updater.feedFileName('win32') === 'latest.yml')
+  const avail = await updater.isUpdateAvailable('https://updates.example.com/messenger', '0.1.1', 'linux', async () => 'version: 0.2.0\n')
+  check('isUpdateAvailable true on newer feed', avail === true)
+  check('resolveFeedUrl defaults to upstream', updater.resolveFeedUrl([]) === updater.PACKAGE_FEED_URL)
+  const optIn = updater.resolveFeedUrl([{ serverUpdaterUrl: 'https://feeds.example.com/x', useServerUpdates: true, lastConnectedAt: '2026-01-02' }])
+  check('resolveFeedUrl honours a profile opt-in', optIn === 'https://feeds.example.com/x/messenger', optIn)
+
+  // The launcher closes after login — reopen it to exercise the feed probe and
+  // the UI update row.
+  messengerMain.createLauncherWindow()
+  const updLauncher = await waitLauncher()
+  const probeOk = await js(updLauncher, `window.lvchat.probeServer({ url: ${JSON.stringify(mock.base)} })`)
+  check('probe surfaces the server updater feed', probeOk.ok && probeOk.updaterUrl === mock.base, JSON.stringify(probeOk))
+  const srv = await profiles.getServerUpdater(profiles.find(profileId))
+  check('getServerUpdater resolves server feed links', srv.ok && (srv.apps.messenger.platforms.win.url || '').includes('/messenger.exe'), JSON.stringify(srv))
+  const footer = await js(updLauncher, `(() => { const t = document.getElementById('update-status-text'); const b = document.getElementById('update-check'); return { hasStatus: !!t, hasBtn: !!b } })()`)
+  check('launcher has update status row', footer.hasStatus && footer.hasBtn)
+  const updState = await js(updLauncher, 'window.lvchat.updatesStatus()')
+  check('updates:status IPC responds', updState && typeof updState.state === 'string', JSON.stringify(updState))
+  const updFeed = await js(updLauncher, 'window.lvchat.updatesFeed()')
+  check('updates:feed IPC responds', updFeed && typeof updFeed.url === 'string' && typeof updFeed.currentVersion === 'string', JSON.stringify(updFeed))
 
   mock.server.close()
 

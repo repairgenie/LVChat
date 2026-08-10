@@ -7,7 +7,9 @@ const http = require('http')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lvchat-desktop-test-'))
 app.setPath('userData', tmp)
 
-const { chatWindows, sameSite, createLauncherWindow, getNotifyCount } = require('../src/main')
+const { chatWindows, sameSite, createLauncherWindow, getNotifyCount, getAppUpdater } = require('../src/main')
+const updater = require('../src/updater')
+const profiles = require('../src/profiles')
 
 let failures = 0
 function check (name, cond, extra) {
@@ -66,12 +68,27 @@ function mockLvchatServer () {
   const notifications = []
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
     const cookie = req.headers.cookie || ''
     const hasSession = /session=abc123/.test(cookie)
 
     if (url.pathname === '/api/version') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ version: '1.0.0-test', site: 'Test Chat' }))
+      res.end(JSON.stringify({ version: '1.0.0-test', site: 'Test Chat', updater_url: baseUrl }))
+      return
+    }
+
+    if (url.pathname === '/api/updater') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        updater_url: baseUrl,
+        site: 'Test Chat',
+        apps: {
+          web: { installed: '1.0.0', latest: '1.0.0', url: baseUrl + '/web.zip', sha256: '', update_available: false },
+          desktop: { installed: '9.9.9', latest: '9.9.9', update_available: false, platforms: { win: { url: baseUrl + '/desktop.exe', version: '9.9.9' } } },
+          messenger: { installed: '1.0.0', latest: '1.0.0', update_available: false, platforms: {} }
+        }
+      }))
       return
     }
 
@@ -163,6 +180,7 @@ async function main () {
 
   const probeOk = await js(win, `window.lvchat.probeServer({ url: '${base}' })`)
   check('probe accepts an LVChat server', probeOk.ok && probeOk.site === 'Test Chat' && probeOk.version === '1.0.0-test', JSON.stringify(probeOk))
+  check('probe surfaces the server updater feed', probeOk.updaterUrl === base, JSON.stringify(probeOk))
 
   const probeBad = await js(win, `window.lvchat.probeServer({ url: '${plainBase}' })`)
   check('probe rejects a plain website', probeBad.ok === false, JSON.stringify(probeBad))
@@ -327,6 +345,50 @@ async function main () {
 
   check('sameSite helper (subdomains)', sameSite('https://chat.lasvegasbestinternet.com', 'https://lasvegasbestinternet.com'))
   check('sameSite helper (foreign rejected)', !sameSite('https://chat.lasvegasbestinternet.com', 'https://evil.com'))
+
+  // ── updater (pure logic, no electron-updater dependency) ──────────────────
+  console.log('== updater ==')
+  check('compareVersions same', updater.compareVersions('1.2.3', '1.2.3') === 0)
+  check('compareVersions newer', updater.compareVersions('1.10.0', '1.9.0') > 0)
+  check('compareVersions older', updater.compareVersions('0.9.9', '1.0.0') < 0)
+  check('compareVersions dotted padding', updater.compareVersions('1.2.3.4', '1.2.3') > 0)
+  check('compareVersions fallback strings', updater.compareVersions('beta2', 'beta1') > 0)
+  check('parseFeedVersion yml', updater.parseFeedVersion('version: 2.0.1\nfiles:\n  - url: x\n') === '2.0.1')
+  check('parseFeedVersion missing', updater.parseFeedVersion('nope') === '')
+  check('feedFileName win', updater.feedFileName('win32') === 'latest.yml')
+  check('feedFileName mac', updater.feedFileName('darwin') === 'latest-mac.yml')
+  check('feedFileName linux', updater.feedFileName('linux') === 'latest-linux.yml')
+
+  const feedYml = 'version: 0.2.0\nfiles:\n  - url: https://x/LVChat.AppImage\n    sha512: null\n    size: 1\n'
+  const avail = await updater.isUpdateAvailable('https://updates.example.com/desktop', '0.1.1', 'linux', async (u) => feedYml)
+  check('isUpdateAvailable true on newer feed', avail === true)
+  const noAvail = await updater.isUpdateAvailable('https://updates.example.com/desktop', '0.3.0', 'linux', async (u) => feedYml)
+  check('isUpdateAvailable false on older/equal feed', noAvail === false)
+
+  check('resolveFeedUrl defaults to upstream', updater.resolveFeedUrl([]) === updater.PACKAGE_FEED_URL)
+  const optIn = updater.resolveFeedUrl([
+    { id: 'a', serverUpdaterUrl: 'https://feeds.example.com/x', useServerUpdates: false, lastConnectedAt: '2026-01-01' },
+    { id: 'b', serverUpdaterUrl: 'https://feeds.example.com/y', useServerUpdates: true, lastConnectedAt: '2026-01-02' }
+  ])
+  check('resolveFeedUrl honours a profile opt-in', optIn === 'https://feeds.example.com/y/desktop', optIn)
+
+  // The server-recommended links via /api/updater (main-process fetch).
+  const srv = await profiles.getServerUpdater(profiles.find(fresh.profile.id))
+  check('getServerUpdater resolves server feed links', srv.ok && (srv.apps.desktop.platforms.win.url || '').includes('/desktop.exe'), JSON.stringify(srv))
+
+  // The launcher footer exposes the update controls.
+  const footer = await js(win, `(() => {
+    const t = document.getElementById('update-status-text');
+    const btn = document.getElementById('update-check');
+    return { hasStatus: !!t, hasBtn: !!btn, statusText: t ? t.textContent : '' };
+  })()`)
+  check('launcher has update status row', footer.hasStatus && footer.hasBtn)
+
+  // The updater singleton exists and answers status without hanging.
+  const updState = await js(win, 'window.lvchat.updatesStatus()')
+  check('updates:status IPC responds', updState && typeof updState.state === 'string', JSON.stringify(updState))
+  const updFeed = await js(win, 'window.lvchat.updatesFeed()')
+  check('updates:feed IPC responds', updFeed && typeof updFeed.url === 'string' && typeof updFeed.currentVersion === 'string', JSON.stringify(updFeed))
 
   lvchat.server.close()
   plain.close()

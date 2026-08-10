@@ -3,16 +3,19 @@ set -u
 cd "$(dirname "$0")/.."
 
 # tests/e2e.js: the main messenger suite (launcher-first flow).
+# tests/switch-e2e.js: account switching via the Profile Manager.
 # tests/startup-e2e.js: launcher-bypass — once per seed mode (auto-connect on
 # startup, and last-used profile with no auto-connect).
 # tests/tray-diagnostic.js: tray icon non-empty + icon shipped in the package.
 TESTS=(
   "tests/e2e.js"
+  "tests/switch-e2e.js"
   "tests/startup-e2e.js"
   "tests/startup-e2e.js"
   "tests/tray-diagnostic.js"
 )
 EXTRA_ENV=(
+  ""
   ""
   "STARTUP_SEED=auto"
   "STARTUP_SEED=lastused"
@@ -32,7 +35,7 @@ for i in "${!TESTS[@]}"; do
   fi
   PID=$!
 
-  for _ in $(seq 1 120); do
+  for _ in $(seq 1 180); do
     if grep -qE "ALL TESTS PASSED|TEST\(S\) FAILED|aborting" "$LOG" 2>/dev/null; then
       break
     fi
