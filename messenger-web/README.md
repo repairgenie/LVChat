@@ -17,8 +17,7 @@ one is set.
 
 - Node.js (any recent version) **only for building** — the output is fully
   static and can be hosted anywhere.
-- The LVChat server must be **HTTPS** (cross-site session cookies need
-  `SameSite=None`, which LVChat only uses over HTTPS).
+- The LVChat server must be **HTTPS**.
 
 ## Setup
 
@@ -48,9 +47,12 @@ npm run preview             # serve dist/ locally for testing (http://127.0.0.1:
 
 ## Allowing the client on the server
 
-The messenger talks to the LVChat server cross-origin with the browser
-session's cookies. Add the origin the messenger will be served from to the
-server's allowlist — easiest from the admin dashboard:
+The messenger talks to the LVChat server cross-origin using a **bearer session
+token** (kept in localStorage, sent as `X-LVC-Session`) instead of the session
+cookie, so it signs in and stays signed in even on phones where browsers block
+third-party cookies (mobile Safari). Add the origin the messenger will be
+served from to the server's allowlist so the API's CORS headers are emitted —
+easiest from the admin dashboard:
 
 ```bash
 # on the LVChat server: Admin → Settings → Web messenger clients → Allowed origins
@@ -62,8 +64,7 @@ export CHAT_CORS_ORIGINS=https://msg.example.com
 The built-in loopback origins (`http://127.0.0.1:*`) and `null` (file://) are
 already allowed, so local testing works without touching the server.
 
-**Both sites must be HTTPS** (or localhost): LVChat sets its session cookie to
-`SameSite=None; Secure` over HTTPS so it flows cross-site.
+Both sites must be **HTTPS** (or localhost).
 
 ## Deploying
 
@@ -101,12 +102,13 @@ Requires the server build that exposes `vapidPublicKey` in `/api/me`
 
 Only the app shell is cached by the service worker. Every API call — polling,
 sending, history, avatars, uploads — goes straight to the server and is never
-served stale or cached per-user. Signing out posts the server's `/logout`
-(clearing the session cookie) and wipes the local shell caches.
+served stale or cached per-user. Signing out revokes the bearer session server-side
+(`/api/messenger/logout`) and wipes the local shell caches.
 
-The client remembers only your **username** in localStorage. Passwords are
-never stored by this app — your browser's own password manager and the
-persistent session cookie handle sign-in.
+The client remembers only your **username** and the opaque **session token** in
+localStorage. Passwords are never stored by this app — your browser's own
+password manager and the bearer token handle sign-in. The token is a random
+64-char session identifier that is revoked on logout and expires after 30 days.
 
 ## Layout / files
 

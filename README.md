@@ -494,7 +494,7 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **1074 automated assertions** in three layers:
+Runs **1088 automated assertions** in three layers:
 
 - **`tests/smoke.php`** (598) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
@@ -505,7 +505,7 @@ Runs **1074 automated assertions** in three layers:
   (sqline/cqline), `/sanick` gating + availability, the `#oper-log` mirror, the
   channel-URL validator and banned-domain list (exact + subdomain), and the
   ChannelService URL/`canManageChannel` helpers.
-- **`tests/http_test.php`** (464) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (478) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
@@ -515,9 +515,12 @@ Runs **1074 automated assertions** in three layers:
   **Blocked URLs** page and `banned_url` actions, the `channel_url` / `url_banned`
   poll fields, the web-messenger **allowed origins** (CORS) setting, the messenger
   room-browser API (`/api/browse`), the **kick** flow (target's poll returns a
-  one-shot redirect carrying the kick reason + actor), and the **channel-URL
+  one-shot redirect carrying the kick reason + actor), the **channel-URL
   embed proxy** (`/api/embed`: framing-header stripping, injected `<base>`,
-  redirects, non-HTML passthrough, plus auth/banned-domain/SSRF guards).
+  redirects, non-HTML passthrough, plus auth/banned-domain/SSRF guards), and the
+  web-messenger **bearer-token auth** (login/mfa/logout, header-authenticated
+  `/api/me` + POSTs without cookies, token revocation, single-use MFA tickets,
+  and the CORS preflight allowing the custom headers).
 - **`tests/ws_test.php`** (12) — WebSocket gateway integration: spawns the realtime
   daemon against a scratch DB and verifies ticket auth, channel/DM subscriptions,
   and message/msg-update fan-out (ports via `WS_PORT` / `WS_PUSH_PORT`).
@@ -573,13 +576,15 @@ npm test                      # mock-server end-to-end suite
 npm run dist                  # package installers (electron-builder)
 ```
 
-The messenger talks to this server's JSON API cross-origin using the browser session's
-cookies, so the server needs CORS enabled for the app's loopback origin. This is on by
-default for `null` (file://) and any `http://127.0.0.1:*` origin. To allow other origins
-(web/mobile builds), add them under **Admin → Settings → Web messenger clients** (writes
-the `app_origins` config key), or set the `CHAT_CORS_ORIGINS` env var, to a comma-separated
-list, e.g. `https://app.example.com`. CORS headers are only emitted when an allowlisted
-`Origin` header is present — normal web-app traffic is untouched.
+The messenger talks to this server's JSON API cross-origin with a **bearer session
+token** (`X-LVC-Session`, kept in localStorage) — no reliance on third-party cookies, so
+it works on phones where browsers block them — while the browser's cookies remain
+supported for compatibility. The server still needs CORS enabled for the app's origin.
+This is on by default for `null` (file://) and any `http://127.0.0.1:*` origin. To allow
+other origins (web/mobile builds), add them under **Admin → Settings → Web messenger
+clients** (writes the `app_origins` config key), or set the `CHAT_CORS_ORIGINS` env var,
+to a comma-separated list, e.g. `https://app.example.com`. CORS headers are only emitted
+when an allowlisted `Origin` header is present — normal web-app traffic is untouched.
 
 The messenger has two layouts, toggled from the sidebar header and persisted in the app's
 local settings (`viewMode`, default **Compact**):
@@ -595,12 +600,16 @@ local settings (`viewMode`, default **Compact**):
 The **Profile Manager** (add/edit server) offers a **Register account** action that opens
 that LVChat server's `/register` page in your browser.
 
-Messenger-specific API (additive, auth + CSRF enforced):
+Messenger-specific API (additive; authenticated by the session cookie **or** the
+messenger's `X-LVC-Session` bearer token):
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/me` | current session's account (id, username, avatar) |
 | `GET /api/csrf` | the session's CSRF token for app clients |
+| `POST /api/messenger/login` | token login (`X-Messenger: 1` header; returns `{ok, token}` / `{mfa, ticket}` / `{error}`) |
+| `POST /api/messenger/mfa` | complete a token login with a TOTP code (`{ticket, code}`) |
+| `POST /api/messenger/logout` | revoke the bearer session |
 | `GET /api/directory?q=` | user-directory search with relationship status (find people to add) |
 | `GET /api/groups`, `POST /api/groups`, `/rename`, `/delete`, `/member/add`, `/member/remove` | custom contact groups ("nodes") |
 | `POST /api/channel/read` | mark a room read (clears its unread badge) |
@@ -626,11 +635,14 @@ npm run preview            # local preview on http://127.0.0.1:8080
 npm test                   # build + bridge + API-login smoke suite
 ```
 
-The client talks to the server cross-origin with the browser session's cookies,
-so the messenger's origin must be allowlisted: add it under **Admin → Settings →
-Web messenger clients** (or set `CHAT_CORS_ORIGINS`) to e.g. `https://msg.example.com`.
-HTTPS is required on both ends. Web Push uses the server's VAPID key exposed via `/api/me`
-(`vapidPublicKey`). See `messenger-web/README.md`.
+The client talks to the server cross-origin using a **bearer session token** (kept in
+localStorage, sent as `X-LVC-Session`) instead of relying on the session cookie — so it
+signs in and stays signed in even on phones where browsers block third-party cookies
+(mobile Safari). The messenger's origin still needs allowlisting for the API's CORS
+headers: add it under **Admin → Settings → Web messenger clients** (or set
+`CHAT_CORS_ORIGINS`) to e.g. `https://msg.example.com`. HTTPS is required on both ends.
+Web Push uses the server's VAPID key exposed via `/api/me` (`vapidPublicKey`). See
+`messenger-web/README.md`.
 
 ## Layout
 
@@ -644,7 +656,7 @@ bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/check-updates.php  CLI update check against the configured feed (cron-friendly)
 bin/test.sh      run the full automated test suite
 tests/smoke.php  598 command/service assertions
-tests/http_test.php  464 HTTP assertions
+tests/http_test.php  478 HTTP assertions
 tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
 composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)

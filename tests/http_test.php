@@ -72,6 +72,8 @@ function req(string $method, string $path, array $data = [], ?string $cookieFile
         }
         $opts[CURLOPT_POST] = true;
         $opts[CURLOPT_POSTFIELDS] = http_build_query($data);
+    } elseif (strtoupper($method) !== 'GET') {
+        $opts[CURLOPT_CUSTOMREQUEST] = strtoupper($method);
     }
     if ($headers) {
         $opts[CURLOPT_HTTPHEADER] = $headers;
@@ -1130,6 +1132,53 @@ check('embed follows redirects server-side', $s === 200 && str_contains($b, '<h1
 // Non-HTML payloads pass through untouched.
 [$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/img.png"), [], $cjA);
 check('embed passes non-HTML payloads through', $s === 200 && str_starts_with($h['content-type'] ?? '', 'image/png'), ($h['content-type'] ?? ''));
+
+// ── Web-messenger token auth (login without relying on cookies/CSRF) ─────────
+echo "== messenger token auth ==\n";
+// Create users directly in the DB (avoids the registration throttle interplay).
+$tokHash = password_hash('password123', PASSWORD_ARGON2ID);
+$pdo->prepare("INSERT INTO users (username, email, password_hash, age_verified_at, registered_at) VALUES ('tokenuser','tokenuser@x.com',?,'1',datetime('now'))")->execute([$tokHash]);
+$tokUser = (int) $pdo->lastInsertId();
+check('token test user created', $tokUser > 0, (string) $tokUser);
+
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'password123']);
+check('messenger login requires the X-Messenger header', $s === 403, "$s $j");
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'wrong'], null, ['X-Messenger: 1']);
+check('messenger login rejects bad credentials', $s === 401 && str_contains($j, 'Invalid username or password'), "$s $j");
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'password123'], null, ['X-Messenger: 1']);
+$mTok = jsonDecode($j)['token'] ?? '';
+check('messenger login returns a bearer token', $s === 200 && strlen($mTok) > 40, "$s $j");
+[$s, , $b] = req('GET', '/api/me', [], null, ['X-LVC-Session: ' . $mTok]);
+check('bearer token authenticates /api/me (no cookies)', $s === 200 && (jsonDecode($b)['user']['username'] ?? '') === 'tokenuser', "$s $b");
+[$s, , $j] = req('POST', '/api/status', ['status_mode' => 'away', 'away' => 'brb'], null, ['X-LVC-Session: ' . $mTok]);
+check('bearer-authenticated POST skips cookie-CSRF', $s === 200 && (jsonDecode($j)['status']['status_mode'] ?? '') === 'away', "$s $j");
+[$s, , $j] = req('POST', '/api/messenger/logout', [], null, ['X-LVC-Session: ' . $mTok]);
+check('messenger logout revokes the token', $s === 200 && (jsonDecode($j)['ok'] ?? false) === true, "$s $j");
+[$s] = req('GET', '/api/me', [], null, ['X-LVC-Session: ' . $mTok]);
+check('revoked token is rejected', $s === 401, (string) $s);
+
+// MFA path: an enrolled user gets a one-time ticket, then a token on TOTP verify.
+$tokMfaSecret = 'JBSWY3DPEHPK3PXP'; // valid base32 secret for the scratch TOTP helper
+$pdo->prepare("INSERT INTO users (username, email, password_hash, age_verified_at, totp_secret, totp_enabled_at, registered_at) VALUES ('tokmfa','tokmfa@x.com',?,'1',?,datetime('now'),datetime('now'))")->execute([$tokHash, $tokMfaSecret]);
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokmfa', 'password' => 'password123'], null, ['X-Messenger: 1']);
+$mfaTicket = jsonDecode($j)['ticket'] ?? '';
+check('messenger login flags MFA with a ticket', $s === 200 && (jsonDecode($j)['mfa'] ?? false) === true && $mfaTicket !== '', "$s $j");
+[$s, , $j] = req('POST', '/api/messenger/mfa', ['ticket' => $mfaTicket, 'code' => '000000'], null, ['X-Messenger: 1']);
+check('messenger MFA rejects a bad code', $s === 401, "$s $j");
+[$s, , $j] = req('POST', '/api/messenger/mfa', ['ticket' => $mfaTicket, 'code' => mfaCode($tokMfaSecret)], null, ['X-Messenger: 1']);
+$mfaTok = jsonDecode($j)['token'] ?? '';
+check('messenger MFA completes with a token', $s === 200 && strlen($mfaTok) > 40, "$s $j");
+[$s, , $b] = req('GET', '/api/me', [], null, ['X-LVC-Session: ' . $mfaTok]);
+check('MFA token authenticates /api/me', $s === 200 && (jsonDecode($b)['user']['username'] ?? '') === 'tokmfa', "$s $b");
+[$s, , $j] = req('POST', '/api/messenger/mfa', ['ticket' => $mfaTicket, 'code' => mfaCode($tokMfaSecret)], null, ['X-Messenger: 1']);
+check('MFA ticket is single-use', $s === 410, "$s $j");
+
+// CORS preflight lets the messenger send its custom headers.
+[$s, $h] = req('OPTIONS', '/api/messenger/login', [], null, ['Origin: http://127.0.0.1:8098', 'Access-Control-Request-Method: POST', 'Access-Control-Request-Headers: x-messenger,x-lvc-session,content-type']);
+check('messenger preflight allowed', $s === 204 && str_contains(strtolower($h['access-control-allow-headers'] ?? ''), 'x-messenger') && str_contains(strtolower($h['access-control-allow-headers'] ?? ''), 'x-lvc-session'), ($h['access-control-allow-headers'] ?? ''));
+
+
+
 
 // ── Support tickets (HTTP) ───────────────────────────────────────────────────
 echo "== support tickets ==\n";

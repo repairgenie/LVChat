@@ -77,6 +77,7 @@ require ROOT . '/src/controllers/ContactGroupController.php';
 require ROOT . '/src/controllers/OpenClawController.php';
 require ROOT . '/src/controllers/PushController.php';
 require ROOT . '/src/controllers/EmbedController.php';
+require ROOT . '/src/controllers/MessengerController.php';
 
 Database::init();
 
@@ -113,7 +114,7 @@ if ($__corsOrigin !== '') {
         header('Access-Control-Allow-Credentials: true');
         header('Vary: Origin');
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type, X-CSRF');
+        header('Access-Control-Allow-Headers: Content-Type, X-CSRF, X-Messenger, X-LVC-Session');
         header('Access-Control-Max-Age: 600');
     }
     unset($__o, $__corsList);

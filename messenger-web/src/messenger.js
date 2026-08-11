@@ -340,6 +340,7 @@ async function doLogout () {
   stopNotifications()
   stopWs()
   LvApi.resetCsrf()
+  try { await LvApi.logout() } catch (err) { /* best-effort */ }
   try { await window.msg.teardownWebPush() } catch (err) { /* ignore */ }
   await window.msg.logout()
 }
@@ -455,6 +456,7 @@ async function pollTick () {
     const j = await LvApi.getJson(path)
     if (j.status === 401) {
       LvApi.resetCsrf()
+      LvApi.clearToken()
       stopPoll()
       showView('login')
       showLoginError('Your session has expired. Please sign in again.')
@@ -2138,7 +2140,7 @@ function csFlashM (msg) {
 async function openChannelSettings () {
   if (!state.open || state.open.type !== 'room') return
   const j = await LvApi.getJson('/api/channel/settings?channel=' + encodeURIComponent(state.open.id))
-  if (j.status === 401) { LvApi.resetCsrf(); stopPoll(); showView('login'); showLoginError('Your session has expired. Please sign in again.'); return }
+  if (j.status === 401) { LvApi.resetCsrf(); LvApi.clearToken(); stopPoll(); showView('login'); showLoginError('Your session has expired. Please sign in again.'); return }
   if (!j.ok || !j.body) { appAlert('Could not load channel settings.'); return }
   if (j.body.error) { appAlert(j.body.error); return }
   CS_DATA_M = j.body
@@ -2153,7 +2155,7 @@ async function settingsActionM (payload, done) {
   if (!state.open) return
   payload.channel = state.open.id
   const j = await LvApi.postForm('/api/channel/settings', payload)
-  if (j.status === 401) { LvApi.resetCsrf(); stopPoll(); showView('login'); showLoginError('Your session has expired. Please sign in again.'); return }
+  if (j.status === 401) { LvApi.resetCsrf(); LvApi.clearToken(); stopPoll(); showView('login'); showLoginError('Your session has expired. Please sign in again.'); return }
   if (!j.ok || !j.body) { appAlert('Request failed. Please try again.'); return }
   if (j.body.error) { csFlashM(j.body.error); return }
   if (j.body.message) csFlashM(j.body.message)

@@ -254,10 +254,11 @@ function mockLvchatServer () {
       res.setHeader('access-control-allow-credentials', 'true')
       res.setHeader('vary', 'Origin')
       res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS')
-      res.setHeader('access-control-allow-headers', 'Content-Type, X-CSRF')
+      res.setHeader('access-control-allow-headers', 'Content-Type, X-CSRF, X-Messenger, X-LVC-Session')
     }
     const cookie = req.headers.cookie || ''
-    const hasSession = cookie.includes('session=abc123')
+    const sessionHeader = String(req.headers['x-lvc-session'] || '')
+    const hasSession = cookie.includes('session=abc123') || sessionHeader === 'session-abc123'
     const hasPending = cookie.includes('pending=abc')
 
     if (req.method === 'OPTIONS') {
@@ -302,7 +303,8 @@ function mockLvchatServer () {
       return
     }
 
-    if (url.pathname === '/login' && req.method === 'POST') {
+    if (url.pathname === '/api/messenger/login' && req.method === 'POST') {
+      if (req.headers['x-messenger'] !== '1') { json(403, { error: 'Not a messenger request.' }); return }
       let body = ''
       req.on('data', (c) => { body += c })
       req.on('end', () => {
@@ -310,40 +312,35 @@ function mockLvchatServer () {
         const username = params.get('username')
         const password = params.get('password')
         if (username === 'alice' && password === 'password123') {
-          res.writeHead(302, { location: '/login/mfa', 'set-cookie': 'pending=abc; Path=/' })
-          res.end()
+          json(200, { mfa: true, ticket: 'ticket-abc' })
           return
         }
         if (username === 'bob' && password === 'secret') {
-          res.writeHead(302, { location: '/app?channel=general', 'set-cookie': 'session=abc123; Path=/' })
-          res.end()
+          json(200, { ok: true, token: 'session-abc123' })
           return
         }
-        res.writeHead(200, { 'content-type': 'text/html' })
-        res.end(html('login', 'Invalid username or password.'))
+        json(401, { error: 'Invalid username or password.' })
       })
       return
     }
 
-    if (url.pathname === '/login/mfa' && req.method === 'GET') {
-      res.writeHead(200, { 'content-type': 'text/html' })
-      res.end(html('mfa'))
-      return
-    }
-
-    if (url.pathname === '/login/mfa' && req.method === 'POST') {
+    if (url.pathname === '/api/messenger/mfa' && req.method === 'POST') {
+      if (req.headers['x-messenger'] !== '1') { json(403, { error: 'Not a messenger request.' }); return }
       let body = ''
       req.on('data', (c) => { body += c })
       req.on('end', () => {
-        const code = new URLSearchParams(body).get('code')
-        if (hasPending && code === '123456') {
-          res.writeHead(302, { location: '/app?channel=general', 'set-cookie': 'session=abc123; Path=/' })
-          res.end()
+        const p = new URLSearchParams(body)
+        if (p.get('ticket') === 'ticket-abc' && p.get('code') === '123456') {
+          json(200, { ok: true, token: 'session-abc123' })
           return
         }
-        res.writeHead(200, { 'content-type': 'text/html' })
-        res.end(html('mfa', 'Invalid authentication code. Try again.'))
+        json(401, { error: 'Invalid authentication code. Try again.' })
       })
+      return
+    }
+
+    if (url.pathname === '/api/messenger/logout' && req.method === 'POST') {
+      json(200, { ok: true })
       return
     }
 

@@ -1,22 +1,39 @@
 /* LVChat Messenger API client.
  *
- * Talks to an LVChat server over HTTPS (or local HTTP) using the browser
- * session's cookies (credentials: 'include'). The PHP backend's config-gated
- * CORS middleware allows the messenger's loopback origin. POSTs are
- * form-encoded with the CSRF token in the body (no custom headers, so no
- * preflight); image uploads are multipart (triggers the backend's OPTIONS
- * preflight handler). Login uses redirect:'manual' so the messenger can detect
- * the MFA gate without downloading the full /app page.
+ * Talks to an LVChat server over HTTPS (or local HTTP). Auth uses the chat
+ * session's bearer token: after logging in the token is stored in localStorage
+ * and sent as `X-LVC-Session` on every request, so the messenger works even
+ * when third-party cookies are blocked (mobile Safari). The browser's session
+ * cookies are still sent (credentials: 'include') for backward compatibility
+ * and for resources the token doesn't cover. POSTs are form-encoded; image
+ * uploads are multipart (triggers the backend's OPTIONS preflight handler).
  */
 window.LvApi = (() => {
   let base = ''
   let csrfToken = ''
+  let sessionToken = ''
+  let mfaTicket = null
 
   function origin () { return base }
+
+  function tokenKey () { return 'lvcmsg.token.' + base }
+
+  function loadToken () {
+    try { sessionToken = localStorage.getItem(tokenKey()) || '' } catch (err) { sessionToken = '' }
+  }
+
+  function persistToken () {
+    try {
+      if (sessionToken) localStorage.setItem(tokenKey(), sessionToken)
+      else localStorage.removeItem(tokenKey())
+    } catch (err) { /* ignore */ }
+  }
 
   function init (serverOrigin) {
     base = String(serverOrigin || '').replace(/\/+$/, '')
     csrfToken = ''
+    mfaTicket = null
+    loadToken()
   }
 
   /* Drop the cached CSRF token (e.g. after a session wipe / expiry). */
@@ -24,8 +41,17 @@ window.LvApi = (() => {
     csrfToken = ''
   }
 
+  /* Clear the stored bearer token (logout / session revoked). */
+  function clearToken () {
+    sessionToken = ''
+    mfaTicket = null
+    persistToken()
+  }
+
   function headers (extra) {
-    return Object.assign({}, extra)
+    const h = Object.assign({}, extra)
+    if (sessionToken) h['X-LVC-Session'] = sessionToken
+    return h
   }
 
   /* Fetch without throwing: network/CORS failures return a status-0 result so
@@ -81,7 +107,7 @@ window.LvApi = (() => {
       res = await fetch(base + path, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        headers: headers({ 'content-type': 'application/x-www-form-urlencoded' }),
         body
       })
     } catch (err) {
@@ -102,6 +128,7 @@ window.LvApi = (() => {
       res = await fetch(base + path, {
         method: 'POST',
         credentials: 'include',
+        headers: headers(),
         body: formData
       })
     } catch (err) {
@@ -114,71 +141,79 @@ window.LvApi = (() => {
     return { status: res.status, ok: res.ok, body: j, res }
   }
 
-  /* Attempt a password login. Returns { ok:true } | { mfa:true } | { error }.
-   * Redirects are followed (like the desktop client): the login POST answers
-   * 302 → /login/mfa for MFA users or → next (/app) otherwise, so the final
-   * URL tells us which branch we're on, and the session cookie from the 302
-   * is stored along the way. */
+  /* Attempt a password login. Returns { ok:true } | { mfa:true } | { mfaSetup:true } | { error }.
+   * Uses the token endpoint, so it works even when third-party cookies (and
+   * therefore a cookie-bound CSRF token) are unavailable on mobile. */
   async function login (username, password) {
-    const tok = await csrf()
-    const body = new URLSearchParams({ csrf: tok, username, password, next: '/app' })
+    mfaTicket = null
     let res
     try {
-      res = await fetch(base + '/login', {
+      res = await fetch(base + '/api/messenger/login', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body
+        headers: headers({ 'content-type': 'application/x-www-form-urlencoded', 'X-Messenger': '1' }),
+        body: new URLSearchParams({ username, password })
       })
     } catch (err) {
       return { error: 'Could not reach the server. ' + String(err && err.message || '') }
     }
-    const finalUrl = res.url || ''
-    if (finalUrl.indexOf('/login/mfa/setup') !== -1) {
-      // Account class requires MFA but it isn't enrolled yet — only the web app
-      // can walk the user through setup (QR code + secret).
-      return { mfaSetup: true }
+    let j = null
+    try { j = await res.json() } catch (err) { /* non-JSON */ }
+    if (j && j.mfa) {
+      mfaTicket = String(j.ticket || '')
+      return { mfa: true }
     }
-    if (finalUrl.indexOf('/login/mfa') !== -1) return { mfa: true }
-    if (finalUrl.indexOf('/login') !== -1) {
-      // Bounced back to a login-family page (bad creds, banned, suspended…).
-      let html = ''
-      try { html = await res.text() } catch (err) { /* ignore */ }
-      return { error: extractFlash(html) || 'Login failed. Check your credentials.' }
+    if (j && j.mfa_setup) {
+      return { mfaSetup: true, error: j.error || 'Two-factor authentication must be set up for this account.' }
     }
-    if (!res.redirected && res.status === 200) {
-      const html = await res.text()
-      return { error: extractFlash(html) || 'Login failed. Check your credentials.' }
+    if (res.status === 200 && j && j.ok && j.token) {
+      sessionToken = String(j.token)
+      persistToken()
+      return { ok: true }
     }
-    return { ok: true }
+    return { error: (j && j.error) || 'Login failed. Check your credentials.' }
   }
 
-  /* Submit the 6-digit TOTP code. Returns { ok:true } | { error }. */
+  /* Submit the 6-digit TOTP code to complete a token login. */
   async function mfaVerify (code) {
-    const tok = await csrf()
-    const body = new URLSearchParams({ csrf: tok, code })
+    const ticket = mfaTicket
+    if (!ticket) return { error: 'That login has expired. Try signing in again.' }
     let res
     try {
-      res = await fetch(base + '/login/mfa', {
+      res = await fetch(base + '/api/messenger/mfa', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body
+        headers: headers({ 'content-type': 'application/x-www-form-urlencoded', 'X-Messenger': '1' }),
+        body: new URLSearchParams({ ticket, code })
       })
     } catch (err) {
       return { error: 'Could not reach the server.' }
     }
-    if (!res.redirected && res.status === 200) {
-      const html = await res.text()
-      return { error: extractFlash(html) || 'Invalid authentication code. Try again.' }
+    let j = null
+    try { j = await res.json() } catch (err) { /* non-JSON */ }
+    if (res.status === 200 && j && j.ok && j.token) {
+      mfaTicket = null
+      sessionToken = String(j.token)
+      persistToken()
+      return { ok: true }
     }
-    if (res.redirected && (res.url || '').indexOf('/login/mfa') === -1) return { ok: true }
-    return { error: 'Invalid authentication code. Try again.' }
+    return { error: (j && j.error) || 'Invalid authentication code. Try again.' }
   }
 
-  function extractFlash (html) {
-    const m = html.match(/text-red-400[^>]*>([^<]+)</)
-    return m ? m[1].trim() : ''
+  /* Revoke the messenger's bearer session on the server and forget it locally. */
+  async function logout () {
+    const had = !!sessionToken
+    if (had) {
+      try {
+        await fetch(base + '/api/messenger/logout', {
+          method: 'POST',
+          credentials: 'include',
+          headers: headers({ 'content-type': 'application/x-www-form-urlencoded' })
+        })
+      } catch (err) { /* best-effort */ }
+    }
+    clearToken()
+    return { ok: true }
   }
 
   /* Absolute URL helper: prefix server-relative paths (avatars, uploads, gifs). */
@@ -188,5 +223,5 @@ window.LvApi = (() => {
     return base + url
   }
 
-  return { origin, init, get, getJson, postForm, upload, login, mfaVerify, csrf, resetCsrf, abs }
+  return { origin, init, get, getJson, postForm, upload, login, mfaVerify, csrf, resetCsrf, clearToken, logout, abs }
 })()

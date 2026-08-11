@@ -14,9 +14,33 @@ final class Auth
         return (int) $u['id'];
     }
 
+    /** The messenger's session token from the X-LVC-Session header (if any).
+     *  Cross-site clients that can't rely on cookies (mobile Safari blocks
+     *  third-party cookies) authenticate with this bearer header instead. */
+    public static function headerToken(): ?string
+    {
+        $h = $_SERVER['HTTP_X_LVC_SESSION'] ?? '';
+        return (is_string($h) && $h !== '') ? $h : null;
+    }
+
+    /** Whether a token corresponds to a live user or guest session. */
+    public static function validSessionToken(string $token): bool
+    {
+        if ($token === '') {
+            return false;
+        }
+        if (Database::scalar('SELECT 1 FROM sessions WHERE token = ? AND expires_at > datetime("now")', [$token])) {
+            return true;
+        }
+        return (bool) Database::scalar('SELECT 1 FROM guest_sessions WHERE token = ? AND expires_at > datetime("now")', [$token]);
+    }
+
     public static function user(): ?array
     {
         $token = $_SESSION['token'] ?? null;
+        if (!$token) {
+            $token = self::headerToken();
+        }
         if (!$token) {
             return null;
         }
@@ -113,6 +137,14 @@ final class Auth
 
     public static function login(array $user): void
     {
+        self::loginToken($user);
+    }
+
+    /** Create a session for a user and return the raw session token. The web
+     *  messenger stores this token and sends it as X-LVC-Session, so it can log
+     *  in (and stay logged in) even when third-party cookies are blocked. */
+    public static function loginToken(array $user): string
+    {
         $token = bin2hex(random_bytes(32));
         Database::query(
             'INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, datetime("now", "+30 days"))',
@@ -121,12 +153,16 @@ final class Auth
         Database::query('UPDATE users SET last_ip = ?, last_seen = datetime("now") WHERE id = ?', [client_ip(), $user['id']]);
         @session_regenerate_id(true);
         $_SESSION['token'] = $token;
+        return $token;
     }
 
     public static function logout(): void
     {
         $user = self::user();
         $token = $_SESSION['token'] ?? null;
+        if (!$token) {
+            $token = self::headerToken();
+        }
         if ($token) {
             Database::query('DELETE FROM sessions WHERE token = ?', [$token]);
             Database::query('DELETE FROM guest_sessions WHERE token = ?', [$token]);

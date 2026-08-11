@@ -19,6 +19,14 @@ final class Csrf
 
     public static function verify(): void
     {
+        // Requests authenticated by the messenger's session-token header are
+        // safe by construction: the token is a bearer secret sent in a custom
+        // header that cross-site pages cannot set (CORS preflight + the origin
+        // allowlist block them), so the cookie-CSRF check is unnecessary here.
+        $h = $_SERVER['HTTP_X_LVC_SESSION'] ?? '';
+        if (is_string($h) && $h !== '' && Auth::validSessionToken($h)) {
+            return;
+        }
         $sent = $_POST['csrf'] ?? '';
         if (!is_string($sent)) {
             $sent = '';

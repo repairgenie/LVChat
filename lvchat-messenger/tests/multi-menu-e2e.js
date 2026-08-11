@@ -76,11 +76,13 @@ function mockServer () {
       res.setHeader('access-control-allow-credentials', 'true')
       res.setHeader('vary', 'Origin')
       res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS')
-      res.setHeader('access-control-allow-headers', 'Content-Type, X-CSRF')
+      res.setHeader('access-control-allow-headers', 'Content-Type, X-CSRF, X-Messenger, X-LVC-Session')
     }
     const cookie = req.headers.cookie || ''
     const session = /session=([a-z]+)/.exec(cookie)
-    const who = session ? session[1] : null
+    const sessionHeader = String(req.headers['x-lvc-session'] || '')
+    const headerWho = /session-([a-z]+)/.exec(sessionHeader)
+    const who = headerWho ? headerWho[1] : (session ? session[1] : null)
     const json = (code, obj) => {
       res.writeHead(code, { 'content-type': 'application/json' })
       res.end(JSON.stringify(obj))
@@ -97,20 +99,23 @@ function mockServer () {
       res.end(html)
       return
     }
-    if (url.pathname === '/login' && req.method === 'POST') {
+    if (url.pathname === '/api/messenger/login' && req.method === 'POST') {
+      if (req.headers['x-messenger'] !== '1') { json(403, { error: 'Not a messenger request.' }); return }
       let body = ''
       req.on('data', (c) => { body += c })
       req.on('end', () => {
         const p = new URLSearchParams(body)
         const u = p.get('username')
         if (ACCOUNTS[u] && ACCOUNTS[u] === p.get('password')) {
-          res.writeHead(302, { location: '/app?channel=general', 'set-cookie': 'session=' + u + '; Path=/' })
-          res.end()
+          json(200, { ok: true, token: 'session-' + u })
           return
         }
-        res.writeHead(200, { 'content-type': 'text/html' })
-        res.end(html)
+        json(401, { error: 'Invalid username or password.' })
       })
+      return
+    }
+    if (url.pathname === '/api/messenger/logout' && req.method === 'POST') {
+      json(200, { ok: true })
       return
     }
 

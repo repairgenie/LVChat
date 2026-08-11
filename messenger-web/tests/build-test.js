@@ -109,11 +109,13 @@ function readText (p) {
 const MOCK_PORT = 18531
 const PREVIEW_PORT = 18532
 let mockSession = false
+let mockTicket = false
 
 const mockServer = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1:' + MOCK_PORT)
   const cookie = req.headers.cookie || ''
-  mockSession = cookie.includes('session=abc123')
+  const sessionHeader = String(req.headers['x-lvc-session'] || '')
+  mockSession = cookie.includes('session=abc123') || sessionHeader === 'session-abc123'
   const json = (code, obj) => {
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' })
     res.end(JSON.stringify(obj))
@@ -129,26 +131,30 @@ const mockServer = http.createServer((req, res) => {
   })
 
   if (url.pathname === '/api/csrf') return json(200, { csrf: 'csrf-token-123' })
-  if (url.pathname === '/login' && req.method === 'POST') {
+  if (url.pathname === '/api/messenger/login' && req.method === 'POST') {
+    if (req.headers['x-messenger'] !== '1') return json(403, { error: 'Not a messenger request.' })
     return formBody().then((body) => {
       const username = body.get('username') || ''
       const password = body.get('password') || ''
       if (username !== 'alice' || password !== 'password123') {
-        return html(200, '<form action="/login" method="post"><div class="text-red-400">Invalid username or password.</div></form>')
+        return json(401, { error: 'Invalid username or password.' })
       }
-      res.writeHead(302, { location: '/login/mfa', 'set-cookie': 'pending=abc; Path=/' })
-      return res.end()
+      mockTicket = 'ticket-abc'
+      return json(200, { mfa: true, ticket: 'ticket-abc' })
     })
   }
-  if (url.pathname === '/login/mfa' && req.method === 'GET') return html(200, '<form action="/login/mfa" method="post">mfa</form>')
-  if (url.pathname === '/login/mfa' && req.method === 'POST') {
+  if (url.pathname === '/api/messenger/mfa' && req.method === 'POST') {
+    if (req.headers['x-messenger'] !== '1') return json(403, { error: 'Not a messenger request.' })
     return formBody().then((body) => {
-      if (body.get('code') !== '123456') {
-        return html(200, '<form action="/login/mfa" method="post"><div class="text-red-400">Invalid authentication code.</div></form>')
-      }
-      res.writeHead(302, { location: '/app?channel=general', 'set-cookie': 'session=abc123; Path=/' })
-      return res.end()
+      if (body.get('ticket') !== 'ticket-abc') return json(410, { error: 'That login has expired. Try signing in again.' })
+      if (body.get('code') !== '123456') return json(401, { error: 'Invalid authentication code. Try again.' })
+      mockSession = true
+      return json(200, { ok: true, token: 'session-abc123' })
     })
+  }
+  if (url.pathname === '/api/messenger/logout' && req.method === 'POST') {
+    mockSession = false
+    return json(200, { ok: true })
   }
   if (url.pathname === '/api/me') {
     if (!mockSession) return json(401, { error: 'Not authenticated.' })
@@ -178,9 +184,9 @@ function sandboxFetch (base, fetchUrl, opts) {
         port: u.port,
         path: u.pathname + u.search,
         method: opts.method || 'GET',
-        headers: { cookie: cookieHeader() }
+        headers: Object.assign({ cookie: cookieHeader() }, opts.headers || {})
       }
-      if (opts.method === 'POST') reqOpts.headers['content-type'] = 'application/x-www-form-urlencoded'
+      if (opts.method === 'POST' && !reqOpts.headers['content-type']) reqOpts.headers['content-type'] = 'application/x-www-form-urlencoded'
       const rq = http.request(reqOpts, (rs) => {
         const chunks = []
         rs.on('data', (c) => chunks.push(c))
