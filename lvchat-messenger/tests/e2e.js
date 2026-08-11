@@ -643,6 +643,10 @@ function mockLvchatServer () {
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
       const port = server.address().port
+      // Expose the message arrays so tests can inject a message as if it came
+      // from another device (deterministic — no shared-id-counter ordering).
+      state.dmMessages = dmMessages
+      state.roomMessages = roomMessages
       resolve({ base: 'http://127.0.0.1:' + port, server, state })
     })
   })
@@ -783,6 +787,11 @@ async function main () {
   check('double-click dedupes to the same window', chatWindowCount('dm', 'bob') === 1, '')
   await js(dmWin, `document.getElementById('composer-input').value = 'from compact window'; document.getElementById('composer-send').click()`)
   check('DM chat window sends messages', await waitJs(dmWin, `document.getElementById('stream').textContent.includes('from compact window') && 'ok'`))
+
+  // A message sent from ANOTHER device must appear live in this chat window —
+  // dedicated windows keep polling, they aren't a one-shot snapshot.
+  mock.state.dmMessages.push({ id: 999, kind: 'message', content: 'from another device', username: 'bob', sender_id: 2, created_at: '2026-08-06 11:02:00', is_pm: true })
+  check('chat window updates live from another device', await waitJs(dmWin, `document.getElementById('stream').textContent.includes('from another device') && 'ok'`, 6000))
   dmWin.close()
   await new Promise((r) => setTimeout(r, 400))
 
@@ -794,6 +803,9 @@ async function main () {
   check('double-click opens a room chat window', !!roomWin, '')
   check('room chat window shows #gaming title', await waitJs(roomWin, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
   check('room chat window renders messages', await waitJs(roomWin, `document.querySelectorAll('#stream .msg').length >= 2 && 'ok'`))
+  // Room windows also poll live: a message from another device shows up.
+  mock.state.roomMessages.push({ id: 998, kind: 'message', content: 'live room ping', username: 'carol', sender_id: 3, created_at: '2026-08-06 11:03:00', channel: 'gaming' })
+  check('room chat window updates live from another device', await waitJs(roomWin, `document.getElementById('stream').textContent.includes('live room ping') && 'ok'`, 6000))
   roomWin.close()
   await new Promise((r) => setTimeout(r, 400))
 

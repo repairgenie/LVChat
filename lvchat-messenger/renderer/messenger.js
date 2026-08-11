@@ -383,6 +383,13 @@ async function startMain (me) {
     try {
       await openConversation(state._chatTarget.type, state._chatTarget.id)
     } catch (err) { /* leave whatever rendered */ }
+    // Dedicated conversation windows live in real time too: openConversation
+    // only does a one-shot poll, so keep polling (and subscribe via WebSocket)
+    // or messages from other devices would never arrive here.
+    loadCommands()
+    initWs()
+    await startPoll()
+    await initSounds()
     return
   }
 
