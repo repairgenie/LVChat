@@ -50,6 +50,17 @@ final class ChatController
         ]);
     }
 
+    /**
+     * The full slash-command name list, mirroring the `data-commands` the web
+     * chat page embeds. Messenger clients fetch this to power their own
+     * slash-command autocomplete (the server stays the authority on execution).
+     */
+    public static function commands(): void
+    {
+        Auth::require();
+        json_out(['commands' => CommandRegistry::names()]);
+    }
+
     public static function app(): void
     {
         $user = Auth::require();
@@ -604,11 +615,18 @@ final class ChatController
             }
             $member = AccessService::member($channel['id'], $user);
             if (!$member) {
-                return ['ok' => true, 'redirect' => '/app', 'reason' => 'You are no longer in this channel.'];
+                // A kicked/banned member gets the recorded reason (one-shot) so
+                // the client can show "why" before dropping them out of the
+                // channel; otherwise a generic removal notice.
+                $removalReason = ChannelService::takeRemovalReason($channel['id'], $user);
+                return ['ok' => true, 'redirect' => '/app', 'reason' => $removalReason ?? ('You were removed from ' . $channel['name'] . '.')];
             }
             $out['messages'] = MessageService::hydrateReactions(MessageService::forChannel((int) $channel['id'], $since), $user);
             $out['channel'] = $channel['slug'];
             $out['topic'] = $channel['topic'];
+            // The embedded channel URL (null when unset or its domain is banned).
+            $out['channel_url'] = ChannelService::channelUrl($channel);
+            $out['url_banned'] = ChannelService::channelUrlBanned($channel);
             foreach (ChannelService::members((string) $channel['id']) as $m) {
                 $out['presence'][] = array_merge([
                     'username' => $m['username'],
@@ -829,10 +847,30 @@ final class ChatController
         foreach ($joined as $c) {
             $joinedMap[$c['id']] = true;
         }
+        // Real member counts (the browse query's "members" is the online count).
+        $all = array_merge($channels, $myChannels);
+        $memberCounts = [];
+        $ids = array_unique(array_map('intval', array_column($all, 'id')));
+        if ($ids) {
+            $in = implode(',', $ids);
+            foreach (Database::all("SELECT channel_id, COUNT(*) AS n FROM channel_members WHERE channel_id IN ($in) GROUP BY channel_id") as $row) {
+                $memberCounts[(int) $row['channel_id']] = (int) $row['n'];
+            }
+        }
+        $shape = fn ($c) => [
+            'id' => (int) $c['id'],
+            'name' => $c['name'],
+            'slug' => $c['slug'],
+            'topic' => $c['topic'] ?? '',
+            'description' => $c['description'] ?? '',
+            'members' => $memberCounts[(int) $c['id']] ?? 0,
+            'online' => (int) $c['members'],
+            'visibility' => $c['visibility'],
+        ];
         json_out([
             'ok' => true,
-            'channels' => array_map(fn ($c) => ['id' => (int) $c['id'], 'name' => $c['name'], 'slug' => $c['slug'], 'topic' => $c['topic'] ?? '', 'description' => $c['description'] ?? '', 'members' => (int) $c['members'], 'online' => (int) $c['members'], 'visibility' => $c['visibility'], 'joined' => isset($joinedMap[$c['id']])], $channels),
-            'myChannels' => array_map(fn ($c) => ['id' => (int) $c['id'], 'name' => $c['name'], 'slug' => $c['slug'], 'topic' => $c['topic'] ?? '', 'description' => $c['description'] ?? '', 'members' => (int) $c['members'], 'online' => (int) $c['members'], 'visibility' => $c['visibility'], 'joined' => true], $myChannels),
+            'channels' => array_map(fn ($c) => $shape($c) + ['joined' => isset($joinedMap[$c['id']])], $channels),
+            'myChannels' => array_map(fn ($c) => $shape($c) + ['joined' => true], $myChannels),
             'online' => online_count(),
             'peak' => (int) (config_get('peak_online', '0') ?? 0),
         ]);

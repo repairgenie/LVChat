@@ -81,6 +81,13 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
       <p class="text-xs text-discord-400 mt-1">Where existing users are pointed to fetch the latest version — shown at the bottom of the download modal.</p>
     </div>
   </div>
+  <div class="pt-4 border-t border-discord-700">
+    <div class="text-sm font-medium text-white mb-1">Web messenger clients</div>
+    <p class="text-xs text-discord-400 mb-3">Origins allowed to use this server's Messenger API cross-origin — the LVChat Messenger web app / PWA and any other browser or mobile client you host. <code class="font-mono">http://127.0.0.1:*</code> and <code class="font-mono">null</code> (file://) are always allowed, so the local Electron messenger works out of the box.</p>
+    <label class="label">Allowed origins</label>
+    <input class="input font-mono text-xs" name="app_origins" value="<?= h($settings['app_origins'] ?? '') ?>" placeholder="https://msg.example.com, https://app.example.com" autocomplete="off" spellcheck="false">
+    <p class="text-xs text-discord-400 mt-1">Comma-separated origins (scheme + host, no path), e.g. <code class="font-mono">https://georgethegeek.com</code>. CORS headers are only emitted when a request carries an allowlisted <code>Origin</code> header, so your normal web-app traffic is unaffected. Both sites must be HTTPS for cross-site session cookies. Trailing slashes, blank entries and duplicates are cleaned up on save.</p>
+  </div>
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Registration</div>

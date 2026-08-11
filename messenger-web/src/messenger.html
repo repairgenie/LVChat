@@ -118,7 +118,12 @@
       </div>
 
       <div id="panel-rooms" class="panel" hidden>
+        <div class="buddy-actions">
+          <button id="btn-browse-rooms" class="ghost small">Browse rooms</button>
+          <button id="btn-browse-back" class="ghost small" hidden>Back</button>
+        </div>
         <div id="rooms-list"></div>
+        <div id="browse-list" hidden></div>
       </div>
 
       <div id="panel-requests" class="panel" hidden>
@@ -140,13 +145,26 @@
           <div id="chat-sub" class="chat-sub">Pick a friend or room to start chatting</div>
         </div>
         <div class="chat-head-actions">
+          <button id="dm-mute-btn" class="ghost small" title="Mute or unmute notifications for this person" hidden>Mute</button>
+          <button id="dm-block-btn" class="ghost small" title="Block this person" hidden>Block</button>
+          <button id="chan-settings-btn" class="ghost small" title="Channel settings" hidden>⚙ Settings</button>
           <button id="members-toggle" class="ghost small" title="Active members" hidden>Members</button>
         </div>
       </header>
 
       <div id="chat-body">
-        <div id="stream"></div>
-        <aside id="members" hidden></aside>
+        <div id="channel-url-pane" hidden>
+          <div class="url-pane-head">
+            <span id="url-pane-host" title=""></span>
+            <a id="url-open" href="#" target="_blank" rel="noopener noreferrer">Open</a>
+            <button type="button" id="url-collapse" class="ghost small" title="Hide or show the URL pane">▾</button>
+          </div>
+          <iframe id="url-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" allow="fullscreen" title="Channel URL"></iframe>
+        </div>
+        <div id="chat-main">
+          <div id="stream"></div>
+          <aside id="members" hidden></aside>
+        </div>
       </div>
 
       <div id="composer" hidden>
@@ -159,6 +177,7 @@
         <div id="emoji-panel" class="picker-panel" hidden></div>
         <div class="composer-wrap">
           <div id="mention-ac" class="mention-ac" hidden></div>
+          <div id="slash-ac" class="mention-ac" hidden></div>
           <div class="composer-row">
             <button id="btn-emoji" class="icon-btn" title="Emoji">☺</button>
             <button id="btn-gif" class="ghost small" title="GIF">GIF</button>
@@ -220,6 +239,19 @@
 
       <div class="modal-actions">
         <button id="settings-close" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="chan-settings-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal chan-settings-modal">
+      <div class="modal-title">Channel settings <span id="cs-name"></span></div>
+      <div id="cs-tabs" class="cs-tabs"></div>
+      <div id="cs-body" class="cs-body"></div>
+      <div id="cs-msg" class="cs-msg" hidden></div>
+      <div class="modal-actions">
+        <button id="chan-settings-close" class="primary">Close</button>
       </div>
     </div>
   </div>

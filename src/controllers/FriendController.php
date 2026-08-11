@@ -140,7 +140,7 @@ final class FriendController
             json_out(['ok' => true, 'results' => []]);
         }
         $rows = Database::all(
-            "SELECT id, username, avatar, role, away, last_seen
+            "SELECT id, username, avatar, role, away, last_seen, status_mode, custom_status
              FROM users
              WHERE guest = 0 AND status = 'active' AND bot = 0 AND id != ?
                AND username LIKE ? COLLATE NOCASE
@@ -153,14 +153,13 @@ final class FriendController
         );
         $results = [];
         foreach ($rows as $r) {
-            $results[] = [
+            $results[] = array_merge([
                 'id' => (int) $r['id'],
                 'username' => $r['username'],
                 'avatar' => $r['avatar'] ?? null,
                 'role' => $r['role'],
-                'is_online' => Auth::isOnline($r) ? 1 : 0,
                 'status' => FriendService::status((int) $user['id'], (int) $r['id']),
-            ];
+            ], Auth::statusInfo($r));
         }
         json_out(['ok' => true, 'results' => $results]);
     }

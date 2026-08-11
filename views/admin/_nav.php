@@ -18,6 +18,7 @@ function admin_nav(string $active, array $user): void {
     'users' => ['/admin/users', 'Users', $isAdmin],
     'channels' => ['/admin/channels', 'Channels', $isAdmin],
     'bans' => ['/admin/bans', 'Bans', $isAdmin],
+    'urls' => ['/admin/urls', 'Blocked URLs', $isAdmin],
     'spamfilters' => ['/admin/spamfilters', 'Spam filters', $isAdmin],
     'badwords' => ['/admin/badwords', 'Bad words', $isAdmin],
     'roles' => ['/admin/roles', 'Roles', $isAdmin],

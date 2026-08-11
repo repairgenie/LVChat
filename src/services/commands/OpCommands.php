@@ -61,12 +61,29 @@ final class OpCommands
         };
     }
 
+    /** Server admins and IRC operators bypass channel-level guards. */
+    private static function isStaff(array $user): bool
+    {
+        return ($user['role'] ?? '') === 'admin' || Auth::isOper($user);
+    }
+
+    /** Resolve a target by nick — registered user OR channel guest. */
     private static function targetUser(?string $nick): ?array
     {
         if (!$nick) {
             return null;
         }
-        return Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]) ?: null;
+        return Auth::findActor($nick) ?: null;
+    }
+
+    /** Delete the target's membership row (user or guest). */
+    private static function removeMember(int|string $channelId, array $target): void
+    {
+        if (Auth::isGuest($target)) {
+            Database::query('DELETE FROM channel_members WHERE channel_id = ? AND guest_id = ?', [$channelId, (int) $target['id']]);
+        } else {
+            Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$channelId, (int) $target['id']]);
+        }
     }
 
     private static function kick(array $args, array $user, array $channel): array
@@ -77,28 +94,39 @@ final class OpCommands
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
-        $member = AccessService::member($channel['id'], (int) $target['id']);
+        $member = AccessService::member($channel['id'], $target);
         if (!$member) {
             return ['replies' => ["$nick is not in " . $channel['name'] . '.']];
         }
-        if ($user['role'] !== 'admin') {
-            $actorLvl = level_weight(AccessService::effectiveLevel($channel['id'], (int) $user['id']));
+        if (!self::isStaff($user)) {
+            $actorLvl = level_weight(AccessService::effectiveLevel($channel['id'], $user));
             $targetLvl = level_weight($member['level']);
             if ($targetLvl >= $actorLvl) {
                 return ['replies' => ["You cannot kick $nick (at or above your level)."]];
             }
         }
-        Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$channel['id'], $target['id']]);
+        self::removeMember($channel['id'], $target);
         ChannelService::afterMemberRemoval($channel['id']);
         $msg = $user['username'] . ' kicked ' . $nick . ' from ' . $channel['name'];
         if ($reason) {
             $msg .= ' (' . $reason . ')';
         }
-        MessageService::system($channel['id'], 'kick', $msg);
+        // One-shot removal notice: the target's next poll shows the reason (with
+        // who did it) before the redirect drops them out. WS clients get the same
+        // text bounced inline by Realtime::memberRemoved below.
+        ChannelService::recordRemoval($channel, $target, $user['username'] . ' kicked you from ' . $channel['name'] . ($reason ? ' (' . $reason . ')' : ''));
         log_audit('kick', $channel['name'], $nick . ($reason ? " / $reason" : ''));
-        ModerationService::record($target, 'kick', 'applied', $channel['name'], $reason, 'c', (int) $channel['id']);
-        ModerationService::note((int) $target['id'], $user, 'kick', $channel['name'] . ($reason ? ' — ' . $reason : ''));
-        return ['replies' => ["Kicked $nick."]];
+        if (!Auth::isGuest($target)) {
+            ModerationService::record($target, 'kick', 'applied', $channel['name'], $reason, 'c', (int) $channel['id']);
+            ModerationService::note((int) $target['id'], $user, 'kick', $channel['name'] . ($reason ? ' — ' . $reason : ''));
+        }
+        // Bounce the target's clients out of the channel right away, with the
+        // reason, so the removal is immediate and never silent (WS mode).
+        Realtime::memberRemoved($target, $channel['slug'], $user['username'] . ' kicked you from ' . $channel['name'] . ($reason ? ' (' . $reason . ')' : ''));
+        return [
+            'replies' => ["Kicked $nick."],
+            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'kick', 'content' => $msg]],
+        ];
     }
 
     private static function kickban(array $args, array $user, array $channel): array
@@ -109,12 +137,17 @@ final class OpCommands
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
+        $isGuest = Auth::isGuest($target);
         $mask = strtolower($target['username']) . '!*@*';
-        BanService::addBan('channel_ban', $channel['id'], $mask, $reason ?: null, null, (int) $user['id'], (int) $target['id']);
-        ModerationService::record($target, 'ban', 'applied', $mask, $reason, 'c', (int) $channel['id']);
-        ModerationService::note((int) $target['id'], $user, 'ban', $channel['name'] . ($reason ? ' — ' . $reason : ''));
+        BanService::addBan('channel_ban', $channel['id'], $mask, $reason ?: null, null, (int) $user['id'], $isGuest ? null : (int) $target['id']);
+        if (!$isGuest) {
+            ModerationService::record($target, 'ban', 'applied', $mask, $reason, 'c', (int) $channel['id']);
+            ModerationService::note((int) $target['id'], $user, 'ban', $channel['name'] . ($reason ? ' — ' . $reason : ''));
+        }
         $r = self::kick([$nick, $reason], $user, $channel);
-        MessageService::system($channel['id'], 'ban', $nick . ' has been banned from ' . $channel['name']);
+        $r['events'] = array_merge($r['events'] ?? [], [
+            ['channel_id' => (int) $channel['id'], 'kind' => 'ban', 'content' => $nick . ' has been banned from ' . $channel['name']],
+        ]);
         return $r;
     }
 
@@ -135,18 +168,19 @@ final class OpCommands
             $reason = implode(' ', $rest);
         }
         $userId = null;
+        $resolved = false;
         if (!preg_match('/[*!@?]/', $target)) {
             $u = self::targetUser($target);
             if ($u) {
-                $userId = (int) $u['id'];
+                $userId = Auth::isGuest($u) ? null : (int) $u['id'];
                 $target = strtolower($u['username']) . '!*@*';
+                $resolved = true;
             } else {
                 return ['replies' => ["No such user: $target"]];
             }
         }
         BanService::addBan('channel_ban', $channel['id'], $target, $reason, $duration, (int) $user['id'], $userId);
         $display = $duration !== null ? self::fmtDuration($duration) : 'permanent';
-        MessageService::system($channel['id'], 'ban', $user['username'] . ' banned ' . $target . ' (' . $display . ')');
         log_audit('ban', $channel['name'], "$target / $display" . ($reason ? " / $reason" : ''));
         if ($userId) {
             $tu = Database::row('SELECT * FROM users WHERE id = ?', [$userId]);
@@ -155,10 +189,12 @@ final class OpCommands
                 ModerationService::note($userId, $user, 'ban', $channel['name'] . ' (' . $display . ')' . ($reason ? ' — ' . $reason : ''));
             }
         }
-        if ($userId) {
-            self::kick([$args[0], 'Banned (' . ($reason ?: 'no reason') . ')'], $user, $channel);
+        $events = [['channel_id' => (int) $channel['id'], 'kind' => 'ban', 'content' => $user['username'] . ' banned ' . $target . ' (' . $display . ')']];
+        if ($resolved) {
+            $r = self::kick([$args[0], 'Banned (' . ($reason ?: 'no reason') . ')'], $user, $channel);
+            $events = array_merge($events, $r['events'] ?? []);
         }
-        return ['replies' => ["Banned $target for $display" . ($reason ? ": $reason" : '') . '.']];
+        return ['replies' => ["Banned $target for $display" . ($reason ? ": $reason" : '') . '.'], 'events' => $events];
     }
 
     private static function unban(array $args, array $user, array $channel): array
@@ -189,25 +225,32 @@ final class OpCommands
         if (!$ok) {
             return ['replies' => ["No matching ban for $target."]];
         }
-        MessageService::system($channel['id'], 'mode', $user['username'] . ' removed a ban (' . $target . ')');
-        return ['replies' => ["Removed ban for $target."]];
+        return [
+            'replies' => ["Removed ban for $target."],
+            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' removed a ban (' . $target . ')']],
+        ];
     }
 
     private static function quiet(array $args, array $user, array $channel): array
     {
         $nick = $args[0] ?? null;
         $duration = $args[1] ?? null;
-        $u = self::targetUser($nick);
-        if (!$u) {
+        $target = self::targetUser($nick);
+        if (!$target) {
             return ['replies' => ["No such user: $nick"]];
         }
+        $isGuest = Auth::isGuest($target);
         $dur = parse_duration($duration);
-        $mask = strtolower($u['username']) . '!*@*';
-        BanService::addBan('quiet', $channel['id'], $mask, null, $dur, (int) $user['id'], (int) $u['id']);
-        ModerationService::record($u, 'quiet', 'applied', $mask, '', 'c', (int) $channel['id']);
-        ModerationService::note((int) $u['id'], $user, 'warn', 'Muted in ' . $channel['name'] . ' (+q)' . ($dur ? ' for ' . self::fmtDuration($dur) : ''));
-        MessageService::system($channel['id'], 'mode', $user['username'] . ' muted ' . $nick . ' (+q)');
-        return ['replies' => ["$nick is now muted in " . $channel['name'] . '.']];
+        $mask = strtolower($target['username']) . '!*@*';
+        BanService::addBan('quiet', $channel['id'], $mask, null, $dur, (int) $user['id'], $isGuest ? null : (int) $target['id']);
+        if (!$isGuest) {
+            ModerationService::record($target, 'quiet', 'applied', $mask, '', 'c', (int) $channel['id']);
+            ModerationService::note((int) $target['id'], $user, 'warn', 'Muted in ' . $channel['name'] . ' (+q)' . ($dur ? ' for ' . self::fmtDuration($dur) : ''));
+        }
+        return [
+            'replies' => ["$nick is now muted in " . $channel['name'] . '.'],
+            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' muted ' . $nick . ' (+q)']],
+        ];
     }
 
     private static function level(string $name, array $args, array $user, array $channel): array
@@ -230,10 +273,21 @@ final class OpCommands
         if ($check !== true) {
             return ['replies' => [$check]];
         }
-        AccessService::setLevel($channel['id'], (int) $target['id'], $newLevel);
+        if (Auth::isGuest($target)) {
+            Database::query(
+                'INSERT INTO channel_members (channel_id, guest_id, level) VALUES (?, ?, ?)
+                 ON CONFLICT DO UPDATE SET level = excluded.level',
+                [$channel['id'], (int) $target['id'], $newLevel]
+            );
+        } else {
+            AccessService::setLevel($channel['id'], (int) $target['id'], $newLevel);
+        }
         $symbol = $newLevel === 'normal' ? '' : level_symbol($newLevel);
-        MessageService::system($channel['id'], 'mode', $user['username'] . ' set mode ' . ($newLevel === 'normal' ? '-' . $name[2] : '+' . $name[0]) . " on $nick ($symbol$nick)");
-        return ['replies' => ["$nick now has level: " . ($newLevel === 'normal' ? 'normal' : $newLevel) . '.']];
+        $flag = $newLevel === 'normal' ? '-' . $name[2] : '+' . $name[0];
+        return [
+            'replies' => ["$nick now has level: " . ($newLevel === 'normal' ? 'normal' : $newLevel) . '.'],
+            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' set mode ' . $flag . " on $nick ($symbol$nick)"]],
+        ];
     }
 
     private static function mode(array $args, array $user, array $channel): array
@@ -411,8 +465,10 @@ final class OpCommands
             default => 1,
         };
         ChannelService::update($channel['id'], ['topic_locked' => $on]);
-        MessageService::system($channel['id'], 'mode', $user['username'] . ($on ? ' locked' : ' unlocked') . ' the topic');
-        return ['replies' => ["Topic " . ($on ? 'locked' : 'unlocked') . '.']];
+        return [
+            'replies' => ["Topic " . ($on ? 'locked' : 'unlocked') . '.'],
+            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ($on ? ' locked' : ' unlocked') . ' the topic']],
+        ];
     }
 
     private static function clear(array $args, array $user, ?array $channel): array
@@ -426,12 +482,14 @@ final class OpCommands
         $isOp = level_weight($level) >= level_weight('op');
         switch ($what) {
             case 'users':
-                if (!$isFounder && $user['role'] !== 'admin') {
+                if (!self::isStaff($user) && !$isFounder) {
                     return ['replies' => ['Only the channel founder can clear all users.']];
                 }
                 Database::query('DELETE FROM channel_members WHERE channel_id = ? AND level != "founder"', [$channel['id']]);
-                MessageService::system($channel['id'], 'system', $user['username'] . ' cleared all users from ' . $channel['name']);
-                return ['replies' => ['All non-founder users removed.']];
+                return [
+                    'replies' => ['All non-founder users removed.'],
+                    'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'system', 'content' => $user['username'] . ' cleared all users from ' . $channel['name']]],
+                ];
             case 'bans':
                 if (!$isOp) {
                     return ['replies' => ['Ops can clear bans.']];

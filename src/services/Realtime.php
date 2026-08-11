@@ -289,6 +289,26 @@ final class Realtime
     }
 
     /**
+     * Tell a target actor's clients (all their open tabs viewing that channel)
+     * that they were removed — a kick or a ban that evicts them. The gateway
+     * bounces those connections out with the reason shown, instead of waiting
+     * for the next poll to notice the membership is gone (up to 30s in WS mode).
+     */
+    public static function memberRemoved(array $target, string $channelSlug, string $reason): void
+    {
+        if (!self::enabled()) {
+            return;
+        }
+        self::publish([
+            'type' => 'member_removed',
+            'user_id' => (int) $target['id'],
+            'guest' => (int) ($target['guest'] ?? 0),
+            'channel' => $channelSlug,
+            'reason' => $reason,
+        ]);
+    }
+
+    /**
      * Admin "reconnect all clients": every open tab reloads on its next poll,
      * SSE frame or WS message so it re-renders with the current gateway config
      * (fresh ticket + URL). Works for all three transports — WS clients get the

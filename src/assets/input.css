@@ -140,6 +140,13 @@ html.light .bg-red-500 .text-white { color: #fff; }
   transition: background .4s ease;
 }
 
+/* Channel URL pane: embedded web page shown above the chat (channels only). */
+#channel-url-pane { min-height: 0; }
+#channel-url-pane.url-pane-collapsed #url-frame { display: none; }
+
+/* Channel settings modal: lock muted tabs to the server theme. */
+#chan-settings-modal .cs-tab:disabled { cursor: not-allowed; opacity: .55; }
+
 /* tiptap rich-text editor (Admin → Terms & Privacy). */
 .tiptap-shell {
   border: 1px solid var(--c-d-600);

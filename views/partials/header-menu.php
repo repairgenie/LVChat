@@ -18,6 +18,9 @@
     <?php if ($channel): ?>
     <div class="h-px bg-discord-700 my-1"></div>
     <button id="share-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">🔗 Share link</button>
+    <?php if ($canManageSettings): ?>
+    <button id="chan-settings-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">⚙ Channel settings</button>
+    <?php endif; ?>
     <button id="mute-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200" data-mode="<?= h($notifyMode) ?>">🔔 Mute</button>
     <button type="button" data-embed class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">&lt;/&gt; Embed</button>
     <button id="install-btn-m" class="dropdown-close w-full text-left px-2.5 py-1.5 rounded-md hover:bg-discord-600/50 text-sm text-discord-200">⬇ How to install</button>

@@ -178,6 +178,12 @@ final class Auth
         if ($errors) {
             return ['ok' => false, 'errors' => $errors];
         }
+        if (BanService::nickForbidden($username)) {
+            $errors[] = 'That username is not allowed.';
+        }
+        if ($errors) {
+            return ['ok' => false, 'errors' => $errors];
+        }
         $exists = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$username]);
         $emailTaken = Database::row('SELECT * FROM users WHERE email = ? COLLATE NOCASE', [$email]);
         if ($emailTaken) {
@@ -578,6 +584,15 @@ final class Auth
         }
         return in_array('oper', self::rolePerms($user), true)
             || in_array('oper', self::operSessionPerms(), true);
+    }
+
+    /** A netadmin: server admin or a user operating with the 'netadmin' o:line class. */
+    public static function isNetadmin(array $user): bool
+    {
+        if ($user['role'] === 'admin') {
+            return true;
+        }
+        return strtolower((string) self::operSessionClass()) === 'netadmin';
     }
 
     /** Drop the current /oper session. */

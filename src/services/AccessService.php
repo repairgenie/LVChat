@@ -79,8 +79,8 @@ final class AccessService
         if (Auth::isAdmin($actor)) {
             return true;
         }
-        $actorWeight = level_weight(AccessService::effectiveLevel($channel['id'], (int) $actor['id']));
-        $targetWeight = level_weight(AccessService::effectiveLevel($channel['id'], (int) $target['id']));
+        $actorWeight = level_weight(AccessService::effectiveLevel($channel['id'], $actor));
+        $targetWeight = level_weight(AccessService::effectiveLevel($channel['id'], $target));
         if ($targetWeight >= $actorWeight) {
             return 'You cannot change the level of a user at or above your own level.';
         }

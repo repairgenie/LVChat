@@ -14,6 +14,8 @@
   const VAPID_KEY = body.dataset.vapidKey || '';
   const MY_LEVEL = body.dataset.myLevel || 'normal';
   const CAN_OP = body.dataset.canOp === '1';
+  // The embedded channel URL for the open channel ('' = none, or its domain is banned).
+  let CHANNEL_URL = body.dataset.channelUrl || '';
 
   // Presence rendering helpers for the rich statuses (online/away/dnd/invisible/custom).
   function presenceDot(u) {
@@ -422,7 +424,10 @@
     if (stickToBottom) scrollBottom();
   }
 
-  function scrollBottom() { msgsEl.scrollTop = msgsEl.scrollHeight; }
+  function scrollBottom() {
+    programmaticScrollAt = Date.now(); // so the context menu ignores this auto-scroll
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
 
   // Images (uploads) are lazy-loaded, so they expand after the initial scroll —
   // pin the view to the bottom again as each one loads so a just-posted image is
@@ -443,21 +448,21 @@
     msgsEl.querySelectorAll('.msg-del').forEach((btn) => {
       if (btn.dataset.bound) return;
       btn.dataset.bound = '1';
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const msg = btn.closest('.msg');
         const id = msg.dataset.id;
-        if (!confirm('Delete this message?')) return;
+        if (!(await uiConfirm('Delete this message?'))) return;
         post('/api/message/delete', { id }, () => msg.remove());
       });
     });
     msgsEl.querySelectorAll('.msg-edit').forEach((btn) => {
       if (btn.dataset.bound) return;
       btn.dataset.bound = '1';
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const msg = btn.closest('.msg');
         const contentEl = msg.querySelector('.msg-content');
         const old = contentEl ? contentEl.textContent : '';
-        const next = prompt('Edit message:', old);
+        const next = await uiPrompt('Edit message:', old);
         if (next === null || next === old) return;
         post('/api/message/edit', { id: msg.dataset.id, content: next }, () => {
           contentEl.innerHTML = linkify(next);
@@ -495,10 +500,10 @@
     msgsEl.querySelectorAll('.reaction-add').forEach((btn) => {
       if (btn.dataset.bound) return;
       btn.dataset.bound = '1';
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const msg = btn.closest('.msg');
         if (!msg) return;
-        const emoji = prompt('Emoji to add:', '👍');
+        const emoji = await uiPrompt('Emoji to add:', '👍');
         if (!emoji) return;
         react(btn, emoji.trim());
       });
@@ -553,11 +558,88 @@
     fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
       .then((r) => r.json().catch(() => ({ error: 'Server error' })))
       .then((j) => {
-        if (j.error) { alert(j.error); return; }
+        if (j.error) { uiAlert(j.error); return; }
         if (j.redirect) { window.location = j.redirect; return; }
         if (onOk) onOk(j);
       })
       .catch(() => { if (onFail) onFail(); });
+  }
+
+  // ── Generic dialog modal (replaces window.prompt/confirm/alert) ────────────
+  // The Electron desktop client does not support window.prompt() (it silently
+  // returns null), which used to kill edit/ban/kick/topic/invite flows there.
+  // All three native dialogs route through this one styled modal.
+  const dlgModal = document.getElementById('dlg-modal');
+  let dlgResolve = null;
+  function uiDialog(opts) {
+    return new Promise((resolve) => {
+      if (!dlgModal) { resolve(opts.input ? null : opts.cancel ? false : true); return; }
+      dlgResolve = resolve;
+      const title = document.getElementById('dlg-title');
+      const message = document.getElementById('dlg-message');
+      const input = document.getElementById('dlg-input');
+      const error = document.getElementById('dlg-error');
+      const ok = document.getElementById('dlg-ok');
+      const cancel = document.getElementById('dlg-cancel');
+      if (title) title.textContent = opts.title || '';
+      if (message) {
+        message.textContent = opts.message || '';
+        message.classList.toggle('hidden', !opts.message);
+      }
+      if (input) {
+        input.classList.toggle('hidden', !opts.input);
+        if (opts.input) {
+          input.value = opts.initial || '';
+          input.type = opts.password ? 'password' : 'text';
+        } else {
+          input.value = '';
+        }
+      }
+      if (error) error.classList.add('hidden');
+      if (ok) ok.textContent = opts.okLabel || (opts.input ? 'OK' : 'OK');
+      if (cancel) {
+        cancel.textContent = opts.cancelLabel || 'Cancel';
+        cancel.classList.toggle('hidden', !opts.cancel);
+      }
+      dlgModal.classList.remove('hidden');
+      if (input && opts.input) setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 30);
+    });
+  }
+  function uiPrompt(text, initial) {
+    return uiDialog({ title: text, input: true, initial: initial || '', okLabel: 'OK', cancel: true })
+      .then((v) => (v === null || v === false ? null : String(v)));
+  }
+  function uiConfirm(text) {
+    return uiDialog({ title: text, okLabel: 'Yes', cancel: true }).then((v) => v === true);
+  }
+  function uiAlert(text) {
+    return uiDialog({ title: text, okLabel: 'OK', cancel: false }).then(() => {});
+  }
+  function settleDialog(value) {
+    if (dlgResolve) { const r = dlgResolve; dlgResolve = null; r(value); }
+    if (dlgModal) dlgModal.classList.add('hidden');
+  }
+  if (dlgModal) {
+    const ok = document.getElementById('dlg-ok');
+    const cancel = document.getElementById('dlg-cancel');
+    const input = document.getElementById('dlg-input');
+    if (ok) ok.addEventListener('click', () => {
+      const hasInput = input && !input.classList.contains('hidden');
+      const val = hasInput ? input.value : true;
+      if (hasInput && val.trim() === '' && input.dataset.required === '1') {
+        const err = document.getElementById('dlg-error');
+        if (err) { err.textContent = 'Please enter a value.'; err.classList.remove('hidden'); }
+        return;
+      }
+      settleDialog(val);
+    });
+    if (cancel) cancel.addEventListener('click', () => settleDialog(null));
+    dlgModal.querySelectorAll('[data-dlg-close]').forEach((el) => el.addEventListener('click', () => settleDialog(null)));
+    dlgModal.addEventListener('click', (e) => { if (e.target === dlgModal) settleDialog(null); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !dlgModal || dlgModal.classList.contains('hidden')) return;
+      settleDialog(null);
+    });
   }
 
   // ── Offline detection + offline send queue (PWA) ─────────────────────────
@@ -797,7 +879,17 @@
     // the current gateway config (fresh ticket + URL). Delivered via poll, SSE
     // and WS frames alike.
     if (j.reconnect) { window.location.reload(); return; }
-    if (j.redirect) { window.location = j.redirect; return; }
+    if (j.redirect) {
+      if (j.reason) {
+        // Kicked/banned: show the reason in the chat window and give it a
+        // moment to be read before the redirect drops us out of the channel.
+        showReply(String(j.reason));
+        setTimeout(() => { window.location = j.redirect; }, 1500);
+        return;
+      }
+      window.location = j.redirect;
+      return;
+    }
     if (j.error) return;
     if (j.messages && j.messages.length) {
       j.messages.forEach(appendMsg);
@@ -809,6 +901,7 @@
     if (j.dm_list) handleDmList(j.dm_list);
     if (j.channel_unread) updateChannelUnread(j.channel_unread);
     if (j.channel_presence) updateChannelPresence(j.channel_presence);
+    if (typeof j.channel_url !== 'undefined' && CHANNEL) applyChannelUrl(j.channel_url);
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
     if (j.msg_update) applyMsgUpdate(j.msg_update);
@@ -1651,18 +1744,18 @@
   }
 
   document.querySelectorAll('.mode-toggle').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const flag = btn.dataset.mode;
       const slug = btn.dataset.channel;
       const wasOn = btn.textContent.trim().startsWith('+');
       const turnOn = !wasOn;
       let cmd = '/mode #' + slug + (turnOn ? '+' : '-') + flag;
       if (flag === 'k' && turnOn) {
-        const key = prompt('Set a channel key (leave empty to remove it):');
+        const key = await uiPrompt('Set a channel key (leave empty to remove it):');
         if (key === null) return;
         cmd = key === '' ? '/mode #' + slug + '-k' : '/mode #' + slug + '+k ' + key;
       } else if (flag === 'l' && turnOn) {
-        const lim = prompt('Max members:');
+        const lim = await uiPrompt('Max members:');
         if (lim === null) return;
         const n = parseInt(lim, 10);
         if (!n || n < 1) return;
@@ -1853,10 +1946,10 @@
         .then((j) => {
           uploadBtn.textContent = '📎';
           uploadFile.value = '';
-          if (j.error) { alert(j.error); return; }
+          if (j.error) { uiAlert(j.error); return; }
           if (j.message) appendMsg(j.message);
         })
-        .catch(() => { uploadBtn.textContent = '📎'; alert('Upload failed.'); });
+        .catch(() => { uploadBtn.textContent = '📎'; uiAlert('Upload failed.'); });
     });
     // Drag & drop an image onto the timeline.
     document.addEventListener('dragover', (e) => { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') !== -1) e.preventDefault(); });
@@ -2014,8 +2107,8 @@
     });
   });
   const partBtn = document.getElementById('part-btn');
-  if (partBtn) partBtn.addEventListener('click', () => {
-    if (!confirm('Leave this channel?')) return;
+  if (partBtn) partBtn.addEventListener('click', async () => {
+    if (!(await uiConfirm('Leave this channel?'))) return;
     post('/api/part', { channel: CHANNEL }, () => { window.location = '/app'; });
   });
   const muteBtn = document.getElementById('mute-btn');
@@ -2117,17 +2210,17 @@
   });
   document.addEventListener('click', () => { if (menu) menu.classList.add('hidden'); });
   const awayBtn = document.getElementById('set-away-btn');
-  if (awayBtn) awayBtn.addEventListener('click', () => {
-    const msg = prompt('Away message (leave empty to come back):', '');
+  if (awayBtn) awayBtn.addEventListener('click', async () => {
+    const msg = await uiPrompt('Away message (leave empty to come back):', '');
     if (msg === null) return;
     post('/api/profile', { away: msg.trim() }, () => { window.location.reload(); });
   });
   // Rich status picker (Online / Away / DND / Appear Offline / Custom).
   document.querySelectorAll('[data-status]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const body = { status_mode: btn.dataset.status };
       if (btn.dataset.status === 'custom') {
-        const text = prompt('Custom status:', '');
+        const text = await uiPrompt('Custom status:', '');
         if (text === null) return;
         body.custom_status = text.trim();
       }
@@ -2193,14 +2286,36 @@
     if (y + r.height > vh - 4) y = vh - r.height - 4;
     ctxMenu.style.left = Math.max(0, x) + 'px';
     ctxMenu.style.top = Math.max(0, y) + 'px';
+    // Remember when the menu opened: the trailing half of a right-button
+    // gesture emits a 'click' right after 'contextmenu', and we must not let
+    // that instantly close the menu the user is about to use.
+    ctxOpenAt = Date.now();
     ctxMenu.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => { const it = items[parseInt(b.dataset.i, 10)]; if (it.onClick) it.onClick(); ctxHide(); });
     });
   }
 
-  function ctxHide() { if (ctxMenu) ctxMenu.classList.add('hidden'); }
+  // Menu close-guard: only a deliberate outside click (primary button, after
+  // the open grace period) or a user-driven scroll should dismiss the menu.
+  let ctxOpenAt = 0;
+  let programmaticScrollAt = 0;
+  function ctxHide(e) {
+    if (!ctxMenu) return;
+    if (e && e.type === 'click') {
+      if (Date.now() - ctxOpenAt < 300) return; // trailing right-click synth click
+      const b = e.button;
+      if (b !== undefined && b !== 0 && b !== -1) return; // ignore right/middle
+      if (e.target && ctxMenu.contains(e.target)) return; // clicks inside the menu
+    }
+    ctxMenu.classList.add('hidden');
+  }
   document.addEventListener('click', ctxHide);
-  document.addEventListener('scroll', ctxHide, true);
+  // Ignore programmatic auto-scroll (the poll re-pins the stream); the flag is
+  // set by scrollBottom()/scrollTop assignments right before the event fires.
+  document.addEventListener('scroll', (e) => {
+    if (Date.now() - programmaticScrollAt < 400) return;
+    ctxHide(e);
+  }, true);
 
   function channelMenu(x, y, el) {
     const slug = el.dataset.ctxChannel;
@@ -2212,8 +2327,9 @@
       { label: 'Channel info', onClick: () => runCommand('/chaninfo ' + name) },
     ];
     if (CHANNEL === slug && (CAN_OP || CAN_ADMIN)) {
-      items.push({ label: 'Set topic', onClick: () => { const t = prompt('New topic:', ''); if (t !== null) runCommand('/topic ' + name + (t ? ' ' + t : '')); } });
-      items.push({ label: 'Invite', onClick: () => { const n = prompt('Invite user:', ''); if (n) runCommand('/invite ' + n + ' ' + name); } });
+      items.push({ label: 'Channel settings', onClick: () => openChannelSettings() });
+      items.push({ label: 'Set topic', onClick: async () => { const t = await uiPrompt('New topic:', ''); if (t !== null) runCommand('/topic ' + name + (t ? ' ' + t : '')); } });
+      items.push({ label: 'Invite', onClick: async () => { const n = await uiPrompt('Invite user:', ''); if (n) runCommand('/invite ' + n + ' ' + name); } });
     }
     if (el.dataset.owned === '1' || CAN_ADMIN) {
       items.push({ div: true });
@@ -2221,8 +2337,8 @@
     }
     if (el.dataset.owned === '1') {
       items.push({ div: true });
-      items.push({ label: 'Delete channel', danger: true, onClick: () => {
-        if (!confirm('Delete ' + name + '? The channel will be closed, but its chat history is preserved for admins.')) return;
+      items.push({ label: 'Delete channel', danger: true, onClick: async () => {
+        if (!(await uiConfirm('Delete ' + name + '? The channel will be closed, but its chat history is preserved for admins.'))) return;
         post('/api/channel/delete', { channel: slug }, () => { window.location = '/app'; });
       } });
     }
@@ -2267,8 +2383,8 @@
           : { label: 'Op', onClick: () => runCommand('/op ' + nick) }
       );
       items.push({ label: 'Mute', danger: true, onClick: () => runCommand('/quiet ' + nick) });
-      items.push({ label: 'Kick', danger: true, onClick: () => { const r = prompt('Reason (optional):', ''); if (r !== null) runCommand('/kick ' + nick + (r ? ' ' + r : '')); } });
-      items.push({ label: 'Ban', danger: true, onClick: () => { const r = prompt('Reason (optional):', ''); if (r !== null) runCommand('/ban ' + nick + (r ? ' ' + r : '')); } });
+      items.push({ label: 'Kick', danger: true, onClick: async () => { const r = await uiPrompt('Reason (optional):', ''); if (r !== null) runCommand('/kick ' + nick + (r ? ' ' + r : '')); } });
+      items.push({ label: 'Ban', danger: true, onClick: async () => { const r = await uiPrompt('Reason (optional):', ''); if (r !== null) runCommand('/ban ' + nick + (r ? ' ' + r : '')); } });
     }
     if (!isSelf) {
       items.push({ div: true });
@@ -2307,8 +2423,8 @@
     }
     const mine = author && author.toLowerCase() === MY_NICK;
     if (CAN_ADMIN || mine) {
-      items.push({ label: 'Edit', onClick: () => {
-        const next = prompt('Edit message:', content);
+      items.push({ label: 'Edit', onClick: async () => {
+        const next = await uiPrompt('Edit message:', content);
         if (next === null || next === content) return;
         post('/api/message/edit', { id, content: next }, () => {
           if (contentEl) contentEl.innerHTML = linkify(next);
@@ -2462,24 +2578,348 @@
     fetch('/api/channel/bg', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
       .then((r) => r.json().catch(() => ({ error: 'Server error (' + r.status + ')' })))
       .then((j) => {
-        if (j.error) { alert(j.error); return; }
+        if (j.error) { uiAlert(j.error); return; }
         if (chanBgMsg) { chanBgMsg.classList.remove('hidden'); setTimeout(() => chanBgMsg.classList.add('hidden'), 1500); }
         window.location.reload();
       })
-      .catch(() => alert('Request failed. Please try again.'));
+      .catch(() => uiAlert('Request failed. Please try again.'));
   });
   const chanBgRemove = document.getElementById('chan-bg-remove');
-  if (chanBgRemove) chanBgRemove.addEventListener('click', () => {
+  if (chanBgRemove) chanBgRemove.addEventListener('click', async () => {
     if (!chanBgSlug) return;
-    if (!confirm('Remove this channel\'s background?')) return;
+    if (!(await uiConfirm('Remove this channel\'s background?'))) return;
     const fd = new FormData();
     fd.append('csrf', CSRF);
     fd.append('channel', chanBgSlug);
     fetch('/api/channel/bg/remove', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
       .then((r) => r.json().catch(() => ({ error: 'Server error (' + r.status + ')' })))
-      .then((j) => { if (j.error) { alert(j.error); return; } window.location.reload(); })
-      .catch(() => alert('Request failed. Please try again.'));
+      .then((j) => { if (j.error) { uiAlert(j.error); return; } window.location.reload(); })
+      .catch(() => uiAlert('Request failed. Please try again.'));
   });
+
+  // ── Channel URL pane (embedded web page above the chat) ────────────────────
+  // When the channel has a URL set, a pane opens above the message list showing
+  // that page (embedded in a sandboxed iframe). Left/right sidebars are
+  // untouched; the chat takes the bottom half. The pane is created on demand so
+  // a URL set by another op shows up live on the next poll.
+  const URL_PANE_KEY = () => 'lvc.urlpane.' + (CHANNEL || 'default');
+
+  function urlPaneEl() {
+    let pane = document.getElementById('channel-url-pane');
+    if (pane) return pane;
+    if (!msgsEl || !msgsEl.parentNode) return null;
+    pane = document.createElement('div');
+    pane.id = 'channel-url-pane';
+    pane.className = 'flex flex-col shrink-0 bg-discord-850 border-b border-discord-700';
+    pane.style.flex = '1 1 45%';
+    pane.style.minHeight = '0';
+    pane.innerHTML =
+      '<div class="flex items-center gap-2 px-3 py-1.5 border-b border-discord-700 shrink-0">' +
+        '<span class="text-[10px] font-bold uppercase tracking-wide text-discord-400">Channel URL</span>' +
+        '<span id="url-pane-host" class="truncate text-xs text-discord-300" title=""></span>' +
+        '<a id="url-open" class="btn-ghost !py-0.5 !px-2 !text-xs ml-auto" target="_blank" rel="noopener noreferrer" title="Open in a new tab">↗ Open</a>' +
+        '<button type="button" id="url-refresh" class="btn-ghost !py-0.5 !px-2 !text-xs" title="Refresh">⟳</button>' +
+        '<button type="button" id="url-collapse" class="btn-ghost !py-0.5 !px-2 !text-xs" title="Hide or show the URL pane">▾</button>' +
+      '</div>' +
+      '<iframe id="url-frame" class="flex-1 min-h-0 w-full" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" allow="fullscreen" title="Channel URL"></iframe>';
+    msgsEl.parentNode.insertBefore(pane, msgsEl);
+    const open = pane.querySelector('#url-open');
+    if (open) open.addEventListener('click', (e) => { e.preventDefault(); if (CHANNEL_URL) window.open(CHANNEL_URL, '_blank', 'noopener'); });
+    const refresh = pane.querySelector('#url-refresh');
+    if (refresh) refresh.addEventListener('click', () => {
+      const frame = pane.querySelector('#url-frame');
+      if (frame && CHANNEL_URL) { frame.src = channelUrlFrameSrc(CHANNEL_URL); }
+    });
+    const collapse = pane.querySelector('#url-collapse');
+    if (collapse) collapse.addEventListener('click', () => {
+      const collapsed = pane.classList.toggle('url-pane-collapsed');
+      pane.style.flex = collapsed ? '0 0 auto' : '1 1 45%';
+      try { localStorage.setItem(URL_PANE_KEY(), collapsed ? '0' : '1'); } catch (e) {}
+      collapse.textContent = collapsed ? '▸' : '▾';
+      // Loading is deferred until the pane is actually shown (mobile default).
+      if (!collapsed && CHANNEL_URL) {
+        const frame = pane.querySelector('#url-frame');
+        if (frame) frame.src = channelUrlFrameSrc(CHANNEL_URL);
+      }
+    });
+    return pane;
+  }
+
+  // The pane iframe goes through the server-side embed proxy (/api/embed) so
+  // sites that refuse to be framed (X-Frame-Options / CSP) still load.
+  function channelUrlFrameSrc(url) {
+    return '/api/embed?url=' + encodeURIComponent(url);
+  }
+
+  function applyChannelUrl(url) {
+    url = String(url || '');
+    if (url === CHANNEL_URL) return;
+    CHANNEL_URL = url;
+    renderUrlPane();
+  }
+
+  function renderUrlPane() {
+    if (DM || !CHANNEL) return;
+    const pane = urlPaneEl();
+    if (!pane) return;
+    const frame = pane.querySelector('#url-frame');
+    const host = pane.querySelector('#url-pane-host');
+    const open = pane.querySelector('#url-open');
+    if (!CHANNEL_URL) {
+      pane.style.display = 'none';
+      return;
+    }
+    pane.style.display = '';
+    // Desktop shows the pane expanded by default; mobile defaults to collapsed
+    // (less screen space) — an explicit choice is always remembered per channel.
+    let collapsed;
+    try {
+      const saved = localStorage.getItem(URL_PANE_KEY());
+      collapsed = saved === null ? window.innerWidth < 768 : saved === '0';
+    } catch (e) {
+      collapsed = window.innerWidth < 768;
+    }
+    pane.classList.toggle('url-pane-collapsed', collapsed);
+    pane.style.flex = collapsed ? '0 0 auto' : '1 1 45%';
+    if (host) {
+      let h = '';
+      try { h = new URL(CHANNEL_URL).host; } catch (e) { h = CHANNEL_URL; }
+      host.textContent = h;
+      host.title = CHANNEL_URL;
+    }
+    if (open) open.href = CHANNEL_URL;
+    // Defer the fetch until the pane is actually shown (keeps mobile data down).
+    if (!collapsed && frame && frame.getAttribute('src') !== channelUrlFrameSrc(CHANNEL_URL)) frame.setAttribute('src', channelUrlFrameSrc(CHANNEL_URL));
+    const collapse = pane.querySelector('#url-collapse');
+    if (collapse) collapse.textContent = collapsed ? '▸' : '▾';
+  }
+
+  // ── Channel Settings modal (bans / registered ops / topic / URL) ───────────
+  const chanSettingsModal = document.getElementById('chan-settings-modal');
+  const csBody = document.getElementById('cs-body');
+  const csTabs = document.getElementById('cs-tabs');
+  const csMsg = document.getElementById('cs-msg');
+  let CS_DATA = null;
+  let CS_TAB = 'overview';
+  const CS_TABS = [
+    ['overview', 'Overview'],
+    ['bans', 'Bans'],
+    ['access', 'Ops & half-ops'],
+    ['topic', 'Topic'],
+  ];
+  const CS_LEVELS = [
+    ['op', '@ Op'], ['halfop', '% Half-op'], ['admin', '& Admin'], ['voice', '+ Voice'],
+  ];
+
+  function csFlash(msg) {
+    if (!csMsg) return;
+    csMsg.textContent = msg;
+    csMsg.classList.remove('hidden');
+    setTimeout(() => csMsg.classList.add('hidden'), 2500);
+  }
+
+  function openChannelSettings() {
+    if (!CHANNEL) return;
+    fetch('/api/channel/settings?channel=' + encodeURIComponent(CHANNEL))
+      .then((r) => r.json().catch(() => ({ error: 'Server error' })))
+      .then((j) => {
+        if (j.error) { uiAlert(j.error); return; }
+        CS_DATA = j;
+        CS_TAB = 'overview';
+        renderSettingsTabs();
+        showSettingsTab(CS_TAB);
+        if (chanSettingsModal) chanSettingsModal.classList.remove('hidden');
+      })
+      .catch(() => uiAlert('Could not load channel settings.'));
+  }
+  function closeChannelSettings() { if (chanSettingsModal) chanSettingsModal.classList.add('hidden'); }
+
+  function csAction(payload, done) {
+    payload.channel = CHANNEL;
+    post('/api/channel/settings', payload, (j) => {
+      if (j.message) csFlash(j.message);
+      fetch('/api/channel/settings?channel=' + encodeURIComponent(CHANNEL))
+        .then((r) => r.json())
+        .then((j2) => {
+          if (j2.ok) CS_DATA = j2;
+          renderSettingsTabs();
+          showSettingsTab(CS_TAB);
+          if (typeof j.url !== 'undefined') applyChannelUrl(j.url);
+          if (typeof j.topic_set !== 'undefined') refreshHeaderTopic(j);
+          if (done) done(j);
+        })
+        .catch(() => {});
+    });
+  }
+
+  function renderSettingsTabs() {
+    if (!csTabs || !CS_DATA) return;
+    const can = CS_DATA.can || {};
+    csTabs.innerHTML = CS_TABS.map(([key, label]) => {
+      const off = (key === 'bans' && !can.bans) || (key === 'access' && !can.access) || (key === 'topic' && !can.topic);
+      return `<button type="button" data-cs-tab="${key}" class="cs-tab px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${CS_TAB === key ? 'bg-blurple text-white' : 'text-discord-300 hover:bg-discord-700 hover:text-white'}"${off ? ' disabled title="You don\'t have permission"' : ''}>${label}${off ? ' 🔒' : ''}</button>`;
+    }).join('');
+    csTabs.querySelectorAll('.cs-tab').forEach((b) => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      CS_TAB = b.dataset.csTab;
+      renderSettingsTabs();
+      showSettingsTab(CS_TAB);
+    }));
+    const nameEl = document.getElementById('cs-name');
+    if (nameEl && CS_DATA.channel) nameEl.textContent = CS_DATA.channel.name;
+  }
+
+  function showSettingsTab(tab) {
+    if (!csBody || !CS_DATA) return;
+    if (tab === 'bans') csBody.innerHTML = csBansHtml();
+    else if (tab === 'access') csBody.innerHTML = csAccessHtml();
+    else if (tab === 'topic') csBody.innerHTML = csTopicHtml();
+    else csBody.innerHTML = csOverviewHtml();
+    bindSettingsActions();
+  }
+
+  function csOverviewHtml() {
+    const ch = CS_DATA.channel || {};
+    const can = CS_DATA.can || {};
+    const urlField = can.url
+      ? `<div class="card border border-discord-700 p-4 space-y-2">
+          <div class="text-xs font-bold uppercase tracking-wide text-discord-400">Channel URL</div>
+          <p class="text-xs text-discord-400">A web page shown in a pane above the chat. Anyone with operator status can change it.</p>
+          <div class="flex gap-2">
+            <input id="cs-url" type="url" class="input flex-1" placeholder="https://example.com/page" value="${esc(ch.url || '')}">
+            <button type="button" id="cs-url-save" class="btn-primary">Set URL</button>
+            ${ch.url ? '<button type="button" id="cs-url-clear" class="btn-ghost text-red-400">Clear</button>' : ''}
+          </div>
+          ${ch.url_banned ? '<p class="text-xs text-red-400">This channel\'s URL domain is on the global banned list — it is hidden until an admin lifts the ban.</p>' : ''}
+        </div>`
+      : '';
+    return `<div class="space-y-4">
+      <div class="card border border-discord-700 p-4 space-y-1">
+        <div class="text-xs font-bold uppercase tracking-wide text-discord-400">Channel</div>
+        <div class="text-sm text-discord-200 font-semibold">${esc(ch.name || '')}</div>
+        <div class="text-xs text-discord-400">${esc(ch.visibility || 'public')}${ch.topic_locked ? ' · topic locked (+t)' : ''}${ch.registered ? ' · registered' : ' · temporary (not registered)'}</div>
+        ${ch.description ? `<div class="text-xs text-discord-300 mt-1">${esc(ch.description)}</div>` : ''}
+      </div>
+      ${urlField}
+    </div>`;
+  }
+
+  function csBansHtml() {
+    const bans = CS_DATA.bans || [];
+    const rows = bans.length
+      ? bans.map((b) => `<tr class="border-b border-discord-800">
+          <td class="px-3 py-2 font-mono text-sm text-discord-200">${esc(b.mask)}</td>
+          <td class="px-3 py-2 text-xs text-discord-300">${esc(b.reason || '—')}</td>
+          <td class="px-3 py-2 text-xs text-discord-400">${esc(b.set_by_name || 'system')}</td>
+          <td class="px-3 py-2 text-right"><button type="button" class="cs-ban-del btn-ghost text-xs !py-0.5 text-red-400" data-id="${parseInt(b.id, 10)}">Remove</button></td>
+        </tr>`).join('')
+      : '<tr><td class="px-3 py-3 text-xs text-discord-500" colspan="4">No bans in this channel.</td></tr>';
+    return `<div class="card border border-discord-700 p-4 space-y-3">
+      <div class="text-xs font-bold uppercase tracking-wide text-discord-400">Channel bans</div>
+      <div class="flex gap-2 flex-wrap">
+        <input id="cs-ban-mask" class="input flex-1 min-w-40" placeholder="Nick or mask (e.g. nick!*@*)">
+        <input id="cs-ban-duration" class="input w-28" placeholder="1d, 30m…">
+      </div>
+      <div class="flex gap-2">
+        <input id="cs-ban-reason" class="input flex-1" placeholder="Reason…">
+        <button type="button" id="cs-ban-add" class="btn-primary">Ban</button>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700">
+        <th class="px-3 py-2">Mask</th><th class="px-3 py-2">Reason</th><th class="px-3 py-2">Set by</th><th class="px-3 py-2 text-right"></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  }
+
+  function csAccessHtml() {
+    const list = CS_DATA.access || [];
+    const rows = list.length
+      ? list.map((a) => `<tr class="border-b border-discord-800">
+          <td class="px-3 py-2 text-sm text-discord-200">${levelSymbol(a.level)} ${esc(a.username)}</td>
+          <td class="px-3 py-2 text-xs text-discord-300">${levelLabel(a.level)}</td>
+          <td class="px-3 py-2 text-xs text-discord-400">${esc(a.added_by ? 'user#' + a.added_by : 'system')}</td>
+          <td class="px-3 py-2 text-right"><button type="button" class="cs-access-del btn-ghost text-xs !py-0.5 text-red-400" data-nick="${esc(a.username)}">Remove</button></td>
+        </tr>`).join('')
+      : '<tr><td class="px-3 py-3 text-xs text-discord-500" colspan="4">No registered ops or half-ops yet. Add a member below — they keep this level every time they join.</td></tr>';
+    return `<div class="card border border-discord-700 p-4 space-y-3">
+      <div class="text-xs font-bold uppercase tracking-wide text-discord-400">Registered ops & half-ops</div>
+      <div class="flex gap-2 flex-wrap">
+        <input id="cs-access-nick" class="input flex-1 min-w-40" placeholder="Username">
+        <select id="cs-access-level" class="input w-36">${CS_LEVELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+        <button type="button" id="cs-access-add" class="btn-primary">Add</button>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700">
+        <th class="px-3 py-2">User</th><th class="px-3 py-2">Level</th><th class="px-3 py-2">Added by</th><th class="px-3 py-2 text-right"></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  }
+
+  function csTopicHtml() {
+    const ch = CS_DATA.channel || {};
+    const locked = ch.topic_locked;
+    return `<div class="card border border-discord-700 p-4 space-y-3">
+      <div class="text-xs font-bold uppercase tracking-wide text-discord-400">Channel topic</div>
+      <p class="text-xs text-discord-400">${locked ? 'The topic is locked (+t) — only operators can change it.' : 'The topic is unlocked — anyone in the channel can change it.'}</p>
+      <textarea id="cs-topic" rows="3" maxlength="500" class="input w-full resize-none" placeholder="What is this channel about?">${esc(ch.topic || '')}</textarea>
+      <div class="flex gap-2">
+        <button type="button" id="cs-topic-save" class="btn-primary">Set topic</button>
+        <button type="button" id="cs-topic-clear" class="btn-ghost text-red-400">Clear</button>
+      </div>
+    </div>`;
+  }
+
+  function levelSymbol(l) { return SYMBOL[l] || ''; }
+  function levelLabel(l) {
+    return ({ op: 'Operator', halfop: 'Half-op', admin: 'Channel admin', voice: 'Voiced', normal: 'Normal' })[l] || l;
+  }
+
+  function bindSettingsActions() {
+    const urlSave = document.getElementById('cs-url-save');
+    if (urlSave) urlSave.addEventListener('click', () => {
+      const v = (document.getElementById('cs-url') || {}).value || '';
+      csAction({ action: 'url_set', url: v.trim() }, (j) => { if (!j.error) applyChannelUrl(j.url || ''); });
+    });
+    const urlClear = document.getElementById('cs-url-clear');
+    if (urlClear) urlClear.addEventListener('click', () => csAction({ action: 'url_clear' }, (j) => { if (!j.error) applyChannelUrl(''); }));
+
+    const banAdd = document.getElementById('cs-ban-add');
+    if (banAdd) banAdd.addEventListener('click', () => {
+      const mask = (document.getElementById('cs-ban-mask') || {}).value || '';
+      if (!mask) { csFlash('Enter a nick or mask to ban.'); return; }
+      csAction({
+        action: 'ban_add',
+        mask: mask.trim(),
+        duration: (document.getElementById('cs-ban-duration') || {}).value || '',
+        reason: (document.getElementById('cs-ban-reason') || {}).value || '',
+      });
+    });
+    csBody.querySelectorAll('.cs-ban-del').forEach((b) => b.addEventListener('click', () => csAction({ action: 'ban_del', id: b.dataset.id })));
+
+    const accessAdd = document.getElementById('cs-access-add');
+    if (accessAdd) accessAdd.addEventListener('click', () => {
+      const nick = (document.getElementById('cs-access-nick') || {}).value || '';
+      if (!nick) { csFlash('Enter a username.'); return; }
+      const level = (document.getElementById('cs-access-level') || {}).value || 'op';
+      csAction({ action: 'access_add', nick: nick.trim(), level });
+    });
+    csBody.querySelectorAll('.cs-access-del').forEach((b) => b.addEventListener('click', () => csAction({ action: 'access_del', nick: b.dataset.nick })));
+
+    const topicSave = document.getElementById('cs-topic-save');
+    if (topicSave) topicSave.addEventListener('click', () => {
+      csAction({ action: 'topic_set', topic: (document.getElementById('cs-topic') || {}).value || '' });
+    });
+    const topicClear = document.getElementById('cs-topic-clear');
+    if (topicClear) topicClear.addEventListener('click', () => csAction({ action: 'topic_set', topic: '' }));
+  }
+
+  const chanSettingsBtn = document.getElementById('chan-settings-btn');
+  if (chanSettingsBtn) chanSettingsBtn.addEventListener('click', openChannelSettings);
+  const chanSettingsBtnM = document.getElementById('chan-settings-btn-m');
+  if (chanSettingsBtnM) chanSettingsBtnM.addEventListener('click', openChannelSettings);
+  if (chanSettingsModal) {
+    chanSettingsModal.querySelectorAll('[data-chan-settings-close]').forEach((el) => el.addEventListener('click', closeChannelSettings));
+    chanSettingsModal.addEventListener('click', (e) => { if (e.target === chanSettingsModal) closeChannelSettings(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !chanSettingsModal.classList.contains('hidden')) closeChannelSettings(); });
+  }
 
   // ── Theme toggle (light/dark, sticky per browser + per account) ────────────
   const themeBtn = document.getElementById('theme-toggle');
@@ -2736,9 +3176,9 @@
     post('/api/push/mute', { user_id: uid }, () => showReply('Muted — no notifications from them.'));
   });
   const dmBlockBtn = document.getElementById('dm-block-btn');
-  if (dmBlockBtn) dmBlockBtn.addEventListener('click', () => {
+  if (dmBlockBtn) dmBlockBtn.addEventListener('click', async () => {
     const nick = dmBlockBtn.dataset.username;
-    if (nick && confirm('Block ' + nick + '?')) {
+    if (nick && await uiConfirm('Block ' + nick + '?')) {
       post('/api/friend/block', { username: nick }, () => showReply(nick + ' has been blocked.'));
     }
   });
@@ -2928,6 +3368,7 @@
   // Also re-pin as any initially-rendered images load (they start lazy/0-height).
   scrollBottomWhenImagesLoad(msgsEl);
   bindMessageActions();
+  renderUrlPane();
   // Runtime diagnostic: confirm the chat fills the viewport (body rect vs window).
   (() => {
     const r = document.body.getBoundingClientRect();
@@ -3276,7 +3717,7 @@
             }
             btn.disabled = false;
             btn.textContent = 'Join';
-            if (j.error) alert(j.error);
+            if (j.error) uiAlert(j.error);
           })
           .catch(() => {
             btn.disabled = false;

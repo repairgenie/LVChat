@@ -21,7 +21,17 @@ $server = proc_open(
     [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/http-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/http-test-server.log', 'a']],
     $pipes,
     dirname(__DIR__),
-    array_merge($_ENV, ['CHAT_DB' => $DB])
+    array_merge($_ENV, ['CHAT_DB' => $DB, 'LVC_EMBED_ALLOW_LOCAL' => '1'])
+);
+sleep(1);
+
+// Mock web server for the /api/embed proxy tests (framing headers, redirects).
+$embedDir = '/tmp/opencode/embedtest';
+$embedServer = proc_open(
+    ['php', '-S', '127.0.0.1:8097', '-t', $embedDir, $embedDir . '/router.php'],
+    [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/embed-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/embed-test-server.log', 'a']],
+    $embedPipes,
+    $embedDir
 );
 sleep(1);
 
@@ -767,6 +777,20 @@ check('logged-in embed redirects into the channel', $s === 302 && str_contains($
 [$s, , $b] = req('GET', '/browse', [], $cjA);
 check('browse page shows online + peak stats', $s === 200 && strpos($b, '>Online<') !== false && strpos($b, '>Peak<') !== false, $b);
 
+// Messenger room-browser API: public rooms (+ the caller's own) with shape.
+[$s, , $b] = req('GET', '/api/browse', [], $cjA);
+$br = jsonDecode($b);
+$brPublic = array_column($br['channels'] ?? [], 'name');
+$brMine = array_column($br['myChannels'] ?? [], 'name');
+$brAll = array_merge($brPublic, $brMine);
+$brShapeOk = (bool) ($br['channels'] ?? null) && is_array($br['channels']) && ($br['myChannels'] ?? null) && is_array($br['myChannels']) && ($br['online'] ?? null) !== null;
+check('/api/browse ok with channels + myChannels + online', $s === 200 && $brShapeOk, $b);
+check('/api/browse lists public rooms', $s === 200 && in_array('#gaming', $brAll, true) && in_array('#general', $brPublic, true), json_encode($brPublic));
+check('/api/browse hides secret rooms from the public list', !in_array('#secretlab', $brPublic, true), json_encode($brPublic));
+check('/api/browse carries join + room metadata', isset($br['channels'][0]['joined']) && isset($br['channels'][0]['members']) && isset($br['channels'][0]['online']) && isset($br['channels'][0]['visibility']), json_encode($br['channels'][0] ?? null));
+[$s] = req('GET', '/api/browse');
+check('/api/browse requires a session', $s === 401, (string) $s);
+
 // ── Day log (modal text + export) ────────────────────────────────────────────
 $today = gmdate('Y-m-d');
 [$s, , $b] = req('GET', '/admin/logs/day?channel=%23gaming&date=' . $today, [], $cjA);
@@ -818,6 +842,19 @@ $t = csrf(req('GET', '/register', [], $cjC)[2]);
 req('POST', '/register', ['csrf' => $t, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjC);
 [$s] = req('GET', '/c/staff', [], $cjC);
 check('regular user denied #staff', $s === 200, (string) $s); // access-denied page (not redirect to chat)
+
+// ── Operator action log + command list ───────────────────────────────────────
+echo "== oper-log / commands ==\n";
+[$s, $h] = req('GET', '/c/oper-log', [], $cjA);
+check('admin can join #oper-log', $s === 302 && str_contains($h['location'] ?? '', 'channel=oper-log'), "$s " . ($h['location'] ?? ''));
+[$s] = req('GET', '/c/oper-log', [], $cjC);
+check('regular user denied #oper-log', $s === 200, (string) $s);
+[$s, , $b] = req('GET', '/api/commands', [], $cjA);
+$cmds = jsonDecode($b);
+check('/api/commands returns the command list', $s === 200 && is_array($cmds['commands'] ?? null) && in_array('sanick', $cmds['commands'], true), "$s $b");
+[$s] = req('GET', '/api/commands');
+check('/api/commands requires a session', $s === 302, (string) $s);
+
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
 echo "== misc ==\n";
@@ -1051,6 +1088,49 @@ $t = csrf(req('GET', '/login', [], $cjMin)[2]);
 [$s, $h] = req('POST', '/guest', ['csrf' => $t, 'nick' => 'minorguest', 'next' => '/app'], $cjMin);
 check('guest without age certification rejected', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
 
+// ── Kick: removes the member AND bounces them with the reason (poll mode) ────
+echo "== kick ==\n";
+$tA = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/command', ['csrf' => $tA, 'channel' => 'gaming', 'text' => '/kick bob you so stinky'], $cjA);
+check('/kick with reason succeeds', $s === 200 && str_contains(jsonDecode($b)['replies'][0] ?? '', 'Kicked bob'), "$s $b");
+[$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0', [], $cjB);
+$kj = jsonDecode($b);
+check('kicked user poll returns redirect', $s === 200 && !empty($kj['redirect']), "$s $b");
+check('kick reason + actor surface to the target', str_contains($kj['reason'] ?? '', 'alice kicked you from #gaming') && str_contains($kj['reason'] ?? '', 'you so stinky'), json_encode($kj));
+[$s, , $b] = req('GET', '/api/poll?channel=gaming&since=0', [], $cjB);
+check('removal reason is one-shot (generic fallback on next poll)', (jsonDecode($b)['reason'] ?? '') === 'You were removed from #gaming.', $b);
+
+// ── Channel-URL embed proxy (/api/embed) ─────────────────────────────────────
+echo "== embed proxy ==\n";
+$emb = 'http://127.0.0.1:8097';
+[$s] = req('GET', '/api/embed?url=' . rawurlencode("$emb/framed"));
+check('embed requires a session', $s === 403, (string) $s);
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode('not-a-url'), [], $cjA);
+check('embed rejects non-http(s) URLs', $s === 400, "$s $b");
+dbq("INSERT OR REPLACE INTO banned_urls (domain, reason) VALUES ('embedbanned.test', 'test')");
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode('https://embedbanned.test/'), [], $cjA);
+check('embed rejects banned domains', $s === 403, "$s $b");
+dbq("DELETE FROM banned_urls WHERE domain = 'embedbanned.test'");
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode('https://10.0.0.5/x'), [], $cjA);
+check('embed rejects private addresses (SSRF guard)', $s === 403, "$s $b");
+// A page that refuses to be framed still embeds: no X-Frame-Options leaks
+// through, and the body gains the base href + click-catcher.
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/framed"), [], $cjA);
+check('embed strips X-Frame-Options and serves framed page', $s === 200 && str_contains($b, '<h1>framed</h1>') && !isset($h['x-frame-options']), "$s");
+check('embed injects base href + click catcher', str_contains($b, '<base href="http://127.0.0.1:8097/framed">') && str_contains($b, '/api/embed'), '');
+// CSP frame-ancestors is dropped (kept CSP is fine, but the frame block must go).
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/csp"), [], $cjA);
+check('embed serves CSP page and strips its frame block', $s === 200 && str_contains($b, 'csp-frame-ancestors-none'), "$s");
+// Relative resources keep resolving to the target site (injected <base> wins).
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/rel"), [], $cjA);
+check('embed replaces the page <base> with the target base', $s === 200 && substr_count(strtolower($b), '<base') === 1 && str_contains($b, '<base href="http://127.0.0.1:8097/rel">') && !str_contains($b, 'evil.example'), '');
+// Server-side redirects are followed, so the final page is what gets embedded.
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/redirect"), [], $cjA);
+check('embed follows redirects server-side', $s === 200 && str_contains($b, '<h1>plain</h1>') && str_contains($b, '<base href="http://127.0.0.1:8097/plain">'), "$s $b");
+// Non-HTML payloads pass through untouched.
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/img.png"), [], $cjA);
+check('embed passes non-HTML payloads through', $s === 200 && str_starts_with($h['content-type'] ?? '', 'image/png'), ($h['content-type'] ?? ''));
+
 // ── Support tickets (HTTP) ───────────────────────────────────────────────────
 echo "== support tickets ==\n";
 $t = csrf(req('GET', '/support', [], $cjB)[2]);
@@ -1255,6 +1335,108 @@ check('header-only csrf wrote the bg', (string) $pdo->query("SELECT bg_color FRO
 [$s, , $j] = req('POST', '/api/channel/bg/remove', ['csrf' => $tB, 'channel' => 'bgtown'], $cjB);
 check('owner removes channel bg again', $s === 200, "$s $j");
 
+// ── Channel settings (bans / ops / topic / URL) + banned-URL list ────────────
+echo "== channel settings ==\n";
+$tA = csrf(req('GET', '/admin/urls', [], $cjA)[2]);
+[$s, , $b] = req('GET', '/admin/urls', [], $cjA);
+check('admin blocked-urls page 200', $s === 200, (string) $s);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'banned_url_add', 'domain' => 'evilhttp.test', 'reason' => 'spam', 'back' => '/admin/urls'], $cjA);
+check('banned_url_add redirects', $s === 302, (string) $s);
+check('banned domain persisted', count(dbq("SELECT id FROM banned_urls WHERE domain = 'evilhttp.test'")) === 1);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'banned_url_add', 'domain' => 'evilhttp.test', 'reason' => 'dup', 'back' => '/admin/urls'], $cjA);
+check('duplicate banned domain rejected', count(dbq("SELECT id FROM banned_urls WHERE domain = 'evilhttp.test'")) === 1);
+[$s, , $b] = req('GET', '/admin/urls', [], $cjA);
+check('blocked-urls page lists domain', $s === 200 && str_contains($b, 'evilhttp.test'), (string) $s);
+$banId = (int) $pdo->query("SELECT id FROM banned_urls WHERE domain = 'evilhttp.test'")->fetchColumn();
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'banned_url_del', 'id' => $banId, 'back' => '/admin/urls'], $cjA);
+check('banned_url_del removes', $s === 302 && count(dbq("SELECT id FROM banned_urls WHERE id = $banId")) === 0);
+
+// A channel owned by bob with a normal member (bguser).
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $j] = req('POST', '/api/channels', ['csrf' => $tB, 'name' => '#sectown'], $cjB);
+check('bob creates settings channel', $s === 200, "$s $j");
+$tBG = csrf(req('GET', '/app', [], $cjBG)[2]);
+[$s, , $j] = req('POST', '/api/join', ['csrf' => $tBG, 'name' => '#sectown'], $cjBG);
+check('bguser joins settings channel', $s === 200, "$s $j");
+
+// GET settings payload + permission surface.
+$tB = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $b] = req('GET', '/api/channel/settings?channel=sectown', [], $cjB);
+$j = jsonDecode($b);
+check('owner GET settings 200', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
+check('settings payload shape', is_array($j['bans'] ?? null) && is_array($j['access'] ?? null) && isset($j['channel']['name']), $b);
+check('owner can manage everything', ($j['can']['manage'] ?? false) === true && ($j['can']['bans'] ?? false) === true && ($j['can']['access'] ?? false) === true && ($j['can']['url'] ?? false) === true, $b);
+[$s, , $b] = req('GET', '/api/channel/settings?channel=sectown', [], $cjBG);
+$j = jsonDecode($b);
+check('normal member GET settings 200', $s === 200, "$s $b");
+check('normal member cannot manage', ($j['can']['manage'] ?? true) === false && ($j['can']['bans'] ?? true) === false && ($j['can']['access'] ?? true) === false && ($j['can']['url'] ?? true) === false, $b);
+[$s] = req('GET', '/api/channel/settings?channel=no-such-channel', [], $cjB);
+check('settings 404 for missing channel', $s === 404, (string) $s);
+[$s] = req('GET', '/api/channel/settings?channel=general', []);
+check('settings requires auth', $s === 401, (string) $s);
+
+// URL management (ops+).
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'url_set', 'url' => 'https://good.example.org/page'], $cjB);
+$j = jsonDecode($b);
+check('owner sets channel url', $s === 200 && ($j['ok'] ?? false) === true && ($j['url'] ?? '') === 'https://good.example.org/page', "$s $b");
+check('channel_url persisted', (string) $pdo->query("SELECT channel_url FROM channels WHERE name = '#sectown'")->fetchColumn() === 'https://good.example.org/page');
+[$s, , $b] = req('GET', '/api/poll?channel=sectown&since=0', [], $cjB);
+$j = jsonDecode($b);
+check('poll carries channel_url', ($j['channel_url'] ?? '') === 'https://good.example.org/page', "$s $b");
+// A domain banned after the fact hides the URL from clients.
+$tA = csrf(req('GET', '/admin/urls', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'banned_url_add', 'domain' => 'good.example.org', 'reason' => 'now banned', 'back' => '/admin/urls'], $cjA);
+[$s, , $b] = req('GET', '/api/poll?channel=sectown&since=0', [], $cjB);
+$j = jsonDecode($b);
+check('banned domain hidden in poll', array_key_exists('channel_url', $j) && $j['channel_url'] === null && ($j['url_banned'] ?? false) === true, "$s $b");
+[$s, , $b] = req('GET', '/api/channel/settings?channel=sectown', [], $cjB);
+$j = jsonDecode($b);
+check('settings flags banned url', array_key_exists('url', $j['channel']) && $j['channel']['url'] === null && ($j['channel']['url_banned'] ?? false) === true, $b);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'banned_url_del', 'id' => (int) $pdo->query("SELECT id FROM banned_urls WHERE domain = 'good.example.org'")->fetchColumn(), 'back' => '/admin/urls'], $cjA);
+// Re-ban the earlier domain so the subdomain rejection below has a ban to hit.
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'banned_url_add', 'domain' => 'evilhttp.test', 'reason' => 'spam', 'back' => '/admin/urls'], $cjA);
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'url_set', 'url' => 'https://sub.evilhttp.test/x'], $cjB);
+$j = jsonDecode($b);
+check('subdomain of banned domain rejected', $s === 400 && isset($j['error']), "$s $b");
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'url_set', 'url' => 'ftp://x.test'], $cjB);
+check('non-http url rejected', $s === 400, "$s $b");
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'url_clear'], $cjB);
+$j = jsonDecode($b);
+check('owner clears channel url', $s === 200 && array_key_exists('url', $j) && $j['url'] === null, "$s $b");
+check('channel_url cleared', (($pdo->query("SELECT channel_url FROM channels WHERE name = '#sectown'")->fetchColumn()) ?: '') === '');
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tBG, 'channel' => 'sectown', 'action' => 'url_set', 'url' => 'https://nope.test'], $cjBG);
+check('normal member cannot set url', $s === 403, "$s $b");
+
+// Bans (halfop+).
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'ban_add', 'mask' => 'spammer!*@*', 'reason' => 'testing', 'duration' => ''], $cjB);
+$j = jsonDecode($b);
+check('owner bans a mask', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
+$banRow = dbq("SELECT id FROM bans WHERE kind = 'channel_ban' AND channel_id = (SELECT id FROM channels WHERE name = '#sectown') AND mask = 'spammer!*@*'");
+check('ban persisted', count($banRow) === 1, json_encode($banRow));
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tBG, 'channel' => 'sectown', 'action' => 'ban_add', 'mask' => 'x!*@*'], $cjBG);
+check('normal member cannot ban', $s === 403, "$s $b");
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'ban_del', 'id' => (int) $banRow[0]['id']], $cjB);
+check('owner removes ban', $s === 200, "$s $b");
+
+// Access list (ops+).
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'access_add', 'nick' => 'bguser', 'level' => 'halfop'], $cjB);
+$j = jsonDecode($b);
+check('owner adds access entry', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
+$acc = dbq("SELECT level FROM channel_access WHERE channel_id = (SELECT id FROM channels WHERE name = '#sectown') AND user_id = (SELECT id FROM users WHERE username = 'bguser')");
+check('access entry persisted', count($acc) === 1 && ($acc[0]['level'] ?? '') === 'halfop', json_encode($acc));
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tBG, 'channel' => 'sectown', 'action' => 'access_add', 'nick' => 'alice', 'level' => 'op'], $cjBG);
+check('normal member cannot manage access', $s === 403, "$s $b");
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'access_del', 'nick' => 'bguser'], $cjB);
+$j = jsonDecode($b);
+check('owner removes access entry', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
+check('access entry removed', count(dbq("SELECT id FROM channel_access WHERE channel_id = (SELECT id FROM channels WHERE name = '#sectown')")) === 0);
+
+// Topic (respects +t).
+[$s, , $b] = req('POST', '/api/channel/settings', ['csrf' => $tB, 'channel' => 'sectown', 'action' => 'topic_set', 'topic' => 'settings topic'], $cjB);
+$j = jsonDecode($b);
+check('owner sets topic via settings', $s === 200 && ($j['topic_set'] ?? '') === 'settings topic', "$s $b");
+check('topic persisted', (string) $pdo->query("SELECT topic FROM channels WHERE name = '#sectown'")->fetchColumn() === 'settings topic');
+
 // Push notifications API.
 $tPush = csrf(req('GET', '/app', [], $cjA)[2]);
 $pt = "\x04" . str_repeat("\x01", 64);
@@ -1323,6 +1505,20 @@ check('chat download modal renders configured links', str_contains($dlPage, 'htt
 check('settings clears download links', $s === 302, (string) $s);
 $dlPage = req('GET', '/app', [], $cjA)[2];
 check('chat download modal hides cleared links', !str_contains($dlPage, 'https://example.com/LVChatSetup.exe'), '');
+
+// Web-messenger allowed origins (CORS): persist + normalize + emit headers.
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'app_origins' => 'https://msg.example.com/, https://msg.example.com,  https://app.example.com,ftp://bad.example.com,not-a-url', 'back' => '/admin/settings'], $cjA);
+check('settings_save accepts app_origins', $s === 302, (string) $s);
+check('app_origins normalized (deduped, slash-stripped, invalid dropped)', (string) $pdo->query("SELECT value FROM server_config WHERE key = 'app_origins'")->fetchColumn() === 'https://msg.example.com, https://app.example.com', '');
+[, $h] = req('GET', '/api/me', [], $cjA, ['Origin: https://msg.example.com']);
+check('CORS emitted for allowlisted origin', ($h['access-control-allow-origin'] ?? '') === 'https://msg.example.com' && ($h['access-control-allow-credentials'] ?? '') === 'true', '');
+[, $h] = req('GET', '/api/me', [], $cjA, ['Origin: https://evil.example.com']);
+check('no CORS for non-allowlisted origin', !isset($h['access-control-allow-origin']), '');
+$settingsPage = req('GET', '/admin/settings', [], $cjA)[2];
+check('settings page renders allowed-origins field', str_contains($settingsPage, 'https://msg.example.com, https://app.example.com'), '');
+[$s] = req('POST', '/admin/action', ['csrf' => $tPush, 'action' => 'settings_save', 'app_origins' => '', 'back' => '/admin/settings'], $cjA);
+check('settings clears app_origins', $s === 302 && (string) $pdo->query("SELECT value FROM server_config WHERE key = 'app_origins'")->fetchColumn() === '', '');
+
 
 // Realtime transport report accepts the forced-offline ('none') state.
 [$s, , $j] = req('POST', '/api/rt/report', ['transport' => 'none'], $cjA, ['X-CSRF: ' . $tPush]);

@@ -10,7 +10,7 @@
         <div>
           <label class="label">Type</label>
           <select name="kind" class="input">
-            <?php foreach (['kline', 'gline', 'zline', 'shun', 'qline'] as $k): ?>
+            <?php foreach (['kline', 'gline', 'zline', 'shun', 'qline', 'cqline'] as $k): ?>
             <option value="<?= $k ?>"><?= strtoupper($k) ?></option>
             <?php endforeach; ?>
           </select>
@@ -21,8 +21,8 @@
         </div>
       </div>
       <div>
-        <label class="label">Mask (nick, IP, or IP/CIDR)</label>
-        <input class="input" name="mask" placeholder="nick · 1.2.3.4 · 10.0.0.0/24" required>
+        <label class="label">Mask</label>
+        <input class="input" name="mask" placeholder="nick · IP · IP/CIDR · #channel for CQLINE" required>
       </div>
       <div>
         <label class="label">Reason</label>

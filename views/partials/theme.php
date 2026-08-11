@@ -6,6 +6,7 @@
 // background, which overrides the theme's chat background while viewing it.
 $themeViewUser = isset($user) && is_array($user) ? $user : null;
 $themeRendered = ThemeService::effectiveForView($themeViewUser);
-$themeCss = ThemeService::cssVars($themeRendered) . "\n" . ThemeService::chatBgCss($themeRendered, $channel ?? null);
+$themeChannel = isset($channel) && is_array($channel) ? $channel : null;
+$themeCss = ThemeService::cssVars($themeRendered) . "\n" . ThemeService::chatBgCss($themeRendered, $themeChannel);
 ?>
 <style id="theme-css"><?= $themeCss ?></style>

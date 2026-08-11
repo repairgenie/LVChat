@@ -214,6 +214,46 @@ Members have one of these levels, shown next to their nick:
 Channel ops can **promote** you (e.g. `/op nick`) and set bans — see
 **Channel ops commands** below.
 
+### 3.7 Channel settings (the control panel)
+
+Channel **operators and above** — plus server admins and opers — get a
+**⚙ Settings** button for the channel they're viewing (top-right of the header,
+or right-click the channel in the sidebar → **Channel settings**). It's a
+point-and-click control panel with four tabs:
+
+- **Overview** — the channel's name, visibility, registration status, and the
+  **Channel URL** field.
+- **Bans** — the channel's ban list with add/remove. Add by **nick** (resolved
+  automatically) or a **mask** (`nick!*@*`, IP, …) with an optional duration
+  (`1d`, `30m`, …) and reason. Half-ops and above can manage bans.
+- **Ops & half-ops** — the registered **access list**: members who
+  automatically hold a level every time they join, even while offline. Add a
+  user with a level (`@ op`, `% half-op`, `& admin`, `+ voice`) or remove one.
+  Ops and above can manage this.
+- **Topic** — set or clear the channel topic. When the topic is locked (`+t`),
+  only operators can change it.
+
+Everything in the panel is also available as a slash command (`/ban`, `/unban`,
+`/access`, `/topic`) with exactly the same permissions — the panel just makes
+them clickable.
+
+### 3.8 Channel URL
+
+An operator can give a channel a **Channel URL** — a web page embedded directly
+in the chat. When one is set, a pane opens **above** the message list. The
+sidebars stay where they are; the chat takes the bottom half of the view.
+
+- The pane's header bar shows the page's host, with **Open** (opens the page in
+  a new tab), **Refresh**, and a **▾** collapse button (your choice is
+  remembered for that channel).
+- Only `http://` and `https://` pages are allowed. Some sites refuse to be
+  embedded (`X-Frame-Options`) — if the pane looks empty, click **Open**.
+- Set or clear it in **Channel settings → Overview**. Ops and above can change
+  it; a system line in the channel announces set/clear so everyone sees it live.
+- The server keeps a global **blocked-domains** list. A URL whose host equals a
+  blocked domain (or is a subdomain of one) is **rejected** when you try to set
+  it, and an already-set URL is **hidden** if its domain gets blocked later.
+
 ---
 
 ## 4. Messaging

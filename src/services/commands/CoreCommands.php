@@ -173,11 +173,8 @@ CommandRegistry::register('nick', [
         if ($exists) {
             return ['replies' => ["Nickname $newnick is already in use."]];
         }
-        $ban = Database::row(
-            "SELECT * FROM bans WHERE active = 1 AND kind = 'qline' AND channel_id IS NULL
-             AND (expires_at IS NULL OR expires_at > datetime('now'))"
-        );
-        if ($ban && Auth::maskMatch($ban['mask'], $newnick)) {
+        $ban = BanService::nickForbidden($newnick);
+        if ($ban) {
             return ['replies' => ['That nickname is reserved (' . ($ban['reason'] ?: 'q-lined') . ').']];
         }
         Database::query('UPDATE users SET username = ? WHERE id = ?', [$newnick, $user['id']]);

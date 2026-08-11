@@ -13,6 +13,18 @@ function redirect(string $path): never
     exit;
 }
 
+/** Only allow same-origin, absolute-relative redirect targets. Blocks open
+ *  redirects (CWE-601): external URLs, protocol-relative "//host" and
+ *  backslash variants are all rejected and fall back to the chat home. */
+function safe_next(string $path): string
+{
+    $path = trim($path);
+    if ($path === '' || $path[0] !== '/' || str_starts_with($path, '//') || str_contains($path, '\\') || preg_match('/[\x00-\x1F\x7F]/', $path)) {
+        return '/app?channel=general';
+    }
+    return $path;
+}
+
 function url(string $path): string
 {
     return $path;
@@ -169,10 +181,63 @@ function level_color(string $level): string
 
 function log_audit(string $action, ?string $target = null, ?string $detail = null): void
 {
+    oper_log($action, $target, $detail);
     Database::query(
         'INSERT INTO audit_log (actor_id, action, target, detail) VALUES (?, ?, ?, ?)',
         [Auth::id(), $action, $target, $detail]
     );
+}
+
+/**
+ * Mirror an audited event into #oper-log when the actor is a server admin or
+ * an o:line holder. Individual channel operators (who hold @ in a channel but
+ * are neither admins nor o:line users) are deliberately excluded.
+ */
+function oper_log(string $action, ?string $target = null, ?string $detail = null): void
+{
+    $actor = Auth::user();
+    if (!$actor || Auth::isGuest($actor)) {
+        return;
+    }
+    $isAdmin = ($actor['role'] ?? '') === 'admin';
+    $hasOline = !$isAdmin && (bool) Database::scalar(
+        'SELECT 1 FROM opers WHERE username = ? COLLATE NOCASE',
+        [$actor['username']]
+    );
+    if (!$isAdmin && !$hasOline) {
+        return;
+    }
+    $ch = Database::row('SELECT * FROM channels WHERE slug = ? COLLATE NOCASE', ['oper-log']);
+    if (!$ch) {
+        return;
+    }
+    // Lazily auto-join qualifying admins/opers so the log channel stays current.
+    Database::query(
+        'INSERT OR IGNORE INTO channel_members (channel_id, user_id, level) VALUES (?, ?, "normal")',
+        [$ch['id'], $actor['id']]
+    );
+    $line = $actor['username'];
+    $operClass = Auth::operSessionClass();
+    if ($operClass) {
+        $line .= ' (' . $operClass . ')';
+    }
+    $line .= ': ' . $action;
+    if ($target !== null && $target !== '') {
+        $line .= ' ' . $target;
+    }
+    if ($detail !== null && $detail !== '') {
+        $line .= ' — ' . $detail;
+    }
+    $id = MessageService::system((int) $ch['id'], 'notice', $line);
+    Realtime::message($ch['slug'], [
+        'id' => $id,
+        'kind' => 'notice',
+        'content' => $line,
+        'channel' => $ch['slug'],
+        'sender_id' => null,
+        'username' => null,
+        'guest' => 0,
+    ]);
 }
 
 function config_get(string $key, ?string $default = null): ?string

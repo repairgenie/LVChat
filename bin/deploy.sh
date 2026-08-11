@@ -31,6 +31,11 @@
 # and refreshed whenever the fingerprint changes (Let's Encrypt rotation), then
 # the gateway is restarted AS THE WEB USER (systemd unit preferred) — never as
 # root, so the admin panel keeps managing the daemon.
+# NOTE: on panels that keep the source certs root-only (e.g. HestiaCP), a
+# NON-root deploy cannot re-stage them. If the source was renewed but the copy
+# fails, deploy.sh now exits loudly instead of claiming "already current" —
+# run  sudo bash bin/deploy.sh  or install the certbot renewal hook
+# (bin/le-renewal-hook.sh) so rotation stays automatic.
 #
 # Verify:
 #   su - <siteuser> -c "head -c 10 .../data/tls/privkey.pem"     # readable
@@ -400,6 +405,7 @@ if [ "$RT" = "ws" ]; then
     fi
 
     SSL_CHANGED=0
+    STAGE_FAILED=0
     if [ -n "$WSCERT" ] && [ -n "$WSKEY" ] && [ -f "$WSCERT" ] && [ -f "$WSKEY" ]; then
         mkdir -p "$ROOT/data/tls"
         NEWCERT="$ROOT/data/tls/fullchain.pem"
@@ -408,13 +414,20 @@ if [ "$RT" = "ws" ]; then
         OLD_KEY_HASH=$(sha256sum "$NEWKEY" 2>/dev/null | awk '{print $1}') || true
         # Re-stage from the source every deploy so Let's Encrypt rotation lands.
         if [ "$WSCERT" != "$NEWCERT" ]; then
-            cp "$WSCERT" "$NEWCERT" 2>/dev/null || echo "WARN: could not copy $WSCERT into data/tls/"
-            if [ -n "$WSCHAIN" ] && [ -f "$WSCHAIN" ]; then
-                cat "$WSCHAIN" >> "$NEWCERT" 2>/dev/null || true
+            if cp "$WSCERT" "$NEWCERT" 2>/dev/null; then
+                if [ -n "$WSCHAIN" ] && [ -f "$WSCHAIN" ]; then
+                    cat "$WSCHAIN" >> "$NEWCERT" 2>/dev/null || true
+                fi
+            else
+                STAGE_FAILED=1
+                echo "WARN: could not copy $WSCERT into data/tls/ (source cert root-only and deploy not run as root?)" >&2
             fi
         fi
         if [ "$WSKEY" != "$NEWKEY" ]; then
-            cp "$WSKEY" "$NEWKEY" 2>/dev/null || echo "WARN: could not copy $WSKEY into data/tls/"
+            if ! cp "$WSKEY" "$NEWKEY" 2>/dev/null; then
+                STAGE_FAILED=1
+                echo "WARN: could not copy $WSKEY into data/tls/ (source key root-only and deploy not run as root?)" >&2
+            fi
         fi
         # Own the staged files by the gateway user (the app dir owner), NOT
         # www-data. Key stays 640, owner-readable.
@@ -432,9 +445,26 @@ if [ "$RT" = "ws" ]; then
             echo "ERROR: staged TLS files are not readable by the gateway user ($SITE_USER). Run deploy.sh as root or as $SITE_USER." >&2
             exit 1
         fi
-        NEW_CERT_HASH=$(sha256sum "$NEWCERT" | awk '{print $1}') || true
-        NEW_KEY_HASH=$(sha256sum "$NEWKEY" | awk '{print $1}') || true
-        if [ "$NEW_CERT_HASH" != "$OLD_CERT_HASH" ] || [ "$NEW_KEY_HASH" != "$OLD_KEY_HASH" ]; then
+        NEW_CERT_HASH=$(sha256sum "$NEWCERT" 2>/dev/null | awk '{print $1}') || true
+        NEW_KEY_HASH=$(sha256sum "$NEWKEY" 2>/dev/null | awk '{print $1}') || true
+        if [ "$STAGE_FAILED" = "1" ]; then
+            # The source is the authority on what the panel now serves. If the
+            # source differs from what we staged but the copy failed, the gateway
+            # will keep the OLD cert until it expires — that needs a root deploy
+            # (or the renewal hook), not a silent "already current".
+            SRC_CERT_HASH=$(sha256sum "$WSCERT" 2>/dev/null | awk '{print $1}') || true
+            SRC_KEY_HASH=$(sha256sum "$WSKEY" 2>/dev/null | awk '{print $1}') || true
+            if [ "$SRC_CERT_HASH" != "$NEW_CERT_HASH" ] || [ "$SRC_KEY_HASH" != "$NEW_KEY_HASH" ]; then
+                echo ""
+                echo "ERROR: the live TLS cert has been renewed but could not be re-staged into data/tls/." >&2
+                echo "       The source ($WSCERT) is only readable by root on this panel." >&2
+                echo "       The WSS gateway keeps the OLD cert and will break when it expires." >&2
+                echo "       Fix: run  sudo bash bin/deploy.sh   OR install the renewal hook (bin/le-renewal-hook.sh)." >&2
+                echo ""
+                exit 1
+            fi
+            echo "WARN: could not refresh the staged TLS files (source is root-only), but the staged cert is still current." >&2
+        elif [ "$NEW_CERT_HASH" != "$OLD_CERT_HASH" ] || [ "$NEW_KEY_HASH" != "$OLD_KEY_HASH" ]; then
             SSL_CHANGED=1
             echo "WSS: TLS files staged/updated at $NEWCERT"
         else

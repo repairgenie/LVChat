@@ -9,7 +9,7 @@ final class AuthController
         if (Auth::user()) {
             redirect('/app?channel=general');
         }
-        $next = $_GET['next'] ?? '/app?channel=general';
+        $next = safe_next((string) ($_GET['next'] ?? '/app?channel=general'));
         render_view('auth/login', [
             'next' => $next,
             'error' => flash(),
@@ -21,7 +21,7 @@ final class AuthController
         Csrf::verify();
         $username = trim($_POST['username'] ?? '');
         $password = (string) ($_POST['password'] ?? '');
-        $next = $_POST['next'] ?? '/app?channel=general';
+        $next = safe_next((string) ($_POST['next'] ?? '/app?channel=general'));
 
         if (login_attempt_count() >= login_attempt_max()) {
             flash('Too many failed login attempts. Please wait a few minutes and try again.');
@@ -86,7 +86,7 @@ final class AuthController
     {
         Csrf::verify();
         $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
-        $next = (string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general');
+        $next = safe_next((string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general'));
         if (!$uid) {
             redirect('/login');
         }
@@ -132,7 +132,7 @@ final class AuthController
     {
         Csrf::verify();
         $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
-        $next = (string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general');
+        $next = safe_next((string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general'));
         $secret = (string) ($_SESSION['mfa_setup_secret'] ?? '');
         if (!$uid || $secret === '') {
             redirect('/login');
@@ -161,7 +161,7 @@ final class AuthController
         if (Auth::user()) {
             redirect('/app?channel=general');
         }
-        $next = $_GET['next'] ?? '/app?channel=general';
+        $next = safe_next((string) ($_GET['next'] ?? '/app?channel=general'));
         $inviteToken = trim((string) ($_GET['invite'] ?? ''));
         $invite = null;
         if ($inviteToken !== '') {
@@ -191,7 +191,7 @@ final class AuthController
             log_audit('bot_signup_blocked', trim((string) ($_POST['username'] ?? '')));
             redirect('/register');
         }
-        $next = $_POST['next'] ?? '/app?channel=general';
+        $next = safe_next((string) ($_POST['next'] ?? '/app?channel=general'));
         $inviteToken = trim((string) ($_POST['invite'] ?? ''));
         $username = trim($_POST['username'] ?? '');
         $email = trim($_POST['email'] ?? '');
@@ -419,7 +419,7 @@ final class AuthController
     public static function guestLogin(): void
     {
         Csrf::verify();
-        $next = $_POST['next'] ?? '/app?channel=general';
+        $next = safe_next((string) ($_POST['next'] ?? '/app?channel=general'));
         $nick = trim((string) ($_POST['nick'] ?? ''));
         $age18 = ($_POST['age18'] ?? '0') === '1';
         if (login_attempt_count() >= login_attempt_max()) {

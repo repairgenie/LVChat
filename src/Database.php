@@ -7,7 +7,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '30';
+    private const SCHEMA_VERSION = '34';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -274,6 +274,16 @@ final class Database
         if (!in_array('bg_overlay', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN bg_overlay INTEGER NOT NULL DEFAULT 55');
         }
+        // Channel URL + global banned URL/domain list (schema v33): a channel
+        // can embed a web page above its chat, and admins maintain the list of
+        // hosts that may never be used for it.
+        $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+        if (!in_array('channel_url', $chanCols, true)) {
+            $pdo->exec('ALTER TABLE channels ADD COLUMN channel_url TEXT');
+        }
+        if (!in_array('banned_urls', $tables, true)) {
+            $pdo->exec('CREATE TABLE banned_urls (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL UNIQUE COLLATE NOCASE, reason TEXT NOT NULL DEFAULT "", created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
+        }
 
         // OpenClaw AI bots (schema v20).
         if (!in_array('openclaw_bots', $tables, true)) {
@@ -329,12 +339,43 @@ final class Database
         // Rename the default site name on installs created before the rebrand.
         $pdo->exec("UPDATE server_config SET value = 'LVChat' WHERE key = 'site_name' AND value = 'Chat Relay'");
 
+        // sound_alerts name-dedupe (schema v31): the old seed could produce
+        // duplicate-named rows on some installs, which made the client sound
+        // pickers list the same tone twice. Keep the lowest id, remap any
+        // pref/override references to it, then enforce uniqueness by name.
+        if (in_array('sound_alerts', $tables, true)) {
+            $dupNames = $pdo->query('SELECT lower(trim(name)) AS n FROM sound_alerts GROUP BY n HAVING COUNT(*) > 1')->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($dupNames as $n) {
+                $qn = $pdo->quote($n);
+                $keep = (int) $pdo->query('SELECT MIN(id) FROM sound_alerts WHERE lower(trim(name)) = ' . $qn)->fetchColumn();
+                if ($keep < 1) {
+                    continue;
+                }
+                $pdo->exec('UPDATE user_sound_prefs SET dm_sound_id = ' . $keep . ' WHERE dm_sound_id IN (SELECT id FROM sound_alerts WHERE lower(trim(name)) = ' . $qn . ' AND id != ' . $keep . ')');
+                $pdo->exec('UPDATE user_sound_prefs SET channel_sound_id = ' . $keep . ' WHERE channel_sound_id IN (SELECT id FROM sound_alerts WHERE lower(trim(name)) = ' . $qn . ' AND id != ' . $keep . ')');
+                $pdo->exec('UPDATE user_sound_overrides SET sound_id = ' . $keep . ' WHERE sound_id IN (SELECT id FROM sound_alerts WHERE lower(trim(name)) = ' . $qn . ' AND id != ' . $keep . ')');
+                $pdo->exec('DELETE FROM sound_alerts WHERE lower(trim(name)) = ' . $qn . ' AND id != ' . $keep);
+            }
+            try {
+                $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS uniq_sound_alerts_name ON sound_alerts(lower(trim(name)))');
+            } catch (Exception $e) {
+                // Duplicates were pruned above; treat a leftover index failure
+                // as non-fatal (older SQLite without expression indexes).
+            }
+        }
+
         self::seedOperclasses($pdo);
         self::seedSoundAlerts($pdo);
 
         // New defaults added after the app shipped need a row on upgrade (seed()
         // only runs on fresh installs). Use OR IGNORE so an admin's value survives.
         $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('registration_rate_limit', '20')");
+        // The admin-only operator action log channel (idempotent on upgrade).
+        $pdo->exec("INSERT OR IGNORE INTO channels (name, slug, topic, description, visibility, topic_locked, registered_at)
+            VALUES ('#oper-log', 'oper-log', 'Operator action log', 'Admin-only log of every action taken by admins and opers', 'private', 1, datetime('now'))");
+        $pdo->exec("INSERT OR IGNORE INTO channel_members (channel_id, user_id, level)
+            SELECT c.id, u.id, 'normal' FROM channels c JOIN users u ON u.role = 'admin'
+            WHERE c.slug = 'oper-log'");
         foreach (['desktop', 'messenger'] as $dlApp) {
             foreach (['win', 'mac', 'linux_rpm', 'linux_deb', 'linux_appimage'] as $dlPlat) {
                 $pdo->exec("INSERT OR IGNORE INTO server_config (key, value) VALUES ('download_{$dlApp}_{$dlPlat}_url', '')");
@@ -574,6 +615,7 @@ final class Database
         $chan->execute(['#general', 'general', 'General discussion', 'Public chat for everyone on the server', 'public']);
         $chan->execute(['#help', 'help', 'Need help? Ask here.', 'Get help from the community and staff', 'public']);
         $chan->execute(['#staff', 'staff', 'Staff coordination', 'Admins and staff only', 'staff']);
+        $chan->execute(['#oper-log', 'oper-log', 'Operator action log', 'Admin-only log of every action taken by admins and opers', 'private']);
     }
 
     /** Ensure the built-in operator classes exist (idempotent). */

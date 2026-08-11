@@ -197,8 +197,11 @@ Cross-origin app clients (LVChat Messenger, future native/mobile) get CORS
 headers **only** when an allowlisted `Origin` header is present:
 
 - Built in: the `null` origin (`file://`) and any `http://127.0.0.1:*`.
-- Configurable: `CHAT_CORS_ORIGINS` env var or the `app_origins` config key
-  (comma-separated list).
+- Configurable: **Admin → Settings → Web messenger clients** (writes the
+  `app_origins` config key), or the `CHAT_CORS_ORIGINS` env var
+  (comma-separated list). The config key wins over the env var when set;
+  clearing the field in the admin UI removes the key so the env fallback
+  applies again.
 - Headers: `Access-Control-Allow-Origin`, `-Credentials: true`, `-Methods:
   GET, POST, OPTIONS`, `-Headers: Content-Type, X-CSRF`.
 - `OPTIONS` preflight is answered with a bare `204`. Normal same-origin web

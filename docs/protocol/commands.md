@@ -188,14 +188,30 @@ voices|topic|modes>`.
 
 `oper`, `deoper`, `kline`, `gline`, `zline`, `shun` (+ `un*` variants), `kill`,
 `global`, `wallops`, `motd`, `sajoin`, `sapart`, `samode`, `sanick`,
-`sasethost`, `sqline`, `spamfilter`, `badword`, `clients`, `serverstats`,
-`rehash`, `notice`.
+`sasethost`, `sqline`, `unsqline`, `sqlines`, `cqline`, `uncqline`, `cqlines`,
+`spamfilter`, `badword`, `clients`, `serverstats`, `rehash`, `notice`.
 
 - `/oper <nick> <password>` elevates against a per-user **o:line** (no shared
   operator password); the result is an oper-class permission set active for the
   session.
 - `kline`/`gline`/`zline`/`shun` write `bans` rows (server-wide), record a
   moderation event and staff note, and emit a `system` event to the channel.
+- `sqline`/`unsqline`/`sqlines` manage **q-lines** — forbidden nicknames,
+  enforced at registration, `/nick`, guest logins, and `/sanick` targets.
+- `cqline`/`uncqline`/`cqlines` manage **c-lines** — forbidden channel-name
+  masks (with or without the leading `#`), enforced at channel creation and on
+  `/join` for both new and existing channels.
+- `/sanick <oldnick> <newnick>` is gated to **server admins and `netadmin`
+  o:line holders** (`Auth::isNetadmin`). A requested nick that is registered to
+  another user or held by a live guest (or q-lined) replies
+  `Requested nick is unavailable, please select another`. On success it updates
+  the target's `users.username` (and any matching `opers` row), broadcasts a
+  `nick` system event to every channel they're in, and sends the renamed user a
+  direct message with the change.
+
+Every action an admin or o:line holder takes is mirrored as a `notice` line into
+the admin-only `#oper-log` channel by `oper_log()` (wired into `log_audit()`).
+Plain channel operators — no o:line, not a server admin — are excluded.
 
 ---
 
@@ -203,9 +219,10 @@ voices|topic|modes>`.
 
 The chat page embeds the full command-name list (`data-commands`) and offers
 Discord-style `/` autocomplete; `@`-mention autocomplete pools the embedded
-`data-users` list plus current channel members. This is purely presentational —
-the server remains the authority (it rejects unknown commands, enforces levels,
-and applies filters).
+`data-users` list plus current channel members. Messenger clients fetch the
+same list from `GET /api/commands` for identical autocomplete. This is purely
+presentational — the server remains the authority (it rejects unknown commands,
+enforces levels, and applies filters).
 
 ---
 

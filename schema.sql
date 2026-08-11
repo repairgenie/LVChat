@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS channels (
   bg_color TEXT,
   bg_fit TEXT NOT NULL DEFAULT 'contain',
   bg_overlay INTEGER NOT NULL DEFAULT 55,
+  channel_url TEXT,
   successor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registered_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -335,6 +336,17 @@ CREATE TABLE IF NOT EXISTS webhooks (
   last_used TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_webhooks_channel ON webhooks(channel_id);
+
+-- Global list of channel URLs / domains that may not be used as a Channel URL.
+-- A channel URL whose host equals a banned domain (or is a subdomain of one)
+-- is rejected when set and blanked when rendered.
+CREATE TABLE IF NOT EXISTS banned_urls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  reason TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS server_config (
   key TEXT PRIMARY KEY,
@@ -633,3 +645,18 @@ CREATE TABLE IF NOT EXISTS contact_group_members (
 );
 CREATE INDEX IF NOT EXISTS idx_contact_group_members_group ON contact_group_members(group_id);
 CREATE INDEX IF NOT EXISTS idx_contact_group_members_friend ON contact_group_members(friend_id);
+
+-- One-shot removal notices: when a member is kicked/banned from a channel, the
+-- reason is recorded here so their next poll of that channel can show why they
+-- were removed before the redirect drops them out (poll/SSE transports — WS
+-- delivers the same reason inline via Realtime::memberRemoved). Rows are
+-- deleted as soon as the target's poll consumes them (and purged after 10min).
+CREATE TABLE IF NOT EXISTS member_removals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_member_removals_target ON member_removals(user_id, guest_id, channel_id, id);

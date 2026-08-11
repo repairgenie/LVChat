@@ -154,6 +154,7 @@ const mockServer = http.createServer((req, res) => {
     if (!mockSession) return json(401, { error: 'Not authenticated.' })
     return json(200, { ok: true, user: { id: 1, username: 'alice', avatar: null, role: 'user', guest: 0 }, vapidPublicKey: 'VAPIDPUBLICKEY' })
   }
+  if (url.pathname === '/api/commands') return json(200, { commands: ['help', 'sanick', 'kick'] })
   if (url.pathname === '/api/push/subscribe' && req.method === 'POST') {
     return formBody().then(() => (mockSession ? json(200, { ok: true }) : json(401, { error: 'Not authenticated.' })))
   }

@@ -180,6 +180,21 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
                     return (int) ($st['user']['id'] ?? 0) === (int) ($event['user_id'] ?? -1);
                 });
                 break;
+            case 'member_removed':
+                // A kick/ban evicted the actor from a channel: bounce every one of
+                // their connections that is viewing that channel out with the
+                // reason, so they leave (and see why) immediately in WS mode.
+                $removedUid = (int) ($event['user_id'] ?? 0);
+                $removedGuest = (int) ($event['guest'] ?? 0);
+                $removedChan = strtolower((string) ($event['channel'] ?? ''));
+                $broadcast(['redirect' => '/app', 'reason' => (string) ($event['reason'] ?? '')], static function (array $st) use ($removedUid, $removedGuest, $removedChan): bool {
+                    if ((int) ($st['user']['id'] ?? 0) !== $removedUid || (int) ($st['user']['guest'] ?? 0) !== $removedGuest) {
+                        return false;
+                    }
+                    return ($st['sub']['type'] ?? null) === 'channel'
+                        && strtolower((string) ($st['sub']['target'] ?? '')) === $removedChan;
+                });
+                break;
             case 'reconnect':
                 // Admin-forced: every connected WS client reloads on this frame so
                 // it re-renders with the current gateway config (poll/SSE clients

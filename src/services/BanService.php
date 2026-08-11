@@ -119,6 +119,50 @@ final class BanService
         );
     }
 
+    /**
+     * Active q-line forbidding a nickname (masks match via Auth::maskMatch).
+     * Used to block registration, /nick, and /sanick targets.
+     */
+    public static function nickForbidden(string $nick): ?array
+    {
+        $nick = trim($nick);
+        if ($nick === '') {
+            return null;
+        }
+        foreach (Database::all(
+            "SELECT * FROM bans WHERE active = 1 AND kind = 'qline' AND channel_id IS NULL
+             AND (expires_at IS NULL OR expires_at > datetime('now'))"
+        ) as $ban) {
+            if (Auth::maskMatch($ban['mask'], $nick)) {
+                return $ban;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Active c-line (channel q-line) forbidding a channel name. Masks may be
+     * given with or without the leading # (e.g. "#ads*" or "ads*") and match
+     * against both forms of the proposed channel name.
+     */
+    public static function channelNameForbidden(string $name): ?array
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return null;
+        }
+        $bare = ltrim($name, '#&');
+        foreach (Database::all(
+            "SELECT * FROM bans WHERE active = 1 AND kind = 'cqline' AND channel_id IS NULL
+             AND (expires_at IS NULL OR expires_at > datetime('now'))"
+        ) as $ban) {
+            if (Auth::maskMatch($ban['mask'], $name) || Auth::maskMatch($ban['mask'], $bare)) {
+                return $ban;
+            }
+        }
+        return null;
+    }
+
     /** Check flood/spamfilter/shun style restrictions on a send. Returns error string or null. */
     public static function sendBlocked(array $user, string $content, string $target): ?string
     {

@@ -316,4 +316,211 @@ final class ChannelController
         log_audit('channel_bg_remove', $channel['name']);
         json_out(['ok' => true]);
     }
+
+    // ── Channel Settings (control panel) ─────────────────────────────────────
+
+    /** The open channel for a settings request (auth + membership checked). */
+    private static function settingsChannel(array $params): array
+    {
+        $user = Auth::user();
+        if (!$user) {
+            json_out(['error' => 'Not authenticated.'], 401);
+        }
+        $channel = ChannelService::findBySlug((string) ($params['channel'] ?? ''));
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        if (!AccessService::member($channel['id'], $user)) {
+            json_out(['error' => 'You are not a member of this channel.'], 403);
+        }
+        return $channel;
+    }
+
+    /** GET /api/channel/settings — the control-panel payload for a channel:
+     *  bans, registered ops/halfops (access list), topic and channel URL. */
+    public static function settings(): void
+    {
+        $channel = self::settingsChannel($_GET);
+        $user = Auth::user();
+        $level = level_weight(AccessService::effectiveLevel($channel['id'], $user));
+        $isStaff = $user['role'] === 'admin' || Auth::isOper($user);
+        json_out([
+            'ok' => true,
+            'channel' => [
+                'id' => (int) $channel['id'],
+                'name' => $channel['name'],
+                'slug' => $channel['slug'],
+                'topic' => $channel['topic'],
+                'description' => $channel['description'],
+                'visibility' => $channel['visibility'],
+                'topic_locked' => (int) $channel['topic_locked'] === 1,
+                'registered' => ChannelService::isRegistered($channel),
+                'url' => ChannelService::channelUrl($channel),
+                'url_banned' => ChannelService::channelUrlBanned($channel),
+                'url_set' => !empty($channel['channel_url']),
+            ],
+            'can' => [
+                'manage' => ChannelService::canManageChannel($channel, $user),
+                'bans' => $isStaff || $level >= level_weight('halfop'),
+                'access' => $isStaff || $level >= level_weight('op'),
+                'topic' => $isStaff || $level >= level_weight('op') || (int) $channel['topic_locked'] !== 1,
+                'url' => $isStaff || $level >= level_weight('op'),
+            ],
+            'bans' => BanService::channelBans((int) $channel['id']),
+            'access' => AccessService::accessList((int) $channel['id']),
+        ]);
+    }
+
+    /** POST /api/channel/settings — actions for the channel control panel.
+     *  Each action enforces its own channel-level permission. */
+    public static function settingsAction(): void
+    {
+        $user = Auth::user();
+        if (!$user) {
+            json_out(['error' => 'Not authenticated.'], 401);
+        }
+        Csrf::verify();
+        $channel = self::settingsChannel($_POST);
+        $cid = (int) $channel['id'];
+        $level = level_weight(AccessService::effectiveLevel($cid, $user));
+        $isStaff = $user['role'] === 'admin' || Auth::isOper($user);
+
+        $action = (string) ($_POST['action'] ?? '');
+        switch ($action) {
+            case 'ban_add':
+                if (!$isStaff && $level < level_weight('halfop')) {
+                    json_out(['error' => 'Half-op or higher is required to manage bans.'], 403);
+                }
+                $target = trim((string) ($_POST['mask'] ?? ''));
+                if ($target === '') {
+                    json_out(['error' => 'A target mask or nick is required.'], 400);
+                }
+                $reason = trim((string) ($_POST['reason'] ?? ''));
+                $duration = parse_duration((string) ($_POST['duration'] ?? ''));
+                $userId = null;
+                if (!preg_match('/[*!@?]/', $target)) {
+                    $u = Auth::findActor($target);
+                    if (!$u) {
+                        json_out(['error' => "No such user: $target"], 404);
+                    }
+                    $userId = Auth::isGuest($u) ? null : (int) $u['id'];
+                    $target = strtolower($u['username']) . '!*@*';
+                }
+                $err = BanService::addBan('channel_ban', $cid, $target, $reason, $duration, (int) $user['id'], $userId);
+                if ($err) {
+                    json_out(['error' => $err], 400);
+                }
+                if ($userId) {
+                    $tu = Database::row('SELECT * FROM users WHERE id = ?', [$userId]);
+                    if ($tu) {
+                        ModerationService::record($tu, 'ban', 'applied', $target, $reason, 'c', $cid);
+                        ModerationService::note($userId, $user, 'ban', $channel['name'] . ' (settings)');
+                    }
+                }
+                log_audit('channel_settings_ban', $channel['name'], "$target / " . ($reason ?: 'no reason'));
+                json_out(['ok' => true, 'message' => "Banned $target."]);
+                // no break
+            case 'ban_del':
+                if (!$isStaff && $level < level_weight('halfop')) {
+                    json_out(['error' => 'Half-op or higher is required to manage bans.'], 403);
+                }
+                $id = (int) ($_POST['id'] ?? 0);
+                if ($id < 1) {
+                    json_out(['error' => 'Missing ban.'], 400);
+                }
+                $ban = Database::row('SELECT * FROM bans WHERE id = ? AND channel_id = ?', [$id, $cid]);
+                if (!$ban) {
+                    json_out(['error' => 'Ban not found.'], 404);
+                }
+                BanService::remove($id);
+                log_audit('channel_settings_unban', $channel['name'], 'ban#' . $id);
+                json_out(['ok' => true, 'message' => 'Ban removed.']);
+                // no break
+            case 'access_add':
+                if (!$isStaff && $level < level_weight('op')) {
+                    json_out(['error' => 'Channel ops or higher can manage registered ops and half-ops.'], 403);
+                }
+                $nick = trim((string) ($_POST['nick'] ?? ''));
+                $newLevel = strtolower((string) ($_POST['level'] ?? ''));
+                if ($nick === '' || !in_array($newLevel, ['admin', 'op', 'halfop', 'voice'], true)) {
+                    json_out(['error' => 'Pick a user and a level (admin, op, halfop or voice).'], 400);
+                }
+                $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+                if (!$t) {
+                    json_out(['error' => "No such user: $nick"], 404);
+                }
+                $check = AccessService::canSetLevel($channel, $user, $t, $newLevel);
+                if ($check !== true) {
+                    json_out(['error' => $check], 403);
+                }
+                AccessService::addAccess($cid, (int) $t['id'], $newLevel, (int) $user['id']);
+                log_audit('channel_settings_access', $channel['name'], "$nick -> $newLevel");
+                json_out(['ok' => true, 'message' => "$nick added to the access list as $newLevel."]);
+                // no break
+            case 'access_del':
+                if (!$isStaff && $level < level_weight('op')) {
+                    json_out(['error' => 'Channel ops or higher can manage registered ops and half-ops.'], 403);
+                }
+                $nick = trim((string) ($_POST['nick'] ?? ''));
+                $t = $nick !== '' ? Database::row('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [$nick]) : null;
+                if (!$t) {
+                    json_out(['error' => "No such user: $nick"], 404);
+                }
+                AccessService::removeAccess($cid, (int) $t['id']);
+                log_audit('channel_settings_access_del', $channel['name'], $nick);
+                json_out(['ok' => true, 'message' => "Removed $nick from the access list."]);
+                // no break
+            case 'topic_set':
+                if ($user['role'] !== 'admin' && (int) $channel['topic_locked'] === 1 && $level < level_weight('op')) {
+                    json_out(['error' => 'You must be a channel operator (+o) to change the topic.'], 403);
+                }
+                $topic = trim((string) ($_POST['topic'] ?? ''));
+                $topic = mb_substr($topic, 0, 500);
+                ChannelService::update((string) $cid, ['topic' => $topic]);
+                MessageService::system($cid, 'topic', $user['username'] . ($topic !== '' ? ' set the topic to: ' . $topic : ' cleared the topic'));
+                log_audit('topic', $channel['name'], $topic);
+                json_out([
+                    'ok' => true,
+                    'message' => $topic !== '' ? 'Topic set.' : 'Topic cleared.',
+                    'topic_set' => $topic,
+                    'topic_channel' => $channel['slug'],
+                ]);
+                // no break
+            case 'url_set':
+            case 'url_clear':
+                if (!$isStaff && $level < level_weight('op')) {
+                    json_out(['error' => 'Channel ops or higher can set the channel URL.'], 403);
+                }
+                $url = $action === 'url_clear' ? '' : trim((string) ($_POST['url'] ?? ''));
+                $err = ChannelService::setChannelUrl($cid, $url);
+                if ($err) {
+                    json_out(['error' => $err], 400);
+                }
+                if ($url !== '') {
+                    self::channelSystemMessage($channel, 'system', $user['username'] . ' set the channel URL to: ' . $url);
+                } else {
+                    self::channelSystemMessage($channel, 'system', $user['username'] . ' cleared the channel URL.');
+                }
+                log_audit('channel_url', $channel['name'], $url !== '' ? $url : '(cleared)');
+                json_out(['ok' => true, 'message' => $url !== '' ? 'Channel URL set.' : 'Channel URL cleared.', 'url' => $url !== '' ? $url : null]);
+                // no break
+            default:
+                json_out(['error' => 'Unknown settings action.'], 400);
+        }
+    }
+
+    /** Post a system message to a channel and fan it out to live viewers. */
+    private static function channelSystemMessage(array $channel, string $kind, string $content): void
+    {
+        $id = MessageService::system((int) $channel['id'], $kind, $content);
+        Realtime::message($channel['slug'], [
+            'id' => $id,
+            'kind' => $kind,
+            'content' => $content,
+            'channel' => $channel['slug'],
+            'sender_id' => null,
+            'username' => null,
+            'guest' => 0,
+        ]);
+    }
 }

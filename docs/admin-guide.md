@@ -207,6 +207,26 @@ IP/zline bans) online matching users are force-kicked.
 Removing: **Remove** on any row (`ban_del`). Also possible in-chat with the
 `un*` commands (below).
 
+### 2.9.1 Blocked URLs (`/admin/urls`)
+
+Channel operators can give their channels a **Channel URL** — a web page
+embedded in a sandboxed pane above the chat (see the user guide, §3.8). This
+page manages the **global list of domains** that may never be used for one.
+
+- **Add a domain** — enter a bare host (`example.com`), an optional wildcard
+  (`*.example.com`), or a full URL (`https://example.com/path`); entries are
+  stored as a normalized lowercase host. A **Reason** is shown in the rejection
+  message the operator sees.
+- **Matching** — a channel URL is blocked when its host **equals** the banned
+  domain or is **any subdomain** of it (banning `example.com` also blocks
+  `sub.example.com`).
+- **Enforcement — set time:** an operator trying to set a blocked URL gets a
+  clear **400** error and nothing is stored. **Render time:** if a domain is
+  banned *after* a URL was already set, the pane is hidden for everyone (the
+  channel's stored URL is kept and reported as `url_banned: true`) until an
+  admin removes the ban.
+- Removing: **Remove** on any row (`banned_url_del`).
+
 ### 2.10 Spam filters
 
 Rules that block messages by content. Fields:

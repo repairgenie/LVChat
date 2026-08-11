@@ -106,6 +106,16 @@ Returns the command result merged with `ok: true`:
 
 The full command protocol is documented in [commands.md](commands.md).
 
+### `GET /api/commands` — slash-command autocomplete list
+
+Requires an authenticated session. Returns the command names the web chat
+embeds as `data-commands`; messenger clients use it for identical `/`
+autocomplete. The server remains the authority — this list is presentational.
+
+```json
+{ "commands": ["help", "join", "nick", "sanick", "sqline", "cqline", "…"] }
+```
+
 ---
 
 ## 2. Receiving
@@ -144,6 +154,7 @@ Field reference:
 | `mentions` | channel view | Unread notifications scoped to the viewed channel (toast surface). |
 | `dm` | DM view | The partner nick echoed back. |
 | `channel` / `topic` | channel view | Slug + current topic echoed back. |
+| `channel_url` / `url_banned` | channel view | The channel's embedded URL (null when unset or its domain is banned); `url_banned` is true when a stored URL is hidden by the global blocked-domains list. |
 | `reconnect` | rare | Admin-forced "reconnect all clients": the client reloads to pick up a new gateway config. |
 | `redirect` | edge | `{ok:true, redirect:"/app", reason:"You are no longer in this channel."}` when the user's membership vanished — client navigates. |
 
@@ -190,7 +201,61 @@ Stored in `rt_transports`.
 | `POST /api/channel/delete` | `channel` | Founder (or admin) deletes the channel (history preserved in `chat_logs`). |
 | `POST /api/channel/invite/accept` / `decline` | `channel` (slug) | Accept/decline a channel invite. |
 | `POST /api/channel/bg` / `bg/remove` | `channel`, optional file/`bg_color`/`bg_fit`/`bg_overlay` | Channel owner sets/clears the channel chat background. |
+| `GET /api/channel/settings` | `channel` (slug, query) | Control-panel payload for a channel — see below. Requires membership. |
+| `POST /api/channel/settings` | `channel`, `action`, action fields | Channel control-panel actions (bans / access list / topic / URL) — see below. |
 | `GET /api/browse` | — | Public channel browser data: `channels` (joinable), `myChannels`, `online`, `peak`. |
+
+### `GET /api/channel/settings` — control-panel payload
+
+Auth + membership required (else **401** / **403**). Returns everything the
+Channel Settings modal renders:
+
+```json
+{
+  "ok": true,
+  "channel": {
+    "id": 7, "name": "#gaming", "slug": "gaming", "topic": "…",
+    "description": "…", "visibility": "public", "topic_locked": true,
+    "registered": true,
+    "url": "https://example.com/page", "url_banned": false, "url_set": true
+  },
+  "can": { "manage": true, "bans": true, "access": true, "topic": true, "url": true },
+  "bans":  [ /* channel bans, newest first */ ],
+  "access": [ /* channel_access rows with username + level */ ]
+}
+```
+
+The `can` map tells the client which tabs/fields the caller may use:
+
+| Key | When true |
+|---|---|
+| `manage` | Channel ops+ (or server admin/oper) — the caller may open the panel at all |
+| `bans` | Half-op+ — add/remove bans |
+| `access` | Op+ — add/remove registered ops & half-ops |
+| `topic` | Op+, **or** the topic is unlocked (`topic_locked` false) |
+| `url` | Op+ — set/clear the Channel URL |
+
+`url` is `null` when no URL is set **or** when the stored URL's domain is on
+the global banned list (`url_banned: true`, `url_set: true` keeps the stored
+value's existence visible).
+
+### `POST /api/channel/settings` — control-panel actions
+
+CSRF + auth + membership required. The `action` field dispatches to one of:
+
+| `action` | Extra fields | Permission | Effect |
+|---|---|---|---|
+| `ban_add` | `mask` (nick auto-resolves to `nick!*@*`), `duration`, `reason` | halfop+ | Inserts a `channel_ban`, records moderation + staff note when the target resolves. → `{ok, message}` |
+| `ban_del` | `id` | halfop+ | Removes a channel ban. |
+| `access_add` | `nick`, `level` (`admin`/`op`/`halfop`/`voice`) | op+ | Adds to `channel_access`, reusing `AccessService::canSetLevel` grant limits. |
+| `access_del` | `nick` | op+ | Removes from `channel_access`. |
+| `topic_set` | `topic` (≤ 500) | op+ unless `+t` off | Updates the topic, posts a `topic` system event. → `{ok, topic_set, topic_channel}` (the client refreshes its header). |
+| `url_set` | `url` | op+ | Sets the Channel URL (http/https only, ≤ 500 chars, banned-domain check). → `{ok, url}` |
+| `url_clear` | — | op+ | Clears the Channel URL. → `{ok, url: null}` |
+
+Errors: **400** (bad URL, banned domain, unknown action), **403** (permission),
+**404** (missing ban/access user). A successful `url_set` / `url_clear` also
+posts a `system` line to the channel so every viewer sees the change.
 
 ---
 

@@ -142,6 +142,9 @@ function mockLvchatServer () {
   const state = {
     directoryDanStatus: 'none',
     dmUnread: 2,
+    kickChannel: null,
+    lastCommand: null,
+    lastJoin: null,
     groups: [{ id: 1, name: 'Friends', position: 0, members: [2] }],
     joinedChannels: [{ slug: 'gaming', unread: 3, online: 4 }, { slug: 'general', unread: 0, online: 1 }],
     soundPrefs: null,
@@ -194,6 +197,12 @@ function mockLvchatServer () {
     const since = Number(url.searchParams.get('since') || 0)
     const dm = url.searchParams.get('dm')
     const channel = url.searchParams.get('channel')
+    // Simulated kick: the server removes the user's membership and bounces
+    // them out of the channel with a reason.
+    if (channel && channel === state.kickChannel) {
+      state.joinedChannels = state.joinedChannels.filter((c) => c.slug !== channel)
+      return { ok: true, redirect: '/app', reason: 'You were removed from #' + channel + '.' }
+    }
     const payload = {
       ok: true,
       messages: [],
@@ -278,6 +287,11 @@ function mockLvchatServer () {
           desktop: { installed: '1.0.0', latest: '1.0.0', update_available: false, platforms: {} }
         }
       })
+      return
+    }
+
+    if (url.pathname === '/api/commands') {
+      json(200, { commands: ['help', 'kick', 'sanick', 'kickban', 'kline', 'msg'] })
       return
     }
 
@@ -535,6 +549,45 @@ function mockLvchatServer () {
       let body = ''
       req.on('data', (c) => { body += c })
       req.on('end', () => { json(200, { ok: true }) })
+      return
+    }
+    if (url.pathname === '/api/command') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        state.lastCommand = { text: p.get('text') || '', channel: p.get('channel') || '' }
+        const text = state.lastCommand.text
+        if (text.startsWith('/clear')) {
+          json(200, { ok: true, action: 'clear' })
+          return
+        }
+        json(200, { ok: true, replies: ['Command reply: ' + text] })
+      })
+      return
+    }
+    if (url.pathname === '/api/browse') {
+      json(200, {
+        ok: true,
+        channels: [{ id: 20, name: '#arcade', slug: 'arcade', topic: '', description: '', members: 3, online: 2, visibility: 'public', joined: false }],
+        myChannels: [{ id: 21, name: '#gaming', slug: 'gaming', topic: 'fps hangout', description: '', members: 5, online: 4, visibility: 'public', joined: true }],
+        online: 9,
+        peak: 12
+      })
+      return
+    }
+    if (url.pathname === '/api/join') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        state.lastJoin = { name: p.get('name') || '', key: p.get('key') || '' }
+        const slug = (p.get('name') || '').replace(/^[#&]/, '')
+        if (slug && !state.joinedChannels.some((c) => c.slug === slug)) {
+          state.joinedChannels.push({ slug, unread: 0, online: 1 })
+        }
+        json(200, { ok: true, redirect: '/app?channel=' + slug })
+      })
       return
     }
     if (url.pathname === '/api/push/prefs') {
@@ -940,13 +993,55 @@ async function main () {
   await js(win, `document.getElementById('members-toggle').click()`)
   check('active members list shows only online members', await waitJs(win, `!document.getElementById('members').hidden && document.getElementById('members').textContent.includes('bob') && !document.getElementById('members').textContent.includes('carol') && 'ok'`))
 
+  // Slash commands route to /api/command and render their reply in the stream.
+  await js(win, `document.getElementById('composer-input').value = '/kick bob too spammy'; document.getElementById('composer-send').click()`)
+  check('slash command reply renders', await waitJs(win, `document.getElementById('stream').textContent.includes('Command reply: /kick bob too spammy') && 'ok'`))
+  check('slash command hit /api/command', mock.state.lastCommand && mock.state.lastCommand.text === '/kick bob too spammy', JSON.stringify(mock.state.lastCommand))
+  check('slash command carried the channel', mock.state.lastCommand && mock.state.lastCommand.channel === 'gaming', JSON.stringify(mock.state.lastCommand))
+
+  // /clear wipes the local stream (a real server also echoes "Chat cleared.").
+  await js(win, `document.getElementById('composer-input').value = '/clear'; document.getElementById('composer-send').click()`)
+  check('clear command empties the stream', await waitJs(win, `!document.getElementById('stream').textContent.includes('Command reply: /kick bob too spammy') && 'ok'`))
+
+  // Slash-command autocomplete mirrors the web app (fed by GET /api/commands).
+  await js(win, `(() => { const i = document.getElementById('composer-input'); i.value = '/sa'; i.dispatchEvent(new Event('input', { bubbles: true })); return 'ok' })()`)
+  check('slash autocomplete lists matching commands', await waitJs(win, `(() => { const ac = document.getElementById('slash-ac'); return !ac.hidden && ac.textContent.includes('/sanick') && 'ok' })()`))
+  check('slash autocomplete omits /help', await waitJs(win, `!document.getElementById('slash-ac').textContent.includes('/help') && 'ok'`))
+  await js(win, `document.getElementById('composer-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))`)
+  check('tab completes the command into the composer', await waitJs(win, `document.getElementById('composer-input').value === '/sanick ' && 'ok'`))
+  check('slash autocomplete closes after completion', await waitJs(win, `document.getElementById('slash-ac').hidden && 'ok'`))
+
+  // Send a real message so there is something to right-click below.
+  await js(win, `document.getElementById('composer-input').value = 'a message to right click'; document.getElementById('composer-send').click()`)
+  check('sent a message for the menu test', await waitJs(win, `document.getElementById('stream').textContent.includes('a message to right click') && 'ok'`))
+
   // Room context menu: leave + share link.
   await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((c) => c.textContent.includes('gaming')); if (!c) return 'no-row'; c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
   check('room context menu shows leave + share link', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Leave room') && m.textContent.includes('Copy share link') && 'ok' })()`))
 
-  // Message context menu: copy.
+  // Message context menu: copy + mute + block.
   await js(win, `(() => { const m = document.querySelector('#stream .msg:not(.system)'); if (!m) return 'no-msg'; m.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })); return 'ok' })()`)
   check('message context menu shows copy', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Copy message') && 'ok' })()`))
+  check('message context menu has mute + block', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Mute notifications') && m.textContent.includes('Block') && 'ok' })()`))
+
+  // Room browsing: list public rooms, join one by name.
+  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `document.getElementById('btn-browse-rooms').click()`)
+  check('browse list shows arcade with member counts', await waitJs(win, `!document.getElementById('browse-list').hidden && document.getElementById('browse-list').textContent.includes('arcade') && document.getElementById('browse-list').textContent.includes('3 members') && 'ok'`))
+  check('browse shows Open for my joined room', await waitJs(win, `(() => { const rows = [...document.querySelectorAll('#browse-list .contact')]; const g = rows.find((r) => r.textContent.includes('gaming')); return !!g && [...g.querySelectorAll('button')].some((b) => b.textContent === 'Open') && 'ok' })()`))
+  await js(win, `(() => { const rows = [...document.querySelectorAll('#browse-list .contact')]; const a = rows.find((r) => r.textContent.includes('arcade')); if (!a) return 'no-row'; [...a.querySelectorAll('button')].find((b) => b.textContent === 'Join').click(); return 'ok' })()`)
+  check('join opens the room by name', await waitJs(win, `document.getElementById('chat-title').textContent === '#arcade' && 'ok'`))
+  check('join posted the display name to /api/join', mock.state.lastJoin && mock.state.lastJoin.name === '#arcade', JSON.stringify(mock.state.lastJoin))
+  await js(win, `document.getElementById('btn-browse-back').click()`)
+  check('back returns to my rooms', await waitJs(win, `document.getElementById('browse-list').hidden && document.getElementById('rooms-list').hidden === false && 'ok'`))
+  check('joined room appears in the rooms list', await waitJs(win, `document.getElementById('rooms-list').textContent.includes('arcade') && 'ok'`))
+
+  // Kick redirect: the server bounces the user out of the open room with a reason.
+  mock.state.kickChannel = 'arcade'
+  await new Promise((r) => setTimeout(r, 3500))
+  check('kicked room leaves the rooms list', await waitJs(win, `!document.getElementById('rooms-list').textContent.includes('arcade') && 'ok'`))
+  check('kicked user sees the removal reason', await waitJs(win, `!document.getElementById('modal').hidden && document.getElementById('modal-message').textContent.includes('removed') && 'ok'`))
+  await js(win, `document.getElementById('modal-ok').click()`)
 
   // Theme toggle.
   const themeBefore = await js(win, `document.body.className`)

@@ -8,7 +8,10 @@ the site it connects to is configured by the admin in a `.env` file.
 It reuses the same IM-first UI as `lvchat-messenger/`: buddy list with custom
 contact groups, DMs, joined rooms, the offline send queue, GIF/image posting,
 mention autocomplete, per-user mutes, and sound alerts — plus Web Push
-notifications when the tab is closed.
+notifications when the tab is closed. Rooms also carry the full **Channel
+settings** control panel (bans, registered ops & half-ops, topic, Channel URL)
+for ops and above, and render a **Channel URL** in a pane above the chat when
+one is set.
 
 ## Requirements
 
@@ -47,12 +50,13 @@ npm run preview             # serve dist/ locally for testing (http://127.0.0.1:
 
 The messenger talks to the LVChat server cross-origin with the browser
 session's cookies. Add the origin the messenger will be served from to the
-server's allowlist:
+server's allowlist — easiest from the admin dashboard:
 
 ```bash
-# on the LVChat server, either:
+# on the LVChat server: Admin → Settings → Web messenger clients → Allowed origins
+# e.g. https://msg.example.com
+# ...or via env var:
 export CHAT_CORS_ORIGINS=https://msg.example.com
-# or set the `app_origins` config key (Admin → Settings, or directly)
 ```
 
 The built-in loopback origins (`http://127.0.0.1:*`) and `null` (file://) are

@@ -28,6 +28,9 @@ final class ChannelService
         if (strlen($name) > 64) {
             return 'Channel names must be 64 characters or fewer.';
         }
+        if (BanService::channelNameForbidden($name)) {
+            return 'That channel name is forbidden.';
+        }
         return true;
     }
 
@@ -100,8 +103,15 @@ final class ChannelService
         if ((int) $channel['forbidden'] === 1) {
             return ['ok' => false, 'reason' => 'Channel is forbidden.', 'needsKey' => false];
         }
+        if (BanService::channelNameForbidden($channel['name'])) {
+            return ['ok' => false, 'reason' => 'That channel name is forbidden.', 'needsKey' => false];
+        }
         if ($channel['visibility'] === 'staff' && !in_array($user['role'], ['admin', 'staff'], true)) {
             return ['ok' => false, 'reason' => 'This channel is restricted to staff.', 'needsKey' => false];
+        }
+        // The operator action log is admin-only.
+        if ($channel['slug'] === 'oper-log' && $user['role'] !== 'admin') {
+            return ['ok' => false, 'reason' => 'This channel is restricted to server administrators.', 'needsKey' => false];
         }
         $ban = BanService::channelBanFor($channel, $user);
         if ($ban) {
@@ -221,6 +231,47 @@ final class ChannelService
         return !empty($channel['registered_at']);
     }
 
+    /**
+     * Remember why a member was removed (kick/ban) so their next poll of the
+     * channel can show the reason before the redirect drops them out. One-shot:
+     * the target's poll consumes it (see takeRemovalReason), and stale markers
+     * are purged after ten minutes so the table stays tiny.
+     */
+    public static function recordRemoval(array $channel, array $target, string $reason): void
+    {
+        $isGuest = Auth::isGuest($target);
+        Database::query(
+            'INSERT INTO member_removals (user_id, guest_id, channel_id, reason) VALUES (?, ?, ?, ?)',
+            [$isGuest ? null : (int) $target['id'], $isGuest ? (int) $target['id'] : null, (int) $channel['id'], mb_substr($reason, 0, 300)]
+        );
+        Database::query("DELETE FROM member_removals WHERE created_at < datetime('now', '-10 minutes')");
+    }
+
+    /**
+     * One-shot read of why a non-member was removed from a channel. Consumes the
+     * newest marker (so a stale kick reason never leaks into a later visit) and
+     * returns null when there was none.
+     */
+    public static function takeRemovalReason(int|string $channelId, array $user): ?string
+    {
+        if (Auth::isGuest($user)) {
+            $row = Database::row(
+                'SELECT id, reason FROM member_removals WHERE channel_id = ? AND guest_id = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1',
+                [(int) $channelId, (int) $user['id']]
+            );
+        } else {
+            $row = Database::row(
+                'SELECT id, reason FROM member_removals WHERE channel_id = ? AND user_id = ? AND guest_id IS NULL ORDER BY id DESC LIMIT 1',
+                [(int) $channelId, (int) $user['id']]
+            );
+        }
+        if (!$row) {
+            return null;
+        }
+        Database::query('DELETE FROM member_removals WHERE id = ?', [(int) $row['id']]);
+        return (string) $row['reason'];
+    }
+
     public static function members(int|string $channelId): array
     {
         return Database::all(
@@ -257,7 +308,7 @@ final class ChannelService
 
     public static function joinedChannelNames(array $actor): array
     {
-        $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color, c.bg_fit, c.bg_overlay';
+        $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color, c.bg_fit, c.bg_overlay, c.channel_url';
         // Online chatter count: members (users + guests) seen within 30s, users not away.
         $onlineSql = '((SELECT COUNT(*) FROM channel_members om JOIN users ou ON ou.id = om.user_id
                          WHERE om.channel_id = c.id AND ou.status_mode != \'invisible\' AND ou.last_seen >= datetime("now", "-30 seconds"))
@@ -369,6 +420,65 @@ final class ChannelService
         Database::query('UPDATE channels SET key_hash = ? WHERE id = ?', [$hash, $channelId]);
     }
 
+    /**
+     * Can this user open the channel control panel (settings modal)? Server
+     * admins and opers always; otherwise channel ops (@), admins (&) and above.
+     */
+    public static function canManageChannel(array $channel, array $user): bool
+    {
+        if (Auth::isAdmin($user) || Auth::isOper($user)) {
+            return true;
+        }
+        return level_weight(AccessService::effectiveLevel($channel['id'], $user)) >= level_weight('op');
+    }
+
+    /**
+     * Set (or clear, with null/'') the embedded channel URL. Validates the
+     * scheme and host and enforces the global banned-URL/domain list. Returns
+     * an error string, or null on success.
+     */
+    public static function setChannelUrl(int|string $channelId, ?string $url): ?string
+    {
+        $url = trim((string) $url);
+        if ($url === '') {
+            Database::query('UPDATE channels SET channel_url = NULL WHERE id = ?', [$channelId]);
+            return null;
+        }
+        $url = mb_substr($url, 0, 500);
+        $check = UrlBanService::urlAllowed($url);
+        if (!empty($check['error'])) {
+            return $check['error'];
+        }
+        Database::query('UPDATE channels SET channel_url = ? WHERE id = ?', [$url, $channelId]);
+        return null;
+    }
+
+    /** The channel URL served to clients — null when unset or its domain is
+     *  on the global banned-URL list (a ban added later hides the pane). */
+    public static function channelUrl(array $channel): ?string
+    {
+        $url = trim((string) ($channel['channel_url'] ?? ''));
+        if ($url === '') {
+            return null;
+        }
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        if ($host !== '' && UrlBanService::isBanned($host)) {
+            return null;
+        }
+        return $url;
+    }
+
+    /** Whether the channel's URL is set but hidden because its domain is banned. */
+    public static function channelUrlBanned(array $channel): bool
+    {
+        $url = trim((string) ($channel['channel_url'] ?? ''));
+        if ($url === '') {
+            return false;
+        }
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        return $host !== '' && UrlBanService::isBanned($host) !== null;
+    }
+
     public static function drop(int|string $channelId): void
     {
         Database::query('DELETE FROM channels WHERE id = ?', [$channelId]);
@@ -393,6 +503,9 @@ final class ChannelService
         $ch = Database::row('SELECT * FROM channels WHERE id = ?', [$channelId]);
         if (!$ch) {
             return 'Channel not found.';
+        }
+        if ($ch['slug'] === 'oper-log') {
+            return 'The operator log channel cannot be deleted.';
         }
         if ($actor['role'] !== 'admin' && (int) $ch['owner_id'] !== (int) $actor['id']) {
             return 'Only the channel founder can delete this channel.';

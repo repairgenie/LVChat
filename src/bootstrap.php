@@ -28,6 +28,7 @@ require ROOT . '/src/services/AccessService.php';
 require ROOT . '/src/services/ChannelService.php';
 require ROOT . '/src/services/MessageService.php';
 require ROOT . '/src/services/BanService.php';
+require ROOT . '/src/services/UrlBanService.php';
 require ROOT . '/src/services/CensorService.php';
 require ROOT . '/src/services/UploadService.php';
 require ROOT . '/src/services/GifService.php';
@@ -51,6 +52,7 @@ require ROOT . '/src/services/AnalyticsService.php';
 require ROOT . '/src/services/UpdaterService.php';
 require ROOT . '/src/services/CommandParser.php';
 require ROOT . '/src/services/CommandRegistry.php';
+require ROOT . '/src/services/EmbedService.php';
 require ROOT . '/src/services/commands/CoreCommands.php';
 require ROOT . '/src/services/commands/OpCommands.php';
 require ROOT . '/src/services/commands/ChanServCommands.php';
@@ -74,6 +76,7 @@ require ROOT . '/src/controllers/FriendController.php';
 require ROOT . '/src/controllers/ContactGroupController.php';
 require ROOT . '/src/controllers/OpenClawController.php';
 require ROOT . '/src/controllers/PushController.php';
+require ROOT . '/src/controllers/EmbedController.php';
 
 Database::init();
 

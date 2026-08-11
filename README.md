@@ -18,6 +18,9 @@ nod to IRC rather than an implementation of it.
 - **Admin account tools** — admins create accounts manually (auto-generated password shown once, optional welcome email), or **invite** people by email with a sign-up link that works even when open registration is closed; pending invites can be re-sent or revoked, and any account can be permanently **deleted** (owned channels pass on; the log archive keeps history). **Admin → Invites**, **Admin → Users**.
 - **Email (SMTP)** — a dependency-free SMTP client configured under **Admin → Settings** (host, port, STARTTLS/SSL, auth, from address) with a one-click **Send test email**; used for invite and welcome emails
 - **Channels** — create, register/deregister (temp channels vanish when empty, founder passes on), public/private/secret, invite-only, keyed, moderated, member limits, topics, ban lists, AKICK, access lists
+- **Channel settings (control panel)** — channel ops, admins, founders, and server admins/opers open a tabbed **⚙ Settings** modal from the channel header (or right-click → **Channel settings**): manage channel bans (add by nick or mask with duration + reason, remove), the registered **ops & half-ops** access list, the channel **topic** (respecting `+t`), and the **Channel URL**. Available in the web app, the desktop app, and both Messenger clients; every action reuses the same permission gates as the `/ban`, `/unban`, `/access`, and `/topic` slash commands
+- **Channel URL** — an operator can give a channel a web page that opens in a **pane above the chat** (the left/right sidebars stay put; the message list takes the bottom half). The pane has a header bar (host, **Open** in a new tab, **Refresh**, collapse ▾ — remembered per channel) and a sandboxed `<iframe>`; only `http://`/`https://` pages are allowed, and the URL updates live for everyone. Set or clear it from the settings modal. Pages load through a **server-side embed proxy** (`GET /api/embed`), so sites that refuse to be framed (`X-Frame-Options` / CSP `frame-ancestors`) or are plain `http://` still render — the proxy fetches the page server-side, strips the frame blocks, injects a `<base>` so relative resources resolve to the target, and reroutes in-pane link clicks back through itself. The proxied document runs in an opaque-origin sandbox (no `allow-same-origin`), so embedded scripts can never touch the chat app. Access is limited to signed-in sessions and guarded against SSRF (no loopback/private/link-local targets) and the **Blocked URLs** list. On **mobile the pane defaults to collapsed** (less screen space) and the page isn't fetched until you expand it; desktop defaults to expanded.
+- **Admin → Blocked URLs** — a global list of domains (exact host or any subdomain) that may never be used as a Channel URL. Enforced at set time (rejected with the reason) **and** at render time (a URL whose domain gets banned later simply stops showing until the ban is lifted)
 - **Friends** — registered users send/accept/decline friend requests, remove friends, block/unblock users; the right sidebar shows a Friends panel with online/offline grouping, pending requests with accept/decline buttons, and a request count badge; friend requests and acceptances appear in the notification bell; `/ignore` and `/unignore` now delegate to the friend block system
 - **Admin tools** — see every user's IP, ban by nick or IP/CIDR with duration and reason (kline/gline/zline/shun), manage the bad-word filter (censor to `****` or block the whole message with a ChanServ notice) via **Admin → Bad words**, per-channel `+C` flag, and a clickable mode bar with tooltips above each channel
 - **Admin presence** — operators' messages and nicks render in red throughout the chat and member lists
@@ -186,6 +189,19 @@ status** (running/stopped, connection count, pid) with **Start / Stop /
 Restart** buttons, and a **Run deploy.sh** button that opens a modal streaming
 `bin/deploy.sh` output exactly like a terminal.
 
+**WSS / TLS renewal:** when WebSocket mode serves `wss://`, `bin/deploy.sh`
+stages the site's Let's Encrypt cert into `data/tls/`. On panels that keep the
+cert source root-only (e.g. HestiaCP), a non-root deploy can't re-stage it —
+deploy.sh now says so loudly instead of "already current". For automatic
+rotation, install the certbot renewal hook and re-run as root when prompted:
+
+```bash
+sudo cp bin/le-renewal-hook.sh /etc/letsencrypt/renewal-hooks/deploy/20-lvchat-wss.sh
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/20-lvchat-wss.sh
+```
+
+See `docs/protocol/gateway.md → WSS / TLS renewal` for details.
+
 > **Note on `proc_open`:** control panels (HestiaCP, Docker panels) sometimes
 > disable `proc_open` in PHP for security. The web UI degrades automatically —
 > it falls back to `popen`, then `exec`, and shows a clear message only if all
@@ -288,9 +304,17 @@ On a fresh database the following channels are created automatically:
 | `#general` | public | everyone |
 | `#help` | public | everyone |
 | `#staff` | staff | admins and `staff`-role users only |
+| `#oper-log` | private | server admins only |
 
 Promote a user to **staff** (or back) from **Admin → Users**. `#staff` is never shown in
 the channel browser and its share link is rejected for non-staff.
+
+`#oper-log` is the admin-only operator action log. Every event performed by a
+server admin or an o:line holder (OperServ commands and admin-panel actions
+alike) is mirrored there as a `notice` line, with the actor's nick and — when
+operating — their oper class. Actions taken by plain channel operators (who are
+neither admins nor o:line holders) are excluded. Admins are auto-joined when
+they first act (or when promoted); demoted admins lose access.
 
 ## Command map (see `/help` in-app)
 
@@ -302,7 +326,20 @@ the channel browser and its share link is rejected for non-staff.
 | NickServ | register, identify, logout, set, ghost, release, recover, status, info, group, rename, ns |
 | MemoServ | memo, ms (send/read/list/del/summary/set) |
 | HostServ | vhost, hs |
-| OperServ | oper, kline, gline, zline, shun (+ un* variants), kill, global, wallops, motd, sajoin, sapart, samode, sanick, sasethost, sqline, spamfilter, badword, clients, serverstats, rehash, notice |
+| OperServ | oper, kline, gline, zline, shun (+ un* variants), kill, global, wallops, motd, sajoin, sapart, samode, sanick, sasethost, sqline, unsqline, sqlines, cqline, uncqline, cqlines, spamfilter, badword, clients, serverstats, rehash, notice |
+
+**Forbidden nicks & channels.** `/sqline` (and the Admin → Bans page) forbids a
+nickname; `/unsqline` and `/sqlines` remove/list them. Q-lines are enforced on
+registration, `/nick`, guest logins, and `/sanick` targets. Channel-name
+c-lines (`/cqline`, `/uncqline`, `/cqlines`) forbid a channel name or mask
+(e.g. `#ads*`) so neither creating nor joining a matching channel is allowed.
+
+**`/sanick`** force-renames a registered user (`/sanick <oldnick> <newnick>`) and is
+restricted to server admins and opers operating with the `netadmin` o:line class. If
+the requested nick is already registered to someone or held by a live guest, it replies
+`Requested nick is unavailable, please select another`. On success the registration is
+updated (including the user's o:line, if any), a `nick` event is broadcast to every
+channel they're in, and the renamed user gets a direct message about the change.
 
 **Channel modes** via `/mode` (also managed by the toggle bar above every channel, with
 mouseover tooltips): `+i` invite-only, `+m` moderated, `+C` word filter, `+k` key, `+l` limit,
@@ -457,20 +494,30 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **957 automated assertions** in three layers:
+Runs **1074 automated assertions** in three layers:
 
-- **`tests/smoke.php`** (546) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (598) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
   share links, guests, webhooks, account invites + SMTP, age verification, the
   moderation queue (filter hits, kicks, *lines), pending/suspended account status,
-  staff notes, support tickets, and legal-page sanitisation.
-- **`tests/http_test.php`** (399) — full HTTP end-to-end: spins up the built-in server
+  staff notes, support tickets, legal-page sanitisation, forbidden nicks/channels
+  (sqline/cqline), `/sanick` gating + availability, the `#oper-log` mirror, the
+  channel-URL validator and banned-domain list (exact + subdomain), and the
+  ChannelService URL/`canManageChannel` helpers.
+- **`tests/http_test.php`** (464) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
   message reports, moderation/reports/support/legal admin pages, pending-approval and
-  suspended login flows, share-link redirects, webhooks, and logout.
+  suspended login flows, share-link redirects, webhooks, logout, the channel-settings
+  API (bans / access list / topic / URL with the full permission matrix), the admin
+  **Blocked URLs** page and `banned_url` actions, the `channel_url` / `url_banned`
+  poll fields, the web-messenger **allowed origins** (CORS) setting, the messenger
+  room-browser API (`/api/browse`), the **kick** flow (target's poll returns a
+  one-shot redirect carrying the kick reason + actor), and the **channel-URL
+  embed proxy** (`/api/embed`: framing-header stripping, injected `<base>`,
+  redirects, non-HTML passthrough, plus auth/banned-domain/SSRF guards).
 - **`tests/ws_test.php`** (12) — WebSocket gateway integration: spawns the realtime
   daemon against a scratch DB and verifies ticket auth, channel/DM subscriptions,
   and message/msg-update fan-out (ports via `WS_PORT` / `WS_PUSH_PORT`).
@@ -529,10 +576,10 @@ npm run dist                  # package installers (electron-builder)
 The messenger talks to this server's JSON API cross-origin using the browser session's
 cookies, so the server needs CORS enabled for the app's loopback origin. This is on by
 default for `null` (file://) and any `http://127.0.0.1:*` origin. To allow other origins
-(web/mobile builds), set the `CHAT_CORS_ORIGINS` env var or the `app_origins` config key
-to a comma-separated list, e.g. `CHAT_CORS_ORIGINS=https://app.example.com`. CORS headers
-are only emitted when an allowlisted `Origin` header is present — normal web-app traffic is
-untouched.
+(web/mobile builds), add them under **Admin → Settings → Web messenger clients** (writes
+the `app_origins` config key), or set the `CHAT_CORS_ORIGINS` env var, to a comma-separated
+list, e.g. `https://app.example.com`. CORS headers are only emitted when an allowlisted
+`Origin` header is present — normal web-app traffic is untouched.
 
 The messenger has two layouts, toggled from the sidebar header and persisted in the app's
 local settings (`viewMode`, default **Compact**):
@@ -580,9 +627,9 @@ npm test                   # build + bridge + API-login smoke suite
 ```
 
 The client talks to the server cross-origin with the browser session's cookies,
-so the messenger's origin must be allowlisted: set `CHAT_CORS_ORIGINS` (or the
-`app_origins` config key) to e.g. `https://msg.example.com`. HTTPS is required
-on both ends. Web Push uses the server's VAPID key exposed via `/api/me`
+so the messenger's origin must be allowlisted: add it under **Admin → Settings →
+Web messenger clients** (or set `CHAT_CORS_ORIGINS`) to e.g. `https://msg.example.com`.
+HTTPS is required on both ends. Web Push uses the server's VAPID key exposed via `/api/me`
 (`vapidPublicKey`). See `messenger-web/README.md`.
 
 ## Layout
@@ -596,8 +643,8 @@ bin/ws-server.php   Workerman realtime gateway (WebSocket + internal push endpoi
 bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/check-updates.php  CLI update check against the configured feed (cron-friendly)
 bin/test.sh      run the full automated test suite
-tests/smoke.php  545 command/service assertions
-tests/http_test.php  342 HTTP assertions
+tests/smoke.php  598 command/service assertions
+tests/http_test.php  464 HTTP assertions
 tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
 composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)

@@ -262,24 +262,66 @@ CommandRegistry::register('samode', [
 
 CommandRegistry::register('sanick', [
     'group' => 'OperServ',
-    'desc' => 'Force-rename a user.',
-    'usage' => '/sanick <nick> <newnick>',
+    'desc' => 'Force-rename a registered user.',
+    'usage' => '/sanick <oldnick> <newnick>',
     'server_admin' => true,
+    'netadmin' => true,
     'run' => function (array $args, array $user, ?array $channel) {
-        $nick = $args[0] ?? null;
+        $oldnick = $args[0] ?? null;
         $newnick = $args[1] ?? null;
-        $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+        $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$oldnick]);
         if (!$t || !$newnick || !preg_match('/^[A-Za-z0-9_\-\[\]\\`^{}|]{2,32}$/', $newnick)) {
-            return ['replies' => ['Usage: /sanick <nick> <newnick>']];
+            return ['replies' => ['Usage: /sanick <oldnick> <newnick>']];
         }
+        // Availability: not registered to another user, not held by a live guest,
+        // and not a forbidden nickname.
         if (Database::scalar('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [$newnick])) {
-            return ['replies' => ["$newnick is already in use."]];
+            return ['replies' => ['Requested nick is unavailable, please select another']];
+        }
+        $guest = Database::row('SELECT * FROM guests WHERE nick = ? COLLATE NOCASE', [$newnick]);
+        if ($guest && Auth::guestInUse($guest)) {
+            return ['replies' => ['Requested nick is unavailable, please select another']];
+        }
+        if (BanService::nickForbidden($newnick)) {
+            return ['replies' => ['Requested nick is unavailable, please select another']];
         }
         Database::query('UPDATE users SET username = ? WHERE id = ?', [$newnick, $t['id']]);
+        // Keep the target's o:line (if any) attached to the new nick.
+        Database::query('UPDATE opers SET username = ? WHERE username = ? COLLATE NOCASE', [$newnick, $oldnick]);
+        $renamed = Database::row('SELECT * FROM users WHERE id = ?', [$t['id']]);
         foreach (ChannelService::joinedChannelNames($t) as $c) {
-            MessageService::system($c['id'], 'nick', $nick . ' is now known as ' . $newnick . ' (SANICK)');
+            $id = MessageService::system($c['id'], 'nick', $oldnick . ' is now known as ' . $newnick . ' (SANICK)');
+            Realtime::message($c['slug'], [
+                'id' => $id,
+                'kind' => 'nick',
+                'content' => $oldnick . ' is now known as ' . $newnick . ' (SANICK)',
+                'channel' => $c['slug'],
+                'sender_id' => null,
+                'username' => null,
+                'guest' => 0,
+            ]);
         }
-        return ['replies' => ["$nick is now known as $newnick."]];
+        // Notify the renamed user directly (persists in their DM history).
+        $notice = "Your nickname has been changed to $newnick by {$user['username']} (SANICK).";
+        $pmId = MessageService::insertPm($user, $renamed, $notice);
+        MessageService::logPm((int) $user['id'], $user['username'], $renamed['username'], $notice, 0);
+        MessageService::notifyDm($renamed, $user, $pmId);
+        $pmMessage = [
+            'id' => $pmId,
+            'kind' => 'message',
+            'content' => $notice,
+            'created_at' => now(),
+            'username' => $user['username'],
+            'sender_id' => (int) $user['id'],
+            'role' => $user['role'],
+            'guest' => 0,
+            'level' => 'normal',
+            'is_pm' => true,
+        ];
+        Realtime::dm($user, $renamed, $pmMessage);
+        Realtime::bell($renamed);
+        log_audit('sanick', $oldnick, '-> ' . $newnick);
+        return ['replies' => ["$oldnick is now known as $newnick."]];
     },
 ]);
 
@@ -312,9 +354,93 @@ CommandRegistry::register('sqline', [
         }
         $reason = implode(' ', array_slice($args, 1));
         BanService::addBan('qline', null, $nick, $reason, null, (int) $user['id']);
+        // Disconnect anyone currently using the forbidden nick.
+        $u = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+        if ($u) {
+            op_force_kick((int) $u['id'], 'Nickname forbidden (' . ($reason ?: 'q-lined') . ')', $user);
+            Database::query('DELETE FROM sessions WHERE user_id = ?', [$u['id']]);
+        }
+        $g = Database::row('SELECT * FROM guests WHERE nick = ? COLLATE NOCASE', [$nick]);
+        if ($g && Auth::guestInUse($g)) {
+            Database::query('DELETE FROM guest_sessions WHERE guest_id = ?', [$g['id']]);
+        }
+        log_audit('sqline', $nick, $reason ?: 'no reason');
         return ['replies' => ["Nickname $nick is now forbidden."]];
     },
 ]);
+
+CommandRegistry::register('unsqline', [
+    'group' => 'OperServ',
+    'desc' => 'Un-forbid a nickname.',
+    'usage' => '/unsqline <nick>',
+    'server_admin' => true,
+    'run' => function (array $args, array $user, ?array $channel) {
+        $nick = $args[0] ?? null;
+        if (!$nick) {
+            return ['replies' => ['Usage: /unsqline <nick>']];
+        }
+        $removed = Database::query(
+            "DELETE FROM bans WHERE kind = 'qline' AND channel_id IS NULL AND mask = ? COLLATE NOCASE",
+            [$nick]
+        )->rowCount();
+        log_audit('unsqline', $nick);
+        return ['replies' => [$removed > 0 ? "$nick removed from the forbidden nick list." : "No q-line for $nick."]];
+    },
+]);
+
+CommandRegistry::register('sqlines', [
+    'group' => 'OperServ',
+    'desc' => 'List forbidden nicknames.',
+    'usage' => '/sqlines',
+    'server_admin' => true,
+    'run' => function (array $args, array $user, ?array $channel) {
+        $rows = BanService::activeBans('qline');
+        if (!$rows) {
+            return ['replies' => ['No forbidden nicknames.']];
+        }
+        return ['replies' => array_map(
+            fn ($b) => h($b['mask']) . ' — ' . ($b['reason'] ?: 'no reason') . ' (by ' . h($b['set_by_name'] ?? 'system') . ')',
+            $rows
+        )];
+    },
+]);
+
+foreach (['cqline' => 'forbid a channel name', 'uncqline' => 'un-forbid a channel name', 'cqlines' => 'list forbidden channel names'] as $name => $desc) {
+    CommandRegistry::register($name, [
+        'group' => 'OperServ',
+        'desc' => ucfirst($desc) . ($name === 'cqlines' ? '' : ': /' . $name . ' <#channel> [reason]'),
+        'usage' => $name === 'cqlines' ? '/cqlines' : "/$name <#channel> [reason]",
+        'server_admin' => true,
+        'run' => function (array $args, array $user, ?array $channel) use ($name) {
+            if ($name === 'cqlines') {
+                $rows = BanService::activeBans('cqline');
+                if (!$rows) {
+                    return ['replies' => ['No forbidden channel names.']];
+                }
+                return ['replies' => array_map(
+                    fn ($b) => h($b['mask']) . ' — ' . ($b['reason'] ?: 'no reason') . ' (by ' . h($b['set_by_name'] ?? 'system') . ')',
+                    $rows
+                )];
+            }
+            $chan = $args[0] ?? null;
+            if (!$chan || !preg_match('/^[#&]/', $chan)) {
+                return ['replies' => ["Usage: /$name <#channel> [reason]"]];
+            }
+            if ($name === 'cqline') {
+                $reason = implode(' ', array_slice($args, 1));
+                BanService::addBan('cqline', null, $chan, $reason, null, (int) $user['id']);
+                log_audit('cqline', $chan, $reason ?: 'no reason');
+                return ['replies' => ["Channel name $chan is now forbidden."]];
+            }
+            $removed = Database::query(
+                "DELETE FROM bans WHERE kind = 'cqline' AND channel_id IS NULL AND (mask = ? COLLATE NOCASE OR mask = ? COLLATE NOCASE)",
+                [$chan, ltrim($chan, '#&')]
+            )->rowCount();
+            log_audit('uncqline', $chan);
+            return ['replies' => [$removed > 0 ? "$chan removed from the forbidden channel list." : "No c-line for $chan."]];
+        },
+    ]);
+}
 
 CommandRegistry::register('spamfilter', [
     'group' => 'OperServ',

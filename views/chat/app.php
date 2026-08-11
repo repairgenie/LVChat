@@ -68,6 +68,8 @@ $modeState = $channel ? [
     'L' => (int) ($channel['no_logging'] ?? 0) === 1,
 ] : [];
 $canManageModes = $myLevelWeight >= 3 || $user['role'] === 'admin';
+$canManageSettings = $channel ? ChannelService::canManageChannel($channel, $user) : false;
+$channelUrl = $channel ? ChannelService::channelUrl($channel) : null;
 
 function chat_divider_label(string $date): string {
     $today = gmdate('Y-m-d');
@@ -305,6 +307,7 @@ function presence_label(array $u): string {
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
       data-my-nick="<?= h($user['username']) ?>"
+      data-channel-url="<?= h((string) ($channelUrl ?? '')) ?>"
       data-site-name="<?= h($site) ?>"
       data-theme-custom="<?= ThemeService::customizationEnabled() ? '1' : '0' ?>"
       data-chan-bg-color="<?= h($channel['bg_color'] ?? '') ?>"
@@ -334,8 +337,8 @@ function presence_label(array $u): string {
       <span class="font-bold text-white text-sm truncate"><?= h($site) ?></span>
       <?php endif; ?>
       <div class="flex items-center gap-1.5">
-        <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1 md:block hidden" title="Switch theme">🌙</button>
-        <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications">
+        <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1 md:block hidden" title="Switch theme" aria-label="Switch theme">🌙</button>
+        <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications" aria-label="Notifications">
           🔔<span id="bell-dot" class="hidden absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center"></span>
         </button>
       </div>
@@ -376,7 +379,7 @@ function presence_label(array $u): string {
       <nav class="px-2 pt-2 pb-2">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400 flex items-center justify-between">
           <span>Text channels</span>
-          <button id="create-channel" class="text-discord-400 hover:text-white text-sm" title="Create a channel">＋</button>
+          <button id="create-channel" class="text-discord-400 hover:text-white text-sm" title="Create a channel" aria-label="Create a channel">＋</button>
         </div>
         <div class="mt-1 space-y-0.5">
           <button id="browse-btn-sidebar" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm w-full text-left cursor-pointer">
@@ -495,11 +498,14 @@ function presence_label(array $u): string {
                class="input w-40 md:w-56 !py-1 !text-xs hidden md:block" title="Search messages in your channels and DMs">
         <div id="search-results" class="hidden absolute top-9 right-0 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin"></div>
         <button id="share-btn" class="btn-ghost text-xs hidden md:flex" title="Copy shareable link">🔗 Share</button>
+        <?php if ($canManageSettings): ?>
+        <button id="chan-settings-btn" class="btn-ghost text-xs hidden md:flex" title="Channel settings">⚙ Settings</button>
+        <?php endif; ?>
         <button id="mute-btn" class="btn-ghost text-xs hidden md:flex" data-mode="<?= h($notifyMode) ?>" title="<?= h($notifyMode === 'muted' ? 'Unmute channel' : ($notifyMode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel')) ?>"><?= $notifyMode === 'muted' ? '🔕 Muted' : ($notifyMode === 'mentions' ? '🔔 Mentions' : '🔔') ?></button>
         <button type="button" data-embed class="btn-ghost text-xs hidden md:flex" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
         <button id="part-btn" class="btn-ghost text-xs text-red-400 hidden md:flex" title="Leave channel">✕ Leave</button>
-        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel">👥</button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php elseif ($dm): ?>
@@ -510,7 +516,7 @@ function presence_label(array $u): string {
       </span>
       <div class="relative ml-auto flex items-center gap-2">
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
-        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel">👥</button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php else: ?>
@@ -520,7 +526,7 @@ function presence_label(array $u): string {
         <button id="browse-btn-header" class="btn-primary text-xs hidden md:flex cursor-pointer">Browse channels</button>
         <button id="create-channel-2" class="btn-ghost text-xs hidden md:flex">＋ New channel</button>
         <button id="install-btn" class="btn-ghost text-xs hidden md:flex">⬇ How to install</button>
-        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel">👥</button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel">👥</button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php endif; ?>
@@ -1070,10 +1076,41 @@ function presence_label(array $u): string {
     </div>
   </div>
 
+  <!-- Channel settings modal (channel control panel: bans, ops, topic, URL) -->
+  <div id="chan-settings-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-chan-settings-close></div>
+    <div class="relative card shadow-2xl w-[min(94vw,760px)] max-h-[88vh] flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-5 pt-4 pb-3 border-b border-discord-700 shrink-0">
+        <h2 class="text-lg font-bold text-white">Channel settings <span id="cs-name" class="text-blurple"></span></h2>
+        <button type="button" data-chan-settings-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+      </div>
+      <div id="cs-tabs" class="flex flex-wrap gap-1 px-3 py-2 border-b border-discord-700 bg-discord-850 shrink-0"></div>
+      <div id="cs-body" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-4 space-y-4"></div>
+      <div id="cs-msg" class="hidden px-4 py-2 border-t border-discord-700 text-sm text-green-400 shrink-0"></div>
+    </div>
+  </div>
+
   <!-- Image lightbox -->
   <div id="lightbox" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/85">
     <button data-lightbox-close class="absolute top-3 right-3 text-white text-2xl leading-none p-2">✕</button>
     <img id="lightbox-img" src="" alt="" class="max-h-[90vh] max-w-full object-contain rounded-lg">
+  </div>
+
+  <!-- Generic dialog modal (replaces native prompt()/confirm()/alert(); the
+       Electron desktop client doesn't support window.prompt and returns null,
+       silently killing edit/ban/kick/topic flows there). -->
+  <div id="dlg-modal" class="hidden fixed inset-0 z-[500] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/70" data-dlg-close></div>
+    <div class="relative card p-6 w-[min(92vw,420px)] shadow-2xl">
+      <h3 id="dlg-title" class="text-lg font-bold text-white mb-2"></h3>
+      <p id="dlg-message" class="hidden text-sm text-discord-400 mb-3 whitespace-pre-wrap"></p>
+      <input id="dlg-input" class="input hidden" type="text" autocomplete="off" spellcheck="false">
+      <div id="dlg-error" class="hidden text-xs text-red-400 mt-2"></div>
+      <div class="flex gap-2 mt-4">
+        <button id="dlg-ok" class="btn-primary flex-1 justify-center">OK</button>
+        <button id="dlg-cancel" class="btn-ghost hidden">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- JS-health watchdog: shows if the chat scripts failed to load (stale/broken deploy) -->

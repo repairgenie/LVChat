@@ -476,20 +476,17 @@ final class MessageService
         );
         $out = [];
         foreach ($rows as $r) {
-            $out[] = [
+            $out[] = array_merge([
                 'user_id' => (int) $r['user_id'],
                 'username' => $r['username'],
                 'role' => $r['role'],
                 'guest' => (int) ($r['guest'] ?? 0),
-                'away' => $r['away'],
-                'status_mode' => (string) ($r['status_mode'] ?? 'online'),
-                'custom_status' => (string) ($r['custom_status'] ?? ''),
                 'last_seen' => $r['last_seen'],
                 'unread' => (int) $r['unread'],
                 'last_content' => (string) ($r['last_content'] ?? ''),
                 'last_id' => (int) ($r['last_id'] ?? 0),
                 'muted' => (int) ($r['muted'] ?? 0),
-            ];
+            ], Auth::statusInfo($r));
         }
         return $out;
     }

@@ -57,6 +57,10 @@ final class CommandParser
             return ['replies' => ["/$cmd is restricted to server administrators."]];
         }
 
+        if (!empty($reg['netadmin']) && !Auth::isNetadmin($user)) {
+            return ['replies' => ["/$cmd requires netadmin access."]];
+        }
+
         $channel = $currentChannel;
         if (!empty($reg['needs_channel'])) {
             [$args, $channel] = self::splitChannel($args, $currentChannel);
@@ -65,7 +69,7 @@ final class CommandParser
             }
             $level = AccessService::effectiveLevel($channel['id'], $user);
             $min = (int) $reg['min_level'];
-            if ($user['role'] !== 'admin' && level_weight($level) < $min) {
+            if ($user['role'] !== 'admin' && !Auth::isOper($user) && level_weight($level) < $min) {
                 return ['replies' => ["You do not have permission to use /$cmd in " . $channel['name'] . '.']];
             }
         }

@@ -181,3 +181,38 @@ For completeness, the gateway's frame handling:
   the daemon is down. Clients independently fall back to polling/SSE (see
   [realtime.md](realtime.md) §4), and the transport-reporting table lets admins
   see that a fallback actually happened.
+
+### WSS / TLS renewal
+
+When `ws_ssl_cert` / `ws_ssl_key` are set (or `WS_SSL_CERT`/`WS_SSL_KEY`), the
+gateway serves `wss://` using those files. `bin/deploy.sh` auto-stages the
+site's Let's Encrypt cert into `data/tls/fullchain.pem` + `privkey.pem` and
+points the config there.
+
+Two caveats keep WSS certificates from going stale after a renewal:
+
+- **Root-only sources (HestiaCP et al.)** — the panel's certs under
+  `/home/<user>/conf/web/<domain>/ssl/` are owned by `root` (mode 600), so a
+  deploy run as the *site user* cannot re-stage them. `bin/deploy.sh` now
+  detects this: if the source cert was renewed but the copy failed it exits
+  loudly (no more misleading "TLS files already current"); run
+  `sudo bash bin/deploy.sh`, or
+- **Install the renewal hook** so rotation is automatic:
+
+  ```bash
+  sudo cp bin/le-renewal-hook.sh /etc/letsencrypt/renewal-hooks/deploy/20-lvchat-wss.sh
+  sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/20-lvchat-wss.sh
+  ```
+
+  Certbot runs deploy hooks as root after each successful renewal, so the hook
+  can read the root-only source, re-stage `data/tls/`, `chown` to the site
+  user, and restart the gateway (systemd unit if present, otherwise
+  `su <siteuser> -c 'php bin/ws-server.php restart -d'`). It is
+  fingerprint-guarded and never fails a renewal — activity is logged to
+  `data/logs/le-hook.log`. Verify with:
+
+  ```bash
+  sudo certbot renew --dry-run
+  cat data/logs/le-hook.log
+  echo | openssl s_client -connect 127.0.0.1:<ws_port> -servername <domain> 2>/dev/null | grep -E 'subject=|issuer=|Verify return'
+  ```

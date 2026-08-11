@@ -231,6 +231,14 @@ final class AdminController
         render_view('admin/bans', ['admin' => $admin, 'global' => $global, 'channelBans' => $channelBans]);
     }
 
+    /** GET /admin/urls — global list of channel URLs/domains that may not be
+     *  used as a Channel URL (enforced in ChannelService::setChannelUrl). */
+    public static function bannedUrls(): void
+    {
+        $admin = self::require();
+        render_view('admin/banned_urls', ['admin' => $admin, 'banned' => UrlBanService::all()]);
+    }
+
     public static function spamfilters(): void
     {
         $admin = self::require();
@@ -400,7 +408,7 @@ final class AdminController
     public static function settings(): void
     {
         $admin = self::require();
-        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'registration_rate_limit', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user', 'download_update_url', 'updater_enabled', 'updater_url'];
+        $keys = ['site_name', 'site_tagline', 'logo_url', 'registration_enabled', 'registration_requires_approval', 'registration_rate_limit', 'spamfilter_enabled', 'uploads_enabled', 'reactions_enabled', 'gifs_enabled', 'giphy_api_key', 'webhooks_enabled', 'chat_logging_enabled', 'max_channels_per_user', 'presence_throttle', 'poll_interval', 'realtime', 'realtime_force', 'ws_ip', 'ws_port', 'ws_ssl_cert', 'ws_ssl_key', 'timezone', 'motd', 'smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'mfa_require_admin', 'mfa_require_staff', 'mfa_require_user', 'download_update_url', 'updater_enabled', 'updater_url', 'app_origins'];
         foreach (self::DOWNLOAD_APPS as $dlApp) {
             foreach (self::DOWNLOAD_PLATFORMS as $dlPlat) {
                 $keys[] = "download_{$dlApp}_{$dlPlat}_url";
@@ -611,6 +619,12 @@ final class AdminController
             case 'user_admin':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET role = "admin" WHERE id = ?', [$id]);
+                // Auto-join the operator action log.
+                Database::query(
+                    "INSERT OR IGNORE INTO channel_members (channel_id, user_id, level)
+                     SELECT c.id, ?, 'normal' FROM channels c WHERE c.slug = 'oper-log'",
+                    [$id]
+                );
                 ModerationService::note($id, $admin, 'role', 'Promoted to admin');
                 log_audit('user_admin', 'user#' . $id);
                 $message = 'User promoted to admin.';
@@ -618,6 +632,12 @@ final class AdminController
             case 'user_deadmin':
                 $id = (int) ($_POST['id'] ?? 0);
                 Database::query('UPDATE users SET role = "user" WHERE id = ? AND id != ?', [$id, $admin['id']]);
+                // Demoted users lose access to the operator action log.
+                Database::query(
+                    "DELETE FROM channel_members WHERE user_id = ? AND channel_id IN
+                     (SELECT id FROM channels WHERE slug = 'oper-log')",
+                    [$id]
+                );
                 ModerationService::note($id, $admin, 'role', 'Admin rights removed');
                 log_audit('user_deadmin', 'user#' . $id);
                 $message = 'Admin rights removed.';
@@ -754,6 +774,23 @@ final class AdminController
                 $id = (int) ($_POST['id'] ?? 0);
                 BanService::remove($id);
                 log_audit('ban_remove_admin', 'ban#' . $id);
+                $message = 'Ban removed.';
+                break;
+            case 'banned_url_add':
+                $err = UrlBanService::add(
+                    (string) ($_POST['domain'] ?? ''),
+                    (string) ($_POST['reason'] ?? ''),
+                    (int) $admin['id']
+                );
+                if ($err) {
+                    $ok = false;
+                    $message = $err;
+                } else {
+                    $message = 'Domain banned.';
+                }
+                break;
+            case 'banned_url_del':
+                UrlBanService::remove((int) ($_POST['id'] ?? 0));
                 $message = 'Ban removed.';
                 break;
             case 'spamfilter_add':
@@ -1092,6 +1129,27 @@ final class AdminController
                 config_set('updater_enabled', ($_POST['updater_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('updater_url', rtrim(trim((string) ($_POST['updater_url'] ?? '')), '/'));
                 @unlink(UpdaterService::manifestPath());
+                // Allowed web-messenger origins (CORS). Normalize: split on
+                // commas, trim, drop trailing slashes, de-dupe case-insensitively.
+                // Only http(s) origins with a host are kept; the built-in
+                // loopback origins and `null` are always allowed by bootstrap.
+                $origins = [];
+                foreach (explode(',', (string) ($_POST['app_origins'] ?? '')) as $o) {
+                    $o = rtrim(trim($o), '/');
+                    if ($o === '' || preg_match('#^https?://[a-z0-9.\-\[\]:]+$#i', $o) !== 1) {
+                        continue;
+                    }
+                    if (!in_array(strtolower($o), array_map('strtolower', $origins), true)) {
+                        $origins[] = $o;
+                    }
+                }
+                if ($origins === []) {
+                    // Empty state: remove the key so a server-set CHAT_CORS_ORIGINS
+                    // env fallback (bootstrap) still applies if there is one.
+                    Database::query('DELETE FROM server_config WHERE key = ?', ['app_origins']);
+                } else {
+                    config_set('app_origins', implode(', ', $origins));
+                }
                 log_audit('settings_save');
                 $message = 'Settings saved.';
                 $newWsPort = (int) (config_get('ws_port', '8080') ?? 8080);

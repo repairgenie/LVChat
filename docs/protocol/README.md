@@ -152,4 +152,5 @@ chat `<body>`:
 | React to a message | `POST /api/message/reaction` (`id`, `emoji`) |
 | Report a message | `POST /api/report` (`id`, `pm`, `reason`, `other`) |
 | Join / part / create a channel | `POST /api/join` / `POST /api/part` / `POST /api/channels` |
+| Manage channel settings (bans / ops / topic / URL) | `GET /api/channel/settings` · `POST /api/channel/settings` |
 | Check the session | `GET /api/me`, `GET /api/csrf` |

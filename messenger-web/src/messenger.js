@@ -27,6 +27,7 @@ const state = {
   dirTimer: null,
   chatWindow: false, // this window is a dedicated conversation window (Compact)
   viewMode: 'compact', // 'compact' | 'advanced' (persisted in prefs)
+  commands: [], // slash-command names from GET /api/commands (autocomplete)
   _chatTarget: null,
   offline: false, // the messenger has no connection to the server
   sendQueue: [], // offline-sent messages, delivered in order on reconnect
@@ -377,6 +378,7 @@ async function startMain (me) {
   try {
     await refreshBuddyData()
   } catch (err) { /* keep going; the poll loop re-renders */ }
+  loadCommands()
   await startPoll()
   await initNotifications()
   await initSounds()
@@ -506,6 +508,10 @@ function handlePoll (body) {
     location.reload()
     return
   }
+  if (body.redirect) {
+    leaveRoomForRemoval(body.reason || 'You were removed from this channel.')
+    return
+  }
   const sigBefore = sidebarSignature()
   if (Array.isArray(body.dm_list)) state.dmList = body.dm_list
   if (Array.isArray(body.friends)) state.friends = body.friends
@@ -535,6 +541,10 @@ function handlePoll (body) {
   if (state.open && state.open.type === 'room' && body.channel === state.open.id) {
     if (Array.isArray(body.presence)) state.open.members = body.presence
     if (typeof body.topic === 'string') state.open.topic = body.topic
+    if (typeof body.channel_url === 'string' && body.channel_url !== state.open.channelUrl) {
+      state.open.channelUrl = body.channel_url
+      renderChat()
+    }
   }
   if (state.open && state.open.type === 'dm' && body.dm === state.open.id && Array.isArray(body.presence) && body.presence.length) {
     state.open.presence = body.presence[0]
@@ -786,6 +796,16 @@ async function initSounds () {
     list[id] = builtin[id]
   }
 
+  // Guard against duplicate-named rows inside the server's own list (older
+  // installs could seed the same tone twice) — keep the first occurrence.
+  const seenNames = new Set()
+  for (const id of Object.keys(list)) {
+    const nameKey = String((list[id] && list[id].name) || '').trim().toLowerCase()
+    if (!nameKey) continue
+    if (seenNames.has(nameKey)) delete list[id]
+    else seenNames.add(nameKey)
+  }
+
   // Server prefs win when the server has sounds; otherwise use local choices,
   // defaulting to a built-in tone so audio alerts work out of the box.
   let dm = local.dm || 'builtin-ding'
@@ -869,6 +889,10 @@ function wsRefreshTicket (done) {
 function wsHandle (j) {
   if (j.pong) return
   if (j.reconnect) { location.reload(); return }
+  if (j.redirect) {
+    leaveRoomForRemoval(j.reason || 'You were removed from this channel.')
+    return
+  }
   if (Array.isArray(j.messages) && j.messages.length) {
     // Frames arrive only for the conversation this socket is subscribed to.
     if (state.open) applyMessages(j.messages)
@@ -934,6 +958,21 @@ function stopWs () {
   if (wsrt.ws) { try { wsrt.ws.close() } catch (err) {} wsrt.ws = null }
 }
 
+/* The user was removed from the open room (kicked/banned). Close the
+ * conversation, drop the room from the list, and explain why. */
+function leaveRoomForRemoval (reason) {
+  if (state.open && state.open.type === 'room') {
+    const slug = state.open.id
+    state.joinedChannels = state.joinedChannels.filter((c) => c.slug !== slug)
+    delete state.channelUnread[slug]
+    delete state.channelPresence[slug]
+    state.open = null
+    state.messages = []
+    renderAll()
+  }
+  if (reason) appAlert(reason)
+}
+
 function applyMessages (messages) {
   let changed = false
   for (const m of messages || []) {
@@ -961,6 +1000,7 @@ async function openConversation (type, id) {
     messages: [],
     members: [],
     topic: '',
+    channelUrl: '',
     presence: null
   }
   state.messages = state.open.messages
@@ -1308,6 +1348,120 @@ function renderRoomsList () {
   }
 }
 
+/* ── Room browsing (#12): discover and join public rooms ──── */
+
+let browseCache = null
+
+async function browseRooms () {
+  const list = $('#browse-list')
+  const roomsList = $('#rooms-list')
+  const backBtn = $('#btn-browse-back')
+  const browseBtn = $('#btn-browse-rooms')
+  if (!list || !roomsList) return
+  if (backBtn) backBtn.hidden = false
+  if (browseBtn) browseBtn.hidden = true
+  roomsList.hidden = true
+  list.hidden = false
+  list.replaceChildren()
+  const loading = document.createElement('div')
+  loading.className = 'empty'
+  loading.textContent = 'Loading rooms…'
+  list.appendChild(loading)
+  if (!browseCache) {
+    try {
+      const j = await LvApi.getJson('/api/browse')
+      if (j.ok && j.body) browseCache = j.body
+    } catch (err) { browseCache = null }
+  }
+  list.replaceChildren()
+  if (!browseCache) {
+    const e = document.createElement('div')
+    e.className = 'empty'
+    e.textContent = 'Could not load the room list.'
+    list.appendChild(e)
+    return
+  }
+  const channels = (browseCache.channels || []).concat(browseCache.myChannels || [])
+  if (!channels.length) {
+    const e = document.createElement('div')
+    e.className = 'empty'
+    e.textContent = 'No public rooms yet. Create one in the web app.'
+    list.appendChild(e)
+    return
+  }
+  for (const c of channels) {
+    const row = document.createElement('div')
+    row.className = 'contact'
+    const icon = document.createElement('div')
+    icon.className = 'avatar'
+    icon.textContent = '#'
+    const name = document.createElement('div')
+    name.className = 'contact-name'
+    name.textContent = c.name || c.slug
+    const meta = document.createElement('div')
+    meta.className = 'contact-name'
+    meta.style.flex = 'none'
+    meta.style.color = 'var(--muted)'
+    meta.style.fontSize = '11px'
+    meta.textContent = (Number(c.members) || 0) + ' members · ' + (Number(c.online) || 0) + ' online'
+    const btn = document.createElement('button')
+    btn.className = 'ghost small'
+    btn.textContent = c.joined ? 'Open' : 'Join'
+    btn.addEventListener('click', async () => {
+      btn.disabled = true
+      if (c.joined) {
+        openRoom(c.slug)
+        return
+      }
+      await joinChannel(c)
+      btn.disabled = false
+    })
+    row.append(icon, name, meta, btn)
+    list.appendChild(row)
+  }
+}
+
+async function joinChannel (c) {
+  const post = (extra) => LvApi.postForm('/api/join', Object.assign({ name: c.name }, extra))
+  let r = await post({})
+  if (r.ok && r.body && r.body.redirect) {
+    await refreshRooms()
+    openRoom(c.slug)
+    return
+  }
+  const err = r.body && r.body.error
+  if (err && /key|password/i.test(String(err))) {
+    const key = await appPrompt('This room requires a key.', '', 'Room key')
+    if (key == null) return
+    r = await post({ key })
+    if (r.ok && r.body && r.body.redirect) {
+      await refreshRooms()
+      openRoom(c.slug)
+      return
+    }
+    await appAlert((r.body && r.body.error) || 'Incorrect key.')
+    return
+  }
+  await appAlert(err || 'Could not join that room.')
+}
+
+async function refreshRooms () {
+  browseCache = null
+  await pollTick()
+  if (state.tab === 'rooms') renderRoomsList()
+}
+
+function closeBrowse () {
+  const list = $('#browse-list')
+  const roomsList = $('#rooms-list')
+  const backBtn = $('#btn-browse-back')
+  const browseBtn = $('#btn-browse-rooms')
+  if (list) list.hidden = true
+  if (roomsList) roomsList.hidden = false
+  if (backBtn) backBtn.hidden = true
+  if (browseBtn) browseBtn.hidden = false
+}
+
 function renderRequestsList () {
   const list = $('#requests-list')
   list.replaceChildren()
@@ -1441,6 +1595,14 @@ function makeRequestRow (r, dir) {
     actions.append(cancel, dm)
   }
   wrap.appendChild(actions)
+  // Right-click a request row for Mute/Block.
+  wrap.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    const menu = document.createElement('div')
+    menu.className = 'ctx-menu'
+    addMuteBlockItems(menu, { id: r.id, username: r.username })
+    showContextMenu(menu, e.clientX, e.clientY)
+  })
   return wrap
 }
 
@@ -1470,7 +1632,7 @@ function makeDirectoryRow (r) {
   const wrap = document.createElement('div')
   wrap.className = 'contact'
   const dot = document.createElement('div')
-  dot.className = 'dot ' + (r.is_online ? 'online' : 'offline')
+  dot.className = 'dot ' + statusClass(r)
   const avatar = avatarEl(r.username, r.avatar, '28px')
   const name = document.createElement('div')
   name.className = 'contact-name'
@@ -1730,6 +1892,11 @@ function openMessageContextMenu (x, y, m) {
       closeContextMenu()
     }))
   }
+  // Mute/Block the sender (registered accounts only — guests have no account).
+  if (m.username && m.sender_id != null) {
+    menu.appendChild(menuSeparator())
+    addMuteBlockItems(menu, { id: m.sender_id, username: m.username })
+  }
 
   showContextMenu(menu, x, y)
 }
@@ -1829,14 +1996,21 @@ function renderChat () {
   const sub = $('#chat-sub')
   const composer = $('#composer')
   const membersBtn = $('#members-toggle')
+  const chanSettingsBtn = $('#chan-settings-btn')
+  const muteBtn = $('#dm-mute-btn')
+  const blockBtn = $('#dm-block-btn')
 
   if (!open) {
     title.textContent = 'LVChat Messenger'
     sub.textContent = 'Pick a friend or room to start chatting'
     composer.hidden = true
     membersBtn.hidden = true
+    if (chanSettingsBtn) chanSettingsBtn.hidden = true
+    if (muteBtn) muteBtn.hidden = true
+    if (blockBtn) blockBtn.hidden = true
     $('#members').hidden = true
     $('#stream').replaceChildren()
+    hideUrlPane()
     return
   }
 
@@ -1847,16 +2021,407 @@ function renderChat () {
     const label = p.status_mode ? statusLabel(p.status_mode) : (p.is_online ? 'Online' : (p.away ? 'Away' : 'Offline'))
     sub.textContent = label + (st ? ' — ' + st : '')
     membersBtn.hidden = true
+    if (chanSettingsBtn) chanSettingsBtn.hidden = true
     $('#members').hidden = true
+    hideUrlPane()
+    // Mute/Block for the DM partner (needs a resolvable account id).
+    const partnerId = dmPartnerId()
+    const dmRow = state.dmList.find((d) => String(d.username || '').toLowerCase() === String(open.id).toLowerCase())
+    if (partnerId != null && muteBtn && blockBtn) {
+      const muted = isMuted({ id: partnerId, muted: dmRow && dmRow.muted })
+      const blocked = isBlocked({ username: open.id })
+      muteBtn.hidden = false
+      muteBtn.textContent = muted ? 'Unmute' : 'Mute'
+      muteBtn.onclick = async () => {
+        await setUserMuted({ id: partnerId, username: open.id }, muted)
+        renderChat()
+      }
+      blockBtn.hidden = false
+      blockBtn.textContent = blocked ? 'Unblock' : 'Block'
+      blockBtn.onclick = async () => {
+        if (!blocked) {
+          const ok = await appConfirm('Block ' + open.id + '? They will be removed from your friends list.')
+          if (!ok) return
+        }
+        await setUserBlocked({ username: open.id }, blocked)
+        renderChat()
+      }
+    } else {
+      if (muteBtn) muteBtn.hidden = true
+      if (blockBtn) blockBtn.hidden = true
+    }
   } else {
     title.textContent = '#' + open.id
     const online = open.members ? open.members.filter((m) => m.is_online).length : 0
     sub.textContent = (open.topic || '') + (open.topic ? ' · ' : '') + (open.members ? open.members.length : 0) + ' members · ' + online + ' online'
     membersBtn.hidden = false
+    if (chanSettingsBtn) chanSettingsBtn.hidden = !canManageChannelSettings()
+    if (muteBtn) muteBtn.hidden = true
+    if (blockBtn) blockBtn.hidden = true
     renderMembers()
+    renderUrlPane()
   }
   composer.hidden = false
   renderStream()
+}
+
+function hideUrlPane () {
+  const pane = $('#channel-url-pane')
+  if (pane) pane.hidden = true
+}
+
+/* Can this user manage the open channel (bans / ops / topic / URL)? Server
+ * admins and opers always; otherwise channel ops (@) and above. */
+function canManageChannelSettings () {
+  if (!state.me || !state.open || state.open.type !== 'room') return false
+  if (state.me.role === 'admin') return true
+  const me = (state.open.members || []).find((m) => m.username && String(m.username).toLowerCase() === String(state.me.username).toLowerCase())
+  const weight = { normal: 0, voice: 1, halfop: 2, op: 3, admin: 4, founder: 5 }
+  return weight[me && me.level ? me.level : 'normal'] >= 3
+}
+
+/* Embedded channel URL pane above the chat (rooms only). The iframe goes
+ * through the server-side embed proxy (/api/embed) so sites that refuse to be
+ * framed (X-Frame-Options / CSP) still load. Desktop shows the pane expanded by
+ * default; mobile defaults to collapsed — an explicit choice is remembered. */
+function urlPaneFrameSrc (url) {
+  return LvApi.abs('/api/embed?url=' + encodeURIComponent(url))
+}
+
+function renderUrlPane () {
+  const pane = $('#channel-url-pane')
+  const open = state.open
+  if (!pane) return
+  const url = open && open.type === 'room' ? (open.channelUrl || '') : ''
+  if (!url) { pane.hidden = true; return }
+  let host = url
+  try { host = new URL(url).host } catch (e) {}
+  const hostEl = $('#url-pane-host')
+  const frame = $('#url-frame')
+  const openLink = $('#url-open')
+  if (hostEl) { hostEl.textContent = host; hostEl.title = url }
+  if (openLink) openLink.href = url
+  pane.hidden = false
+  let collapsed
+  try {
+    const saved = localStorage.getItem('lvc.messenger.urlpane.' + open.id)
+    collapsed = saved === null ? window.innerWidth < 768 : saved === '0'
+  } catch (e) {
+    collapsed = window.innerWidth < 768
+  }
+  pane.classList.toggle('url-pane-collapsed', collapsed)
+  // Defer the fetch until the pane is actually shown (keeps mobile data down).
+  if (!collapsed && frame && frame.getAttribute('src') !== urlPaneFrameSrc(url)) frame.src = urlPaneFrameSrc(url)
+}
+
+/* ── Channel settings modal (bans / registered ops / topic / URL) ──────────── */
+const CS_TABS_M = [
+  ['overview', 'Overview'],
+  ['bans', 'Bans'],
+  ['access', 'Ops & half-ops'],
+  ['topic', 'Topic']
+]
+const CS_LEVELS_M = [['op', '@ Op'], ['halfop', '% Half-op'], ['admin', '& Admin'], ['voice', '+ Voice']]
+const CS_SYMBOL_M = { normal: '', voice: '+', halfop: '%', op: '@', admin: '&', founder: '~' }
+const CS_LEVEL_LABELS_M = { op: 'Operator', halfop: 'Half-op', admin: 'Channel admin', voice: 'Voiced', normal: 'Normal' }
+let CS_DATA_M = null
+let CS_TAB_M = 'overview'
+
+function csFlashM (msg) {
+  const el = $('#cs-msg')
+  if (!el) return
+  el.textContent = msg
+  el.hidden = false
+  setTimeout(() => { el.hidden = true }, 2500)
+}
+
+async function openChannelSettings () {
+  if (!state.open || state.open.type !== 'room') return
+  const j = await LvApi.getJson('/api/channel/settings?channel=' + encodeURIComponent(state.open.id))
+  if (j.status === 401) { LvApi.resetCsrf(); stopPoll(); showView('login'); showLoginError('Your session has expired. Please sign in again.'); return }
+  if (!j.ok || !j.body) { appAlert('Could not load channel settings.'); return }
+  if (j.body.error) { appAlert(j.body.error); return }
+  CS_DATA_M = j.body
+  CS_TAB_M = 'overview'
+  renderChannelSettings()
+  $('#chan-settings-modal').hidden = false
+}
+
+function closeChannelSettings () { $('#chan-settings-modal').hidden = true }
+
+async function settingsActionM (payload, done) {
+  if (!state.open) return
+  payload.channel = state.open.id
+  const j = await LvApi.postForm('/api/channel/settings', payload)
+  if (j.status === 401) { LvApi.resetCsrf(); stopPoll(); showView('login'); showLoginError('Your session has expired. Please sign in again.'); return }
+  if (!j.ok || !j.body) { appAlert('Request failed. Please try again.'); return }
+  if (j.body.error) { csFlashM(j.body.error); return }
+  if (j.body.message) csFlashM(j.body.message)
+  if (typeof j.body.url !== 'undefined') { state.open.channelUrl = j.body.url || ''; renderUrlPane() }
+  if (typeof j.body.topic_set === 'string') { state.open.topic = j.body.topic_set }
+  const r = await LvApi.getJson('/api/channel/settings?channel=' + encodeURIComponent(state.open.id))
+  if (r.ok && r.body && r.body.ok) CS_DATA_M = r.body
+  renderChannelSettings()
+  if (done) done(j.body)
+}
+
+function renderChannelSettings () {
+  if (!CS_DATA_M) return
+  const nameEl = $('#cs-name')
+  if (nameEl && CS_DATA_M.channel) nameEl.textContent = CS_DATA_M.channel.name
+  const can = CS_DATA_M.can || {}
+  const tabsEl = $('#cs-tabs')
+  tabsEl.replaceChildren()
+  for (const [key, label] of CS_TABS_M) {
+    const off = (key === 'bans' && !can.bans) || (key === 'access' && !can.access) || (key === 'topic' && !can.topic)
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.textContent = label + (off ? ' 🔒' : '')
+    b.disabled = !!off
+    if (key === CS_TAB_M) b.classList.add('active')
+    b.addEventListener('click', () => { CS_TAB_M = key; renderChannelSettings() })
+    tabsEl.appendChild(b)
+  }
+  const body = $('#cs-body')
+  body.replaceChildren()
+  if (CS_TAB_M === 'bans') body.appendChild(csBansHtmlM())
+  else if (CS_TAB_M === 'access') body.appendChild(csAccessHtmlM())
+  else if (CS_TAB_M === 'topic') body.appendChild(csTopicHtmlM())
+  else body.appendChild(csOverviewHtmlM())
+  bindSettingsActionsM()
+}
+
+function csSectionM (title, ...nodes) {
+  const sec = document.createElement('div')
+  sec.className = 'cs-section'
+  const t = document.createElement('div')
+  t.className = 'cs-section-title'
+  t.textContent = title
+  sec.appendChild(t)
+  for (const n of nodes) sec.appendChild(n)
+  return sec
+}
+
+function csListM (rows, emptyText) {
+  const wrap = document.createElement('div')
+  wrap.className = 'cs-list'
+  if (!rows.length) {
+    const e = document.createElement('div')
+    e.className = 'cs-list-empty'
+    e.textContent = emptyText
+    wrap.appendChild(e)
+    return wrap
+  }
+  for (const r of rows) wrap.appendChild(r)
+  return wrap
+}
+
+function csRowM (children) {
+  const row = document.createElement('div')
+  row.className = 'cs-row'
+  for (const c of children) row.appendChild(c)
+  return row
+}
+
+function csOverviewHtmlM () {
+  const ch = CS_DATA_M.channel || {}
+  const can = CS_DATA_M.can || {}
+  const wrap = document.createElement('div')
+  const info = csSectionM('Channel',
+    (() => { const d = document.createElement('div'); d.style.fontSize = '13.5px'; d.textContent = ch.name || ''; return d })(),
+    (() => { const d = document.createElement('div'); d.style.color = 'var(--muted)'; d.style.fontSize = '12px'; d.textContent = (ch.visibility || 'public') + (ch.topic_locked ? ' · topic locked (+t)' : '') + (ch.registered ? ' · registered' : ' · temporary'); return d })())
+  wrap.appendChild(info)
+  if (can.url) {
+    const sec = csSectionM('Channel URL',
+      (() => { const p = document.createElement('div'); p.style.cssText = 'color:var(--muted);font-size:12px;margin-bottom:6px'; p.textContent = 'A web page shown in a pane above the chat. Anyone with operator status can change it.'; return p })())
+    const row = csRowM([urlInputM(ch.url || ''), urlSaveBtnM(), ch.url ? urlClearBtnM() : null])
+    sec.appendChild(row)
+    if (ch.url_banned) {
+      const p = document.createElement('div')
+      p.style.cssText = 'color:var(--danger);font-size:12px;margin-top:6px'
+      p.textContent = "This channel's URL domain is on the global banned list — it is hidden until an admin lifts the ban."
+      sec.appendChild(p)
+    }
+    wrap.appendChild(sec)
+  }
+  return wrap
+}
+
+function urlInputM (val) {
+  const i = document.createElement('input')
+  i.type = 'url'
+  i.id = 'cs-url'
+  i.placeholder = 'https://example.com/page'
+  i.value = val || ''
+  return i
+}
+function urlSaveBtnM () {
+  const b = document.createElement('button')
+  b.className = 'primary'
+  b.type = 'button'
+  b.textContent = 'Set URL'
+  b.addEventListener('click', () => settingsActionM({ action: 'url_set', url: ($('#cs-url') || {}).value || '' }))
+  return b
+}
+function urlClearBtnM () {
+  const b = document.createElement('button')
+  b.className = 'ghost'
+  b.type = 'button'
+  b.textContent = 'Clear'
+  b.addEventListener('click', () => settingsActionM({ action: 'url_clear' }))
+  return b
+}
+
+function csBansHtmlM () {
+  const wrap = document.createElement('div')
+  const sec = csSectionM('Channel bans')
+  const mask = document.createElement('input')
+  mask.id = 'cs-ban-mask'
+  mask.type = 'text'
+  mask.placeholder = 'Nick or mask (e.g. nick!*@*)'
+  const dur = document.createElement('input')
+  dur.id = 'cs-ban-duration'
+  dur.type = 'text'
+  dur.placeholder = '1d, 30m…'
+  dur.style.maxWidth = '90px'
+  const reason = document.createElement('input')
+  reason.id = 'cs-ban-reason'
+  reason.type = 'text'
+  reason.placeholder = 'Reason…'
+  const add = document.createElement('button')
+  add.className = 'primary'
+  add.type = 'button'
+  add.textContent = 'Ban'
+  add.addEventListener('click', () => {
+    const m = ($('#cs-ban-mask') || {}).value || ''
+    if (!m) { csFlashM('Enter a nick or mask to ban.'); return }
+    settingsActionM({ action: 'ban_add', mask: m.trim(), duration: ($('#cs-ban-duration') || {}).value || '', reason: ($('#cs-ban-reason') || {}).value || '' })
+  })
+  sec.appendChild(csRowM([mask, dur]))
+  sec.appendChild(csRowM([reason, add]))
+  const rows = (CS_DATA_M.bans || []).map((b) => {
+    const r = document.createElement('div')
+    r.className = 'cs-list-row'
+    const mono = document.createElement('span')
+    mono.className = 'mono'
+    mono.textContent = b.mask
+    const meta = document.createElement('span')
+    meta.className = 'mono'
+    meta.style.color = 'var(--muted)'
+    meta.textContent = (b.reason ? b.reason + ' · ' : '') + (b.set_by_name || 'system')
+    const spacer = document.createElement('span')
+    spacer.className = 'spacer'
+    const del = document.createElement('button')
+    del.className = 'ghost small'
+    del.type = 'button'
+    del.textContent = 'Remove'
+    del.addEventListener('click', () => settingsActionM({ action: 'ban_del', id: b.id }))
+    r.append(mono, meta, spacer, del)
+    return r
+  })
+  sec.appendChild(csListM(rows, 'No bans in this channel.'))
+  wrap.appendChild(sec)
+  return wrap
+}
+
+function csAccessHtmlM () {
+  const wrap = document.createElement('div')
+  const sec = csSectionM('Registered ops & half-ops')
+  const nick = document.createElement('input')
+  nick.id = 'cs-access-nick'
+  nick.type = 'text'
+  nick.placeholder = 'Username'
+  const level = document.createElement('select')
+  level.id = 'cs-access-level'
+  for (const [v, l] of CS_LEVELS_M) {
+    const o = document.createElement('option')
+    o.value = v
+    o.textContent = l
+    level.appendChild(o)
+  }
+  const add = document.createElement('button')
+  add.className = 'primary'
+  add.type = 'button'
+  add.textContent = 'Add'
+  add.addEventListener('click', () => {
+    const n = ($('#cs-access-nick') || {}).value || ''
+    if (!n) { csFlashM('Enter a username.'); return }
+    settingsActionM({ action: 'access_add', nick: n.trim(), level: ($('#cs-access-level') || {}).value || 'op' })
+  })
+  sec.appendChild(csRowM([nick, level, add]))
+  const rows = (CS_DATA_M.access || []).map((a) => {
+    const r = document.createElement('div')
+    r.className = 'cs-list-row'
+    const name = document.createElement('span')
+    name.textContent = (CS_SYMBOL_M[a.level] || '') + ' ' + a.username
+    const meta = document.createElement('span')
+    meta.className = 'mono'
+    meta.style.color = 'var(--muted)'
+    meta.textContent = CS_LEVEL_LABELS_M[a.level] || a.level
+    const spacer = document.createElement('span')
+    spacer.className = 'spacer'
+    const del = document.createElement('button')
+    del.className = 'ghost small'
+    del.type = 'button'
+    del.textContent = 'Remove'
+    del.addEventListener('click', () => settingsActionM({ action: 'access_del', nick: a.username }))
+    r.append(name, meta, spacer, del)
+    return r
+  })
+  sec.appendChild(csListM(rows, 'No registered ops or half-ops yet. They keep this level every time they join.'))
+  wrap.appendChild(sec)
+  return wrap
+}
+
+function csTopicHtmlM () {
+  const ch = CS_DATA_M.channel || {}
+  const wrap = document.createElement('div')
+  const sec = csSectionM('Channel topic')
+  const hint = document.createElement('div')
+  hint.style.cssText = 'color:var(--muted);font-size:12px;margin-bottom:6px'
+  hint.textContent = ch.topic_locked
+    ? 'The topic is locked (+t) — only operators can change it.'
+    : 'The topic is unlocked — anyone in the channel can change it.'
+  sec.appendChild(hint)
+  const ta = document.createElement('textarea')
+  ta.id = 'cs-topic'
+  ta.className = 'cs-topic'
+  ta.maxLength = 500
+  ta.placeholder = 'What is this channel about?'
+  ta.value = ch.topic || ''
+  sec.appendChild(ta)
+  const save = document.createElement('button')
+  save.className = 'primary'
+  save.type = 'button'
+  save.textContent = 'Set topic'
+  save.addEventListener('click', () => settingsActionM({ action: 'topic_set', topic: ($('#cs-topic') || {}).value || '' }))
+  const clear = document.createElement('button')
+  clear.className = 'ghost'
+  clear.type = 'button'
+  clear.textContent = 'Clear'
+  clear.addEventListener('click', () => settingsActionM({ action: 'topic_set', topic: '' }))
+  const actions = csRowM([save, clear])
+  actions.style.marginTop = '8px'
+  sec.appendChild(actions)
+  wrap.appendChild(sec)
+  return wrap
+}
+
+function bindSettingsActionsM () {
+  /* url/topic/ban/access buttons bind their own listeners on creation; this is
+   * a no-op placeholder kept for symmetry with the web client. */
+}
+
+/* Resolve the account id of the open DM partner (friends list or dm_list). */
+function dmPartnerId () {
+  const name = state.open && state.open.type === 'dm' ? state.open.id : null
+  if (!name) return null
+  const key = String(name).toLowerCase()
+  for (const list of [state.friends, state.dmList]) {
+    const u = list.find((x) => String(x.username || '').toLowerCase() === key)
+    if (u) return u.user_id != null ? u.user_id : u.id
+  }
+  return null
 }
 
 function renderMembers () {
@@ -2145,6 +2710,76 @@ function mentionAcOpen () {
   return !$('#mention-ac').hidden
 }
 
+/* ── Slash-command autocomplete ──────────────────────────────
+ * Mirrors the web app's `/` autocomplete: the command-name list comes from
+ * GET /api/commands (the server stays the authority on execution). Purely
+ * presentational — a failed/older server just leaves it silently off. */
+
+let slashIndex = 0
+
+async function loadCommands () {
+  try {
+    const r = await LvApi.getJson('/api/commands')
+    if (r.ok && r.body && Array.isArray(r.body.commands)) {
+      state.commands = r.body.commands.map((c) => String(c))
+    }
+  } catch (err) { /* older server — autocomplete stays off */ }
+}
+
+function showSlashAc (filter) {
+  const ac = $('#slash-ac')
+  const q = String(filter || '').toLowerCase()
+  const matches = state.commands.filter((c) => c.startsWith(q) && c !== 'help').slice(0, 8)
+  ac.replaceChildren()
+  if (!matches.length) {
+    ac.hidden = true
+    return
+  }
+  slashIndex = 0
+  matches.forEach((name, i) => {
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = 'ma-item' + (i === 0 ? ' selected' : '')
+    const label = document.createElement('span')
+    label.className = 'ma-name'
+    label.textContent = '/' + name
+    item.append(label)
+    item.addEventListener('click', () => insertSlash(name))
+    ac.appendChild(item)
+  })
+  ac.hidden = false
+}
+
+function moveSlashAc (d) {
+  const items = $('#slash-ac').querySelectorAll('.ma-item')
+  if (!items.length) return
+  slashIndex = (slashIndex + d + items.length) % items.length
+  items.forEach((el, i) => el.classList.toggle('selected', i === slashIndex))
+  const sel = items[slashIndex]
+  if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' })
+}
+
+function hideSlashAc () {
+  $('#slash-ac').hidden = true
+  $('#slash-ac').replaceChildren()
+}
+
+function slashAcOpen () {
+  return !$('#slash-ac').hidden
+}
+
+function insertSlash (name) {
+  const input = $('#composer-input')
+  input.value = '/' + name + ' '
+  input.focus()
+  hideSlashAc()
+}
+
+function pickSlashAc () {
+  const items = $('#slash-ac').querySelectorAll('.ma-item')
+  if (items[slashIndex]) items[slashIndex].click()
+}
+
 /* ── Offline message queue ──────────────────────────────────
  * While the messenger has no connection, messages the user sends (text, GIF or
  * image) are shown immediately as "Pending" and queued in localStorage (per
@@ -2419,10 +3054,50 @@ async function sendMessage (content) {
   if (!state.open) return
   const trimmed = content.trim()
   if (!trimmed) return
+  // Slash commands go to /api/command (same endpoint as the web app) instead
+  // of being sent as literal chat text.
+  if (trimmed[0] === '/') {
+    runCommand(trimmed)
+    return
+  }
   const data = { content: trimmed }
   if (state.open.type === 'dm') data.recipient = state.open.id
   else data.channel = state.open.id
   await deliverOrQueue({ kind: 'message', payload: data })
+}
+
+/* ── Slash commands ──────────────────────────────────────────
+ * Leading '/' input is a command delivered to /api/command. Replies render as
+ * system lines in the stream; /clear empties the local view; a redirect
+ * (e.g. leaving a channel) surfaces its reason. */
+async function runCommand (text) {
+  const data = { text }
+  if (state.open && state.open.type === 'room') data.channel = state.open.id
+  const r = await LvApi.postForm('/api/command', data)
+  if (!r.ok || !r.body) {
+    await appAlert((r.body && r.body.error) || 'Command failed. Try again.')
+    return
+  }
+  const b = r.body
+  if (b.redirect) {
+    await appAlert(b.reason || 'Command completed.')
+    return
+  }
+  if (b.action === 'clear') {
+    state.messages = []
+    renderStream()
+  }
+  if (Array.isArray(b.replies)) {
+    for (const line of b.replies) {
+      if (line) appendCommandReply(line)
+    }
+  }
+}
+
+function appendCommandReply (text) {
+  const maxId = state.messages.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0)
+  state.messages.push({ id: maxId + 0.5, kind: 'system', content: String(text), created_at: '', username: null, sender_id: null })
+  renderStream()
 }
 
 async function sendGif (gif) {
@@ -2913,11 +3588,36 @@ function wireEvents () {
     if (id && id !== '0') playSound(id)
   })
 
+  // Channel settings modal + URL pane.
+  const chanSettingsBtn = $('#chan-settings-btn')
+  if (chanSettingsBtn) chanSettingsBtn.addEventListener('click', openChannelSettings)
+  const chanSettingsClose = $('#chan-settings-close')
+  if (chanSettingsClose) chanSettingsClose.addEventListener('click', closeChannelSettings)
+  const chanSettingsBackdrop = $('#chan-settings-modal .modal-backdrop')
+  if (chanSettingsBackdrop) chanSettingsBackdrop.addEventListener('click', closeChannelSettings)
+  const urlCollapse = $('#url-collapse')
+  if (urlCollapse) urlCollapse.addEventListener('click', () => {
+    const pane = $('#channel-url-pane')
+    if (!pane || !state.open) return
+    const collapsed = pane.classList.toggle('url-pane-collapsed')
+    try { localStorage.setItem('lvc.messenger.urlpane.' + state.open.id, collapsed ? '0' : '1') } catch (e) {}
+    // Loading is deferred until the pane is actually shown (mobile default).
+    if (!collapsed && state.open.channelUrl) {
+      const frame = $('#url-frame')
+      if (frame && frame.getAttribute('src') !== urlPaneFrameSrc(state.open.channelUrl)) frame.src = urlPaneFrameSrc(state.open.channelUrl)
+    }
+  })
+
   $('#tab-buddy').addEventListener('click', () => setTab('buddy'))
   $('#tab-rooms').addEventListener('click', () => setTab('rooms'))
   $('#tab-requests').addEventListener('click', () => setTab('requests'))
 
   $('#btn-new-group').addEventListener('click', () => promptNewGroupFor(null))
+
+  const browseBtn = $('#btn-browse-rooms')
+  if (browseBtn) browseBtn.addEventListener('click', browseRooms)
+  const backBtn = $('#btn-browse-back')
+  if (backBtn) backBtn.addEventListener('click', closeBrowse)
 
   $('#directory-search').addEventListener('input', debounce(() => {
     renderSidebar()
@@ -2935,8 +3635,15 @@ function wireEvents () {
   input.addEventListener('input', () => {
     const sel = input.selectionStart
     const m = input.value.slice(0, sel).match(MENTION_RE)
-    if (m) showMentionAc(m[1])
-    else hideMentionAc()
+    if (m) {
+      showMentionAc(m[1])
+      hideSlashAc()
+      return
+    }
+    hideMentionAc()
+    const v = input.value
+    if (v[0] === '/') showSlashAc(v.slice(1).split(/\s/)[0].toLowerCase())
+    else hideSlashAc()
   })
   input.addEventListener('keydown', (e) => {
     if (mentionAcOpen()) {
@@ -2950,11 +3657,18 @@ function wireEvents () {
       }
       if (e.key === 'Escape') { hideMentionAc(); return }
     }
+    if (slashAcOpen()) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveSlashAc(1); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveSlashAc(-1); return }
+      if (e.key === 'Tab') { e.preventDefault(); pickSlashAc(); return }
+      if (e.key === 'Escape') { hideSlashAc(); return }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const content = input.value
       input.value = ''
       hideMentionAc()
+      hideSlashAc()
       sendMessage(content)
     }
   })
@@ -2962,6 +3676,7 @@ function wireEvents () {
     const content = input.value
     input.value = ''
     hideMentionAc()
+    hideSlashAc()
     sendMessage(content)
   })
 
@@ -3014,7 +3729,10 @@ function wireEvents () {
     if (!e.target.closest('#status-menu') && !e.target.closest('#me-status')) $('#status-menu').hidden = true
     if (!e.target.closest('#emoji-panel') && !e.target.closest('#btn-emoji')) $('#emoji-panel').hidden = true
     if (!e.target.closest('#gif-panel') && !e.target.closest('#btn-gif') && !e.target.closest('#gif-search-input')) $('#gif-panel').hidden = true
-    if (!e.target.closest('#mention-ac') && !e.target.closest('#composer-input')) hideMentionAc()
+    if (!e.target.closest('#mention-ac') && !e.target.closest('#slash-ac') && !e.target.closest('#composer-input')) {
+      hideMentionAc()
+      hideSlashAc()
+    }
   })
 }
 

@@ -45,6 +45,7 @@ $router->get('/embed/{slug}', [ChannelController::class, 'embed']);
 // Chat API
 $router->get('/api/version', [ChatController::class, 'version']);
 $router->get('/api/updater', [ChatController::class, 'updater']);
+$router->get('/api/commands', [ChatController::class, 'commands']);
 $router->post('/api/send', [ChatController::class, 'send']);
 $router->post('/api/upload', [ChatController::class, 'upload']);
 $router->post('/api/command', [ChatController::class, 'command']);
@@ -54,6 +55,7 @@ $router->get('/api/ws/ticket', [ChatController::class, 'wsTicket']);
 $router->post('/api/rt/report', [ChatController::class, 'reportTransport']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
 $router->get('/api/browse', [ChatController::class, 'browseData']);
+$router->get('/api/embed', [EmbedController::class, 'proxy']);
 $router->post('/api/notifications/read', [ChatController::class, 'readNotifications']);
 $router->post('/api/notifications/dismiss', [ChatController::class, 'dismissNotification']);
 $router->post('/api/channels', [ChannelController::class, 'create']);
@@ -127,6 +129,8 @@ $router->post('/api/theme/bg', [ThemeController::class, 'uploadBg']);
 $router->post('/api/theme/bg/remove', [ThemeController::class, 'removeBg']);
 $router->post('/api/channel/bg', [ChannelController::class, 'setBackground']);
 $router->post('/api/channel/bg/remove', [ChannelController::class, 'removeBackground']);
+$router->get('/api/channel/settings', [ChannelController::class, 'settings']);
+$router->post('/api/channel/settings', [ChannelController::class, 'settingsAction']);
 
 // Legal pages (public)
 $router->get('/terms', [LegalController::class, 'terms']);
@@ -159,6 +163,7 @@ $router->post('/admin/support/{id}/assign', [SupportController::class, 'assign']
 $router->get('/admin/legal', [AdminController::class, 'legal']);
 $router->get('/admin/channels', [AdminController::class, 'channels']);
 $router->get('/admin/bans', [AdminController::class, 'bans']);
+$router->get('/admin/urls', [AdminController::class, 'bannedUrls']);
 $router->get('/admin/spamfilters', [AdminController::class, 'spamfilters']);
 $router->get('/admin/badwords', [AdminController::class, 'badwords']);
 $router->get('/admin/roles', [AdminController::class, 'roles']);

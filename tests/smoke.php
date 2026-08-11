@@ -368,6 +368,8 @@ check('/whois', count($res['replies']) >= 1);
 $res = CommandParser::run('/kick bob test reason', $alice, $ch);
 check('/kick bob', $res['replies'][0] === 'Kicked bob.', $res['replies'][0] ?? '');
 check('bob no longer member', AccessService::member($ch['id'], (int) $bob['id']) === null);
+$removal = Database::row('SELECT reason FROM member_removals WHERE user_id = ? AND channel_id = ? ORDER BY id DESC LIMIT 1', [$bob['id'], $ch['id']]);
+check('kick records a one-shot removal reason', ($removal['reason'] ?? '') === 'alice kicked you from #test (test reason)', $removal['reason'] ?? '');
 $res = CommandParser::run('/ban bob 1h test', $alice, $ch);
 check('/ban bob', str_starts_with($res['replies'][0] ?? '', 'Banned bob'), $res['replies'][0] ?? '');
 check('bob cannot rejoin', ChannelService::joinStatus($ch, $bob)['ok'] === false);
@@ -589,6 +591,38 @@ check('/forbid', str_contains($res['replies'][0] ?? '', 'forbidden'));
 check('#test forbidden blocks join', ChannelService::joinStatus($ch, $dave)['ok'] === false);
 $res = CommandParser::run('/forbid #test off', $alice, $ch);
 check('/forbid off', str_contains($res['replies'][0] ?? '', 'un-forbidden'));
+
+// --- Channel settings / URL bans ---
+echo "== channel settings / URL ==\n";
+check('url ban normalize wildcard', UrlBanService::normalizeHost('*.Example.COM') === 'example.com');
+check('url ban normalize url', UrlBanService::normalizeHost('https://Sub.EXAMPLE.com/path') === 'sub.example.com');
+check('url ban add', UrlBanService::add('banned.test', 'spam test', (int) $alice['id']) === null);
+check('url ban duplicate rejected', UrlBanService::add('BANNED.test', 'dup', (int) $alice['id']) !== null);
+check('url ban exact match', UrlBanService::isBanned('banned.test') !== null);
+check('url ban subdomain match', UrlBanService::isBanned('sub.banned.test') !== null);
+check('url ban non-match', UrlBanService::isBanned('ok.test') === null);
+check('url allowed good', isset(UrlBanService::urlAllowed('https://ok.test/x')['ok']));
+check('url allowed banned domain', isset(UrlBanService::urlAllowed('https://sub.banned.test/')['error']));
+check('url allowed non-http rejected', isset(UrlBanService::urlAllowed('ftp://x.test')['error']));
+
+$urlCh = ChannelService::find('#test');
+check('founder can manage channel', ChannelService::canManageChannel($urlCh, $alice) === true);
+check('normal member cannot manage channel', ChannelService::canManageChannel($urlCh, $erin) === false);
+check('set channel url', ChannelService::setChannelUrl($urlCh['id'], 'https://good.example.org/page') === null);
+$fresh = Database::row('SELECT * FROM channels WHERE id = ?', [$urlCh['id']]);
+check('channel_url persisted', ($fresh['channel_url'] ?? '') === 'https://good.example.org/page');
+check('channelUrl served', ChannelService::channelUrl($fresh) === 'https://good.example.org/page');
+check('banned domain rejected on set', ChannelService::setChannelUrl($urlCh['id'], 'https://banned.test/evil') !== null);
+check('clear channel url', ChannelService::setChannelUrl($urlCh['id'], '') === null);
+check('channel_url cleared', (Database::row('SELECT channel_url FROM channels WHERE id = ?', [$urlCh['id']])['channel_url'] ?? null) === null);
+ChannelService::setChannelUrl($urlCh['id'], 'https://later-banned.test');
+UrlBanService::add('later-banned.test', 'added after', (int) $alice['id']);
+$fresh2 = Database::row('SELECT * FROM channels WHERE id = ?', [$urlCh['id']]);
+check('banned url hidden from clients', ChannelService::channelUrl($fresh2) === null);
+check('banned url flagged', ChannelService::channelUrlBanned($fresh2) === true);
+UrlBanService::remove((int) UrlBanService::isBanned('later-banned.test')['id']);
+UrlBanService::remove((int) UrlBanService::isBanned('banned.test')['id']);
+check('url ban remove', UrlBanService::isBanned('banned.test') === null);
 
 // ── Channel delete: rename to -deleted####, archive preserved ───────────────
 $doomed = ChannelService::create($alice, '#doomed');
@@ -980,6 +1014,90 @@ check('deoper clears isOper', Auth::isOper($erin) === false);
 Database::query('UPDATE opers SET enabled = 0 WHERE username = "erin"');
 $res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
 check('disabled o:line rejected', str_contains($res['replies'][0] ?? '', 'Incorrect oper credentials'));
+
+// ── Forbidden nicks (sqline / unsqline / sqlines) ────────────────────────────
+echo "== forbidden nicks ==\n";
+$res = CommandParser::run('/sqline forbiddennick keep out', $alice, $ch);
+check('/sqline forbids a nick', str_contains($res['replies'][0] ?? '', 'forbidden'));
+$res = CommandParser::run('/nick forbiddennick', $bob, $ch);
+check('qline blocks /nick', str_contains($res['replies'][0] ?? '', 'reserved'), $res['replies'][0] ?? '');
+$reg = Auth::register('forbiddennick', 'fn@example.com', 'password123', true);
+check('qline blocks registration', $reg['ok'] === false, json_encode($reg));
+$res = CommandParser::run('/sanick erin forbiddennick', $alice, $ch);
+check('qline blocks sanick target', $res['replies'][0] === 'Requested nick is unavailable, please select another', $res['replies'][0] ?? '');
+$res = CommandParser::run('/sqlines', $alice, $ch);
+check('/sqlines lists forbidden nicks', str_contains(implode(' ', $res['replies']), 'forbiddennick'));
+$res = CommandParser::run('/unsqline forbiddennick', $alice, $ch);
+check('/unsqline removes the qline', str_contains($res['replies'][0] ?? '', 'removed'));
+$res = CommandParser::run('/sqlines', $alice, $ch);
+check('/sqlines no longer lists the removed nick', !str_contains(implode(' ', $res['replies']), 'forbiddennick'));
+
+// ── Forbidden channels (cqline / uncqline / cqlines) ─────────────────────────
+echo "== forbidden channels ==\n";
+$res = CommandParser::run('/cqline #spamchan no spam rooms', $alice, $ch);
+check('/cqline forbids a channel name', str_contains($res['replies'][0] ?? '', 'forbidden'));
+check('cqline blocks creating a forbidden channel', str_contains(ChannelService::create($bob, '#spamchan'), 'forbidden'));
+$mc = ChannelService::create($bob, '#matchme');
+ChannelService::join($mc, $bob);
+$res = CommandParser::run('/cqline #matchme', $alice, $ch);
+check('/cqline forbids an existing channel name', str_contains($res['replies'][0] ?? '', 'forbidden'));
+check('cqline blocks joining a forbidden channel', ChannelService::joinStatus(ChannelService::find('#matchme'), $erin)['ok'] === false);
+$res = CommandParser::run('/cqlines', $alice, $ch);
+check('/cqlines lists forbidden channels', str_contains(implode(' ', $res['replies']), 'matchme'));
+$res = CommandParser::run('/uncqline #matchme', $alice, $ch);
+check('/uncqline removes the cqline', str_contains($res['replies'][0] ?? '', 'removed'));
+check('channel joinable again after uncqline', ChannelService::joinStatus(ChannelService::find('#matchme'), $erin)['ok'] === true);
+
+// ── /sanick (admins + netadmin opers) ────────────────────────────────────────
+echo "== sanick ==\n";
+Database::query('UPDATE opers SET enabled = 1 WHERE username = "erin"');
+$res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
+check('netadmin o:line works', str_contains($res['replies'][0] ?? '', 'netadmin'));
+$res = CommandParser::run('/sanick nosuchuser whatever', $erin, $ch);
+check('netadmin may use /sanick', !str_contains($res['replies'][0] ?? '', 'requires netadmin'));
+$globalop = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "globalop"');
+Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES ("frank", ?, ?)', [password_hash('franksecret', PASSWORD_ARGON2ID), $globalop]);
+$res = CommandParser::run('/oper frank franksecret', $frank, $ch);
+check('globalop o:line works', str_contains($res['replies'][0] ?? '', 'globalop'));
+$res = CommandParser::run('/sanick erin zed', $frank, $ch);
+check('sanick denied to non-netadmin oper', str_contains($res['replies'][0] ?? '', 'requires netadmin'), $res['replies'][0] ?? '');
+CommandParser::run('/deoper', $frank, $ch);
+$res = CommandParser::run('/sanick erin alice', $alice, $ch);
+check('sanick exact error when nick is registered', $res['replies'][0] === 'Requested nick is unavailable, please select another', $res['replies'][0] ?? '');
+Auth::loginGuest('guestheld', true);
+$res = CommandParser::run('/sanick erin guestheld', $alice, $ch);
+check('sanick exact error when nick held by a guest', $res['replies'][0] === 'Requested nick is unavailable, please select another', $res['replies'][0] ?? '');
+Auth::logout();
+$res = CommandParser::run('/sanick erin erina', $alice, $ch);
+check('/sanick renames the user', str_contains($res['replies'][0] ?? '', 'now known as erina'), $res['replies'][0] ?? '');
+check('sanick updates the registration', Database::scalar('SELECT id FROM users WHERE username = "erina"') == $erin['id']);
+check('sanick notifies the renamed user (PM)', (int) Database::scalar("SELECT COUNT(*) FROM private_messages WHERE recipient_id = ? AND content LIKE '%erina%'", [$erin['id']]) > 0);
+check('sanick posts a nick event in the channel', (int) Database::scalar("SELECT COUNT(*) FROM messages WHERE kind = 'nick' AND channel_id = ? AND content LIKE '%erina%'", [$ch['id']]) > 0);
+
+// ── #oper-log (admin-only action log) ────────────────────────────────────────
+echo "== oper-log ==\n";
+$operLog = ChannelService::find('#oper-log');
+check('#oper-log seeded as private', $operLog !== null && $operLog['visibility'] === 'private', json_encode($operLog));
+check('regular user denied #oper-log', ChannelService::joinStatus($operLog, $bob)['ok'] === false);
+check('admin allowed #oper-log', ChannelService::joinStatus($operLog, $alice)['ok'] === true);
+$beforeLog = (int) Database::scalar('SELECT COUNT(*) FROM messages WHERE channel_id = ?', [$operLog['id']]);
+Auth::login($alice);
+CommandParser::run('/kline somefake 1h spam', $alice, $ch);
+$afterLog = (int) Database::scalar('SELECT COUNT(*) FROM messages WHERE channel_id = ?', [$operLog['id']]);
+check('admin action mirrored to #oper-log', $afterLog > $beforeLog, "$beforeLog -> $afterLog");
+Auth::register('opx', 'opx@example.com', 'password123', true);
+$opx = Auth::attempt('opx', 'password123');
+Auth::register('kickme', 'kickme@example.com', 'password123', true);
+$kickme = Auth::attempt('kickme', 'password123');
+$opCh = ChannelService::create($opx, '#opxtest');
+ChannelService::join($opCh, $kickme);
+Auth::login($opx);
+$beforeOp = (int) Database::scalar('SELECT COUNT(*) FROM messages WHERE channel_id = ?', [$operLog['id']]);
+$res = CommandParser::run('/kick kickme time to go', $opx, $opCh);
+check('chanop can kick in their channel', str_contains($res['replies'][0] ?? '', 'Kicked'), $res['replies'][0] ?? '');
+$afterOp = (int) Database::scalar('SELECT COUNT(*) FROM messages WHERE channel_id = ?', [$operLog['id']]);
+check('chanop action NOT mirrored to #oper-log', $afterOp === $beforeOp, "$beforeOp -> $afterOp");
+
 
 // --- Audit / admin helpers ---
 echo "== admin dashboard data ==\n";
