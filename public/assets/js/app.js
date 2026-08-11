@@ -2621,7 +2621,7 @@
         '<button type="button" id="url-refresh" class="btn-ghost !py-0.5 !px-2 !text-xs" title="Refresh">⟳</button>' +
         '<button type="button" id="url-collapse" class="btn-ghost !py-0.5 !px-2 !text-xs" title="Hide or show the URL pane">▾</button>' +
       '</div>' +
-      '<iframe id="url-frame" class="flex-1 min-h-0 w-full" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" allow="fullscreen" title="Channel URL"></iframe>';
+      '<iframe id="url-frame" class="flex-1 min-h-0 w-full" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer" allow="fullscreen" title="Channel URL"></iframe>';
     msgsEl.parentNode.insertBefore(pane, msgsEl);
     const open = pane.querySelector('#url-open');
     if (open) open.addEventListener('click', (e) => { e.preventDefault(); if (CHANNEL_URL) window.open(CHANNEL_URL, '_blank', 'noopener'); });

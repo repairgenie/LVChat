@@ -15,6 +15,9 @@ final class FriendController
 
     private static function requireCsrf(): void
     {
+        if (Csrf::bearerAuthorized()) {
+            return; // messenger bearer-token requests are CSRF-safe by construction
+        }
         $sent = $_POST['csrf'] ?? ($_SERVER['HTTP_X_CSRF'] ?? '');
         if (!is_string($sent) || !hash_equals(Csrf::token(), $sent)) {
             json_out(['error' => 'CSRF token mismatch.'], 419);

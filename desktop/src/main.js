@@ -351,6 +351,28 @@ function wireChatWindow (win, record, profile) {
   }
   win.webContents.on('dom-ready', onReady)
   win.webContents.on('did-navigate', onReady)
+
+  // If the renderer dies (e.g. a hostile or heavy page embedded in the
+  // Channel-URL pane crashes Chromium), recover by reloading instead of
+  // leaving the user on the dead "Application error" crash page. Guarded so a
+  // page that crashes every load can't loop the window forever.
+  const crashTimes = []
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details && details.reason === 'clean-exit') return
+    const now = Date.now()
+    crashTimes.push(now)
+    const recent = crashTimes.filter((t) => now - t < 30000).length
+    if (recent > 3) {
+      console.warn('[lvchat-desktop] renderer crashed repeatedly; not reloading')
+      return
+    }
+    console.warn('[lvchat-desktop] renderer crashed (' + (details && details.reason) + '), reloading')
+    setTimeout(() => {
+      if (!win.isDestroyed()) {
+        try { win.webContents.reload() } catch (err) { /* ignore */ }
+      }
+    }, 1200)
+  })
 }
 
 function connectProfile (profile) {

@@ -1152,6 +1152,11 @@ check('messenger login returns a bearer token', $s === 200 && strlen($mTok) > 40
 check('bearer token authenticates /api/me (no cookies)', $s === 200 && (jsonDecode($b)['user']['username'] ?? '') === 'tokenuser', "$s $b");
 [$s, , $j] = req('POST', '/api/status', ['status_mode' => 'away', 'away' => 'brb'], null, ['X-LVC-Session: ' . $mTok]);
 check('bearer-authenticated POST skips cookie-CSRF', $s === 200 && (jsonDecode($j)['status']['status_mode'] ?? '') === 'away', "$s $j");
+// /api/send uses requireCsrf (a separate check) — it must skip for the bearer too.
+[$s, , $j] = req('POST', '/api/send', ['recipient' => 'tokenuser', 'content' => 'bearer send', 'ajax' => '1'], null, ['X-LVC-Session: ' . $mTok]);
+check('bearer-authenticated send works (requireCsrf skips)', $s === 200 && (jsonDecode($j)['ok'] ?? false) === true, "$s $j");
+[$s] = req('POST', '/api/send', ['recipient' => 'tokenuser', 'content' => 'x', 'ajax' => '1']);
+check('send without a session still rejected', $s === 401, (string) $s);
 [$s, , $j] = req('POST', '/api/messenger/logout', [], null, ['X-LVC-Session: ' . $mTok]);
 check('messenger logout revokes the token', $s === 200 && (jsonDecode($j)['ok'] ?? false) === true, "$s $j");
 [$s] = req('GET', '/api/me', [], null, ['X-LVC-Session: ' . $mTok]);

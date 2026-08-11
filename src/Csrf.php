@@ -12,6 +12,17 @@ final class Csrf
         return $_SESSION['csrf'];
     }
 
+    /** Whether this request is authenticated by the messenger's bearer session
+     *  header (X-LVC-Session). Such requests are CSRF-safe by construction: the
+     *  token is a bearer secret sent in a custom header that cross-site pages
+     *  cannot set (CORS preflight + the origin allowlist block them), so the
+     *  cookie-CSRF check can be skipped. */
+    public static function bearerAuthorized(): bool
+    {
+        $h = $_SERVER['HTTP_X_LVC_SESSION'] ?? '';
+        return is_string($h) && $h !== '' && Auth::validSessionToken($h);
+    }
+
     public static function field(): string
     {
         return '<input type="hidden" name="csrf" value="' . h(self::token()) . '">';
@@ -23,8 +34,7 @@ final class Csrf
         // safe by construction: the token is a bearer secret sent in a custom
         // header that cross-site pages cannot set (CORS preflight + the origin
         // allowlist block them), so the cookie-CSRF check is unnecessary here.
-        $h = $_SERVER['HTTP_X_LVC_SESSION'] ?? '';
-        if (is_string($h) && $h !== '' && Auth::validSessionToken($h)) {
+        if (self::bearerAuthorized()) {
             return;
         }
         $sent = $_POST['csrf'] ?? '';

@@ -1548,10 +1548,12 @@ final class AdminController
     public static function deployStream(): void
     {
         Auth::requireAdmin();
-        $sent = $_POST['csrf'] ?? ($_GET['csrf'] ?? '');
-        if (!is_string($sent) || !hash_equals(Csrf::token(), $sent)) {
-            http_response_code(419);
-            exit('CSRF token mismatch');
+        if (!Csrf::bearerAuthorized()) {
+            $sent = $_POST['csrf'] ?? ($_GET['csrf'] ?? '');
+            if (!is_string($sent) || !hash_equals(Csrf::token(), $sent)) {
+                http_response_code(419);
+                exit('CSRF token mismatch');
+            }
         }
         header('Content-Type: text/plain; charset=utf-8');
         header('Cache-Control: no-cache');

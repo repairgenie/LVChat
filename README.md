@@ -494,7 +494,7 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **1088 automated assertions** in three layers:
+Runs **1090 automated assertions** in three layers:
 
 - **`tests/smoke.php`** (598) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
@@ -505,7 +505,7 @@ Runs **1088 automated assertions** in three layers:
   (sqline/cqline), `/sanick` gating + availability, the `#oper-log` mirror, the
   channel-URL validator and banned-domain list (exact + subdomain), and the
   ChannelService URL/`canManageChannel` helpers.
-- **`tests/http_test.php`** (478) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (480) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
@@ -656,7 +656,7 @@ bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/check-updates.php  CLI update check against the configured feed (cron-friendly)
 bin/test.sh      run the full automated test suite
 tests/smoke.php  598 command/service assertions
-tests/http_test.php  478 HTTP assertions
+tests/http_test.php  480 HTTP assertions
 tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
 composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)
