@@ -49,7 +49,9 @@
 
 html, body {
   height: 100%;
+  width: 100%;
   margin: 0;
+  overflow-x: hidden;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   font-size: 14px;
   background: var(--bg);
@@ -148,7 +150,7 @@ button.icon-btn:hover { background: var(--hover); color: var(--text); }
 
 /* ── Main layout ───────────────────────────────────────────── */
 #view-main { display: flex; flex-direction: column; }
-#app-row { display: flex; flex: 1; min-height: 0; }
+#app-row { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 
 /* Offline banner: a slim strip above the sidebar/chat when disconnected. */
 #offline-banner {
@@ -232,6 +234,10 @@ body.chat-window #sidebar-resizer { display: none; }
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   padding: 5px;
+}
+/* Phones (< 768px) are Compact-only — never show the layout toggle. */
+@media (max-width: 767px) {
+  #view-mode-btn { display: none !important; }
 }
 .head-menu[hidden] { display: none; }
 .me { display: flex; align-items: center; gap: 8px; min-width: 0; position: relative; }
@@ -423,16 +429,19 @@ body.chat-window #sidebar-resizer { display: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.chat-title { font-weight: 700; font-size: 15px; }
-.chat-sub { color: var(--muted); font-size: 12px; margin-top: 1px; }
+.chat-head-info { flex: 1; min-width: 0; }
+.chat-head-actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.chat-title { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-sub { color: var(--muted); font-size: 12px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 #chat-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-#chat-main { flex: 1; display: flex; min-height: 0; }
-#stream { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+#chat-main { flex: 1; display: flex; min-height: 0; min-width: 0; overflow: hidden; }
+#stream { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
 
 /* Channel URL pane: embedded web page above the chat (rooms only). */
 #channel-url-pane {
@@ -496,6 +505,7 @@ body.chat-window #sidebar-resizer { display: none; }
 .cs-list-empty { padding: 12px; color: var(--muted); font-size: 12.5px; text-align: center; }
 textarea.cs-topic { width: 100%; min-height: 72px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font: inherit; resize: vertical; }
 #members {
+  flex: none;
   width: 220px;
   border-left: 1px solid var(--border);
   background: var(--panel);
@@ -524,7 +534,7 @@ textarea.cs-topic { width: 100%; min-height: 72px; padding: 8px 10px; border: 1p
 .msg.pending .avatar { opacity: 0.6; }
 .msg-content { margin-top: 1px; white-space: pre-wrap; word-wrap: break-word; font-size: 13.5px; line-height: 1.4; }
 .msg-content img.media {
-  max-width: 320px;
+  max-width: min(320px, 100%);
   max-height: 240px;
   border-radius: 8px;
   margin: 4px 0;

@@ -66,6 +66,14 @@ function parseChatTarget () {
 
 parseChatTarget()
 
+/* Phones (coarse pointer + < 768px) are compact-only — Advanced needs the width
+ * of a tablet or larger. This drives both the layout lock and the
+ * single-tap-to-open behavior (compact normally requires a double-click, which
+ * is unreliable on touch). A narrow desktop window is still desktop. */
+function isMobile () {
+  return window.innerWidth < 768 && window.matchMedia('(pointer: coarse)').matches
+}
+
 function esc (s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -366,6 +374,10 @@ async function startMain (me) {
   window.addEventListener('offline', () => setOffline(true))
   if (navigator.onLine) flushSendQueue()
   else setOffline(true)
+
+  // Cross the phone/tablet breakpoint (orientation change, window resize) and
+  // the layout lock + single-tap behavior switch over automatically.
+  window.addEventListener('resize', debounce(applyViewMode, 150))
 
   if (state.chatWindow && state._chatTarget) {
     try {
@@ -1071,7 +1083,11 @@ function makeContact (user, opts) {
 
   wrap.addEventListener('click', (e) => {
     if (e.target.closest('.ctx-menu')) return
-    if (state.viewMode === 'compact') return
+    if (state.viewMode === 'compact') {
+      // Compact normally needs a double-click, but on touch a single tap opens.
+      if (isMobile()) openChatWindow('dm', user.username)
+      return
+    }
     openDm(user.username)
   })
   wrap.addEventListener('dblclick', (e) => {
@@ -1315,7 +1331,11 @@ function renderRoomsList () {
       row.appendChild(b)
     }
     row.addEventListener('click', () => {
-      if (state.viewMode === 'compact') return
+      if (state.viewMode === 'compact') {
+        // Compact normally needs a double-click, but on touch a single tap opens.
+        if (isMobile()) openChatWindow('room', c.slug)
+        return
+      }
       openRoom(c.slug)
     })
     row.addEventListener('dblclick', () => openChatWindow('room', c.slug))
@@ -3149,6 +3169,7 @@ async function loadGifs (q) {
 async function applyViewMode () {
   let mode = await window.msg.prefsGet('viewMode')
   if (mode !== 'compact' && mode !== 'advanced') mode = 'compact'
+  if (isMobile()) mode = 'compact' // phones are compact-only
   state.viewMode = mode
   document.body.classList.remove('compact', 'advanced')
   if (state.chatWindow) {
@@ -3163,6 +3184,7 @@ async function applyViewMode () {
 function updateViewModeButton () {
   const btn = $('#view-mode-btn')
   if (!btn) return
+  btn.hidden = isMobile() // phones have no layout choice
   if (state.viewMode === 'compact') {
     btn.textContent = '▦'
     btn.title = 'Switch to Advanced view'
@@ -3173,6 +3195,7 @@ function updateViewModeButton () {
 }
 
 async function toggleViewMode () {
+  if (isMobile()) return // phones stay in Compact
   const next = state.viewMode === 'compact' ? 'advanced' : 'compact'
   state.viewMode = next
   document.body.classList.remove('compact', 'advanced')
@@ -3209,7 +3232,7 @@ async function toggleHeadMenu (force) {
     b.addEventListener('click', () => { menu.hidden = true; onClick() })
     menu.appendChild(b)
   }
-  add(state.viewMode === 'compact' ? 'Switch to Advanced view' : 'Switch to Compact view', toggleViewMode)
+  if (!isMobile()) add(state.viewMode === 'compact' ? 'Switch to Advanced view' : 'Switch to Compact view', toggleViewMode)
   add('Toggle light / dark theme', toggleTheme)
 
   // Account switching: every other saved profile. Same-server accounts make
