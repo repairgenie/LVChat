@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
+
 declare(strict_types=1);
 
 final class Database
@@ -7,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '34';
+    private const SCHEMA_VERSION = '35';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -317,6 +336,11 @@ final class Database
             $pdo->exec('CREATE TABLE friendships (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT \'pending\', created_at TEXT NOT NULL DEFAULT (datetime(\'now\')), updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')), UNIQUE (user_id, friend_id))');
             $pdo->exec('CREATE INDEX idx_friendships_user ON friendships(user_id, status)');
             $pdo->exec('CREATE INDEX idx_friendships_friend ON friendships(friend_id, status)');
+        }
+
+        // Modules system (schema v35): one row per discovered module directory.
+        if (!in_array('modules', $tables, true)) {
+            $pdo->exec('CREATE TABLE modules (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT "", version TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1, license TEXT NOT NULL DEFAULT "", license_status TEXT NOT NULL DEFAULT "", license_checked_at TEXT, license_expires_at TEXT, config TEXT, installed_at TEXT NOT NULL DEFAULT (datetime("now")), updated_at TEXT)');
         }
 
         // Analytics indexes (schema v16): keep range-aggregation charts off full scans.

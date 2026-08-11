@@ -1,0 +1,6 @@
+{
+  "id": "disabled-mod",
+  "name": "Disabled Module",
+  "version": "0.1.0",
+  "description": "Must never load (directory renamed to .disabled)."
+}

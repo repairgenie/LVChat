@@ -248,6 +248,11 @@ sidebars stay where they are; the chat takes the bottom half of the view.
   remembered for that channel).
 - Only `http://` and `https://` pages are allowed. Some sites refuse to be
   embedded (`X-Frame-Options`) — if the pane looks empty, click **Open**.
+- Pages load through a server-side proxy, so sites that block embedding still
+  render. The page runs in a sealed sandbox (it can never touch your chat
+  session); the proxy shims the few browser APIs the sandbox forbids and
+  re-serves the page's stylesheets and fonts, so modern JS-heavy sites and
+  their fonts work normally in the pane.
 - Set or clear it in **Channel settings → Overview**. Ops and above can change
   it; a system line in the channel announces set/clear so everyone sees it live.
 - The server keeps a global **blocked-domains** list. A URL whose host equals a

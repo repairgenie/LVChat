@@ -1,4 +1,23 @@
 <?php
+
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
 $site = config_get('site_name', 'LVChat');
 $csrf = Csrf::token();
 $channelSlug = $channel['slug'] ?? '';
@@ -292,6 +311,27 @@ function presence_label(array $u): string {
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
   <?php require ROOT . '/views/partials/theme.php'; ?>
   <?php require ROOT . '/views/partials/pwa.php'; ?>
+  <?php
+  // Module assets (docs/modules.md): each enabled module's manifest `assets`
+  // lists css/js files served at /modules/<id>/assets/<path>. Loaded here so
+  // modules can extend the chat app without touching core views. Manifest
+  // order is preserved (a module may list its vendor lib before its own js).
+  foreach (ModuleLoader::all() as $__mid => $__man) {
+      foreach ((array) ($__man['assets']['css'] ?? []) as $__p) {
+          $__p = ltrim((string) $__p, '/');
+          $__f = ModuleLoader::dir() . '/' . $__mid . '/assets/' . $__p;
+          $__v = is_file($__f) ? (int) @filemtime($__f) : '';
+          echo '<link rel="stylesheet" href="/modules/' . h($__mid) . '/assets/' . h($__p) . ($__v ? '?v=' . $__v : '') . '">' . "\n";
+      }
+      foreach ((array) ($__man['assets']['js'] ?? []) as $__p) {
+          $__p = ltrim((string) $__p, '/');
+          $__f = ModuleLoader::dir() . '/' . $__mid . '/assets/' . $__p;
+          $__v = is_file($__f) ? (int) @filemtime($__f) : '';
+          echo '<script src="/modules/' . h($__mid) . '/assets/' . h($__p) . ($__v ? '?v=' . $__v : '') . '"></script>' . "\n";
+      }
+  }
+  unset($__mid, $__man, $__p, $__f, $__v);
+  ?>
 </head>
 <body class="chat-app bg-discord-800 text-discord-200 antialiased flex"
       data-csrf="<?= h($csrf) ?>"

@@ -1,3 +1,20 @@
+/*
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 /* LVChat Messenger end-to-end test.
  *
  * Boots the real Electron app against an in-memory mock LVChat server and
@@ -637,6 +654,26 @@ function mockLvchatServer () {
       json(200, { ok: true, ticket: 'test-ticket', url: 'ws://127.0.0.1:1/' })
       return
     }
+    if (url.pathname === '/api/webrtc/voice/status') {
+      const voice = state.voiceEnabled === undefined ? false : !!state.voiceEnabled
+      json(200, {
+        ok: true, enabled: voice, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000,
+        channels: [{ slug: 'gaming', name: '#gaming', voice_enabled: voice }],
+        session: null,
+        calls: { incoming: [], outgoing: [], active: null }
+      })
+      return
+    }
+    if (url.pathname === '/api/webrtc/voice/join' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        state.lastVoiceJoin = { channel: p.get('channel') || '' }
+        json(200, { ok: true, url: 'ws://127.0.0.1:1/', token: 'a.b.c', room: 'chan:' + (p.get('channel') || ''), talker_cap: 8, bitrate: 40000 })
+      })
+      return
+    }
     json(404, { error: 'Not found' })
   })
 
@@ -1001,6 +1038,19 @@ async function main () {
   check('room opens with #gaming title', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
   await js(win, `document.getElementById('members-toggle').click()`)
   check('active members list shows only online members', await waitJs(win, `!document.getElementById('members').hidden && document.getElementById('members').textContent.includes('bob') && !document.getElementById('members').textContent.includes('carol') && 'ok'`))
+
+  // WebRTC voice: the voice client is server-gated — no button while disabled,
+  // and a join button once the module reports voice enabled on the channel.
+  mock.state.voiceEnabled = false
+  await new Promise((r) => setTimeout(r, 700))
+  check('no voice button while the module is disabled', await waitJs(win, `!document.getElementById('lvcvoice-btn') || document.getElementById('lvcvoice-btn').hidden ? 'ok' : 'visible'`))
+  mock.state.voiceEnabled = true
+  await new Promise((r) => setTimeout(r, 700))
+  check('voice button appears when the module is enabled', await waitJs(win, `(() => { const b = document.getElementById('lvcvoice-btn'); return !!b && !b.hidden && b.textContent === 'Voice' && 'ok' })()`))
+  await js(win, `document.getElementById('lvcvoice-btn').click()`)
+  await new Promise((r) => setTimeout(r, 700))
+  check('voice button join posts /api/webrtc/voice/join with the channel', mock.state.lastVoiceJoin && mock.state.lastVoiceJoin.channel === 'gaming', JSON.stringify(mock.state.lastVoiceJoin))
+  mock.state.voiceEnabled = false
 
   // Slash commands route to /api/command and render their reply in the stream.
   await js(win, `document.getElementById('composer-input').value = '/kick bob too spammy'; document.getElementById('composer-send').click()`)

@@ -1,4 +1,20 @@
-#!/usr/bin/env node
+/*
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 'use strict'
 
 /* LVChat Messenger Web — zero-dependency test suite.
@@ -75,6 +91,14 @@ function readText (p) {
   for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'web-bridge.js', 'offline.html']) {
     check('dist copies ' + f, fs.existsSync(path.join(DIST, f)))
   }
+  // WebRTC voice assets ship with the build and are precached by the SW.
+  for (const f of ['voice.js', 'voice.css', 'vendor/livekit-client.umd.js']) {
+    check('dist copies voice asset ' + f, fs.existsSync(path.join(DIST, f)) && fs.statSync(path.join(DIST, f)).size > 100)
+  }
+  check('sw.js precaches the voice shell', sw.includes('voice.js') && sw.includes('voice.css') && sw.includes('livekit-client.umd.js'))
+  check('messenger.html loads the voice scripts', readText(path.join(DIST, 'messenger.html')).includes('vendor/livekit-client.umd.js') && readText(path.join(DIST, 'messenger.html')).includes('voice.js'))
+  check('voice.js gates on the server status endpoint', readText(path.join(DIST, 'voice.js')).includes('/api/webrtc/voice/status'))
+  check('voice.js ships video (camera + screen share)', readText(path.join(DIST, 'voice.js')).includes('setCameraEnabled') && readText(path.join(DIST, 'voice.js')).includes('setScreenShareEnabled'))
   for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'favicon.png']) {
     const p = path.join(DIST, 'icons', f)
     check('icon ' + f + ' exists', fs.existsSync(p) && fs.statSync(p).size > 100)
@@ -170,6 +194,19 @@ const mockServer = http.createServer((req, res) => {
   if (url.pathname === '/api/push/prefs') return json(200, { ok: true, prefs: { channels: 1, dms: 1, invites: 1 } })
   if (url.pathname === '/api/sounds') return json(200, { ok: true, sounds: {} })
   if (url.pathname === '/api/ws/ticket') return json(200, { ok: true, ticket: 't', url: 'ws://127.0.0.1:' + MOCK_PORT + '/ws' })
+  // WebRTC voice: the messenger voice client gates all UI on this endpoint and
+  // never renders when it 404s (module absent) or reports enabled:false.
+  if (url.pathname === '/api/webrtc/voice/status') {
+    if (!mockSession) return json(401, { error: 'Not authenticated.' })
+    return json(200, { ok: true, enabled: true, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000, channels: [{ slug: 'general', name: '#general', voice_enabled: true }], session: null, calls: { incoming: [], outgoing: [], active: null } })
+  }
+  if (url.pathname === '/api/webrtc/voice/join' && req.method === 'POST') {
+    if (!mockSession) return json(401, { error: 'Not authenticated.' })
+    return formBody().then((body) => {
+      if (body.get('csrf') !== 'csrf-token-123') return json(419, { error: 'CSRF token mismatch.' })
+      return json(200, { ok: true, url: 'wss://livekit.test/', token: 'a.b.c', room: 'chan:' + (body.get('channel') || ''), talker_cap: 8, bitrate: 40000 })
+    })
+  }
   return html(404, 'not found: ' + url.pathname)
 })
 
@@ -282,6 +319,13 @@ function loadApiClient () {
 
   const sub = await LvApi.postForm('/api/push/subscribe', { endpoint: 'https://push.example/x', p256dh: 'abc', auth: 'def' })
   check('api: push subscribe accepted', sub.ok && sub.body && sub.body.ok === true, JSON.stringify(sub))
+
+  // WebRTC voice contract: status is gated on auth, carries the enabled flag +
+  // channels; join requires CSRF and returns the LiveKit payload.
+  const vs = await LvApi.getJson('/api/webrtc/voice/status')
+  check('api: voice status returns the module contract', vs.ok && vs.body.enabled === true && vs.body.talker_cap === 8 && Array.isArray(vs.body.channels), JSON.stringify(vs.body))
+  const join = await LvApi.postForm('/api/webrtc/voice/join', { channel: 'general' })
+  check('api: voice join returns the LiveKit payload', join.ok && join.body && join.body.url === 'wss://livekit.test/' && join.body.room === 'chan:general' && join.body.token === 'a.b.c', JSON.stringify(join.body))
 
   /* Part 2: web-bridge against stubbed browser globals. */
   let notifShown = false

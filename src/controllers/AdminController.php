@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
+
 declare(strict_types=1);
 
 final class AdminController
@@ -590,6 +609,29 @@ final class AdminController
             'channels' => $channels,
             'botChannels' => $botChannels,
             'botPmUsers' => $botPmUsers,
+        ]);
+    }
+
+    /** GET /admin/modules — installed modules, enable state, licenses, warnings. */
+    public static function modules(): void
+    {
+        $admin = self::require();
+        $rows = [];
+        foreach (Database::all('SELECT * FROM modules ORDER BY id COLLATE NOCASE') as $row) {
+            $id = (string) $row['id'];
+            $onDisk = ModuleLoader::dirExists($id);
+            $rows[$id] = [
+                'row' => $row,
+                'manifest' => ModuleLoader::get($id),
+                'onDisk' => $onDisk,
+                'disabledRename' => $onDisk && !is_dir(ModuleLoader::dir() . '/' . $id) && is_dir(ModuleLoader::dir() . '/' . $id . '.disabled'),
+            ];
+        }
+        render_view('admin/modules', [
+            'admin' => $admin,
+            'rows' => $rows,
+            'warnings' => ModuleLoader::warnings(),
+            'dir' => ModuleLoader::dir(),
         ]);
     }
 
@@ -1370,6 +1412,31 @@ final class AdminController
                     (int) ($_POST['user_id'] ?? 0)
                 );
                 $message = 'PM access revoked.';
+                break;
+            case 'module_toggle':
+                $id = (string) ($_POST['id'] ?? '');
+                $modRow = $id !== '' ? Database::row('SELECT id FROM modules WHERE id = ?', [$id]) : null;
+                if (!$modRow) {
+                    $ok = false;
+                    $message = 'Unknown module.';
+                } else {
+                    Database::query('UPDATE modules SET enabled = 1 - enabled WHERE id = ?', [$id]);
+                    log_audit('module_toggle', 'module#' . $id);
+                    $message = 'Module toggled.';
+                }
+                break;
+            case 'module_save':
+                $id = (string) ($_POST['id'] ?? '');
+                $modRow = $id !== '' ? Database::row('SELECT id FROM modules WHERE id = ?', [$id]) : null;
+                if (!$modRow) {
+                    $ok = false;
+                    $message = 'Unknown module.';
+                } else {
+                    $license = trim((string) ($_POST['license'] ?? ''));
+                    Database::query('UPDATE modules SET license = ? WHERE id = ?', [$license, $id]);
+                    log_audit('module_save', 'module#' . $id, $license !== '' ? 'license set' : 'license cleared');
+                    $message = $license !== '' ? 'License key saved.' : 'License key cleared.';
+                }
                 break;
             default:
                 $ok = false;

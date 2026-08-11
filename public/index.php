@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
+
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/src/bootstrap.php';
@@ -56,6 +75,7 @@ $router->post('/api/rt/report', [ChatController::class, 'reportTransport']);
 $router->get('/api/notifications', [ChatController::class, 'notifications']);
 $router->get('/api/browse', [ChatController::class, 'browseData']);
 $router->get('/api/embed', [EmbedController::class, 'proxy']);
+$router->get('/api/embed/res', [EmbedController::class, 'resource']);
 $router->post('/api/messenger/login', [MessengerController::class, 'login']);
 $router->post('/api/messenger/mfa', [MessengerController::class, 'mfa']);
 $router->post('/api/messenger/logout', [MessengerController::class, 'logout']);
@@ -185,6 +205,7 @@ $router->post('/admin/updates/download-web', [AdminController::class, 'updatesDo
 $router->get('/admin/updates/download', [AdminController::class, 'updatesDownload']);
 $router->get('/admin/theme', [AdminController::class, 'theme']);
 $router->get('/admin/invites', [AdminController::class, 'invites']);
+$router->get('/admin/modules', [AdminController::class, 'modules']);
 $router->get('/admin/openclaw', [AdminController::class, 'openclaw']);
 $router->post('/admin/action', [AdminController::class, 'action']);
 $router->get('/admin/ws/status', [AdminController::class, 'wsStatus']);
@@ -203,5 +224,10 @@ $router->get('/api/openclaw/messages', [OpenClawController::class, 'messages']);
 $router->get('/api/openclaw/pms', [OpenClawController::class, 'pms']);
 $router->post('/api/openclaw/send', [OpenClawController::class, 'send']);
 $router->post('/api/openclaw/pm', [OpenClawController::class, 'pm']);
+
+// Module system: static asset serving + module routes (registered after core so
+// core routes always win on a path collision). See docs/modules.md.
+$router->get('/modules/{name}/assets/{path...}', [ModuleController::class, 'asset']);
+ModuleLoader::wireRoutes($router);
 
 $router->dispatch();

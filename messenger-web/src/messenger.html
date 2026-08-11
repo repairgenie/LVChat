@@ -1,3 +1,10 @@
+<!--
+  LVChat — Discord-style web chat (PHP + SQLite)
+  Copyright (C) LVChat contributors
+  SPDX-License-Identifier: AGPL-3.0-only
+  License: GNU Affero General Public License v3 only — see the LICENSE file.
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,6 +21,7 @@
   <link rel="icon" type="image/png" href="icons/favicon.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="messenger.css" />
+  <link rel="stylesheet" href="voice.css" />
 </head>
 <body class="theme-dark">
 
@@ -261,5 +269,7 @@
   <script src="api.js"></script>
   <script src="web-bridge.js"></script>
   <script src="messenger.js"></script>
+  <script src="vendor/livekit-client.umd.js"></script>
+  <script src="voice.js"></script>
 </body>
 </html>

@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+
+#
+# LVChat — Discord-style web chat (PHP + SQLite)
+# Copyright (C) LVChat contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+# License: GNU Affero General Public License v3 only — see the LICENSE file.
+#
+
 #
 # deploy.sh — run this ON THE SERVER after every upload / fresh install.
 #

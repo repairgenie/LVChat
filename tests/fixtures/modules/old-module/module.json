@@ -1,0 +1,7 @@
+{
+  "id": "old-module",
+  "name": "Old Module",
+  "version": "1.0.0",
+  "description": "Requires a never-released LVChat version.",
+  "requires": { "lvchat": ">=9.9.9" }
+}

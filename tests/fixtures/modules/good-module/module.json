@@ -1,0 +1,24 @@
+{
+  "id": "good-module",
+  "name": "Good Module",
+  "version": "1.0.0",
+  "description": "Test module used by the automated suites.",
+  "author": "LVChat Tests",
+  "license": "MIT",
+  "requires": {
+    "lvchat": ">=1.0.0",
+    "php": ">=8.1"
+  },
+  "order": 1,
+  "admin": [
+    { "id": "good-module-settings", "label": "Good Module Settings", "url": "/admin/good-module", "roles": ["admin"] }
+  ],
+  "settings": {
+    "good_setting": "seed_value"
+  },
+  "assets": {
+    "css": ["css/style.css"],
+    "js": ["js/app.js"]
+  },
+  "license": false
+}

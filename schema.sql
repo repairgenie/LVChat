@@ -660,3 +660,22 @@ CREATE TABLE IF NOT EXISTS member_removals (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_member_removals_target ON member_removals(user_id, guest_id, channel_id, id);
+
+-- Installed modules (schema v35). One row per discovered module directory.
+-- `enabled` is the soft off-switch (Admin → Modules); renaming a directory to
+-- `<id>.disabled` is the hard off-switch and keeps this row (and its license
+-- key) alive. `license*` columns are managed by the licensing layer
+-- (docs/licensing.md); `config` holds private per-module state as JSON.
+CREATE TABLE IF NOT EXISTS modules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  license TEXT NOT NULL DEFAULT '',
+  license_status TEXT NOT NULL DEFAULT '',
+  license_checked_at TEXT,
+  license_expires_at TEXT,
+  config TEXT,
+  installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);

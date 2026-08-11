@@ -1,3 +1,20 @@
+/*
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 const { app, BrowserWindow } = require('electron')
 const fs = require('fs')
 const os = require('os')
@@ -66,11 +83,31 @@ function mockLvchatServer () {
   const csrf = 'test-csrf-token'
   const sessions = new Set()
   const notifications = []
+  const mockState = { voiceEnabled: false, lastVoiceJoin: null }
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     const baseUrl = `http://127.0.0.1:${server.address().port}`
     const cookie = req.headers.cookie || ''
     const hasSession = /session=abc123/.test(cookie)
+
+    // WebRTC module assets (served exactly like the server's /modules route,
+    // straight from the real module so the desktop chat window runs the real
+    // voice client).
+    if (url.pathname.startsWith('/modules/webrtc/assets/')) {
+      const rel = url.pathname.slice('/modules/webrtc/assets/'.length)
+      const file = path.join(__dirname, '..', '..', 'modules', 'webrtc', 'assets', rel)
+      const mime = rel.endsWith('.js') ? 'text/javascript; charset=utf-8' : (rel.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream')
+      fs.readFile(file, (err, data) => {
+        if (err) {
+          res.writeHead(404)
+          res.end('not found')
+          return
+        }
+        res.writeHead(200, { 'content-type': mime })
+        res.end(data)
+      })
+      return
+    }
 
     if (url.pathname === '/api/version') {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -133,12 +170,47 @@ function mockLvchatServer () {
 
     if (url.pathname === '/app') {
       if (hasSession) {
+        // Mimic the server's chat page + module head injection (docs/modules.md):
+        // the module assets load in the desktop chat window, and voice.js boots
+        // against this shell (body.chat-app + the header action container).
         res.writeHead(200, { 'content-type': 'text/html' })
-        res.end('<title>app</title><h1>logged in</h1><div id="notif-list"></div>')
+        res.end(
+          '<!DOCTYPE html><html><head><title>app</title>' +
+          '<link rel="stylesheet" href="' + baseUrl + '/modules/webrtc/assets/css/voice.css">' +
+          '<script src="' + baseUrl + '/modules/webrtc/assets/vendor/livekit-client.umd.js"></script>' +
+          '<script src="' + baseUrl + '/modules/webrtc/assets/js/voice.js"></script>' +
+          '</head>' +
+          '<body class="chat-app" data-csrf="' + csrf + '" data-channel="general" data-dm="" data-my-guest="0">' +
+          '<header><div class="relative ml-auto flex items-center gap-2"></div></header>' +
+          '<h1>logged in</h1><div id="notif-list"></div></body></html>'
+        )
         return
       }
       res.writeHead(302, { location: '/login?next=' + encodeURIComponent('/app?channel=general') })
       res.end()
+      return
+    }
+
+    if (url.pathname === '/api/webrtc/voice/status') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        ok: true, enabled: !!mockState.voiceEnabled, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000,
+        channels: [{ slug: 'general', name: '#general', voice_enabled: !!mockState.voiceEnabled }],
+        session: null,
+        calls: { incoming: [], outgoing: [], active: null }
+      }))
+      return
+    }
+
+    if (url.pathname === '/api/webrtc/voice/join' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const params = new URLSearchParams(body)
+        mockState.lastVoiceJoin = { channel: params.get('channel') || '' }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, url: 'ws://127.0.0.1:1/', token: 'a.b.c', room: 'chan:' + (params.get('channel') || ''), talker_cap: 8, bitrate: 40000 }))
+      })
       return
     }
 
@@ -148,7 +220,8 @@ function mockLvchatServer () {
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve({
       server,
-      addNotification: (n) => notifications.push(n)
+      addNotification: (n) => notifications.push(n),
+      mockState
     }))
   })
 }
@@ -222,6 +295,32 @@ async function main () {
   check('connection uses a stable per-profile partition',
     record && record.partition === 'persist:lvchat-profile-' + add.profile.id,
     record ? record.partition : 'no record')
+
+  // ── WebRTC voice: /app injects the module assets and the voice client is
+  // server-gated — hidden while the module reports disabled, join button once
+  // enabled, and clicking it posts the channel to /api/webrtc/voice/join.
+  const voiceWin = () => (chatWindows.get(conn.id) && !chatWindows.get(conn.id).win.isDestroyed() ? chatWindows.get(conn.id).win : null)
+  await waitFor(() => { const w = voiceWin(); return !!w && w.webContents.getURL().includes('/app') })
+  const waitVoice = async (expr) => {
+    const start = Date.now()
+    for (;;) {
+      let v
+      try { v = await js(voiceWin(), expr) } catch (err) { v = false }
+      if (v && !(typeof v === 'object' && v.__timeout)) return v
+      if (Date.now() - start > 20000) return false
+      await new Promise((r) => setTimeout(r, 120))
+    }
+  }
+  lvchat.mockState.voiceEnabled = false
+  check('voice button hidden while the module is disabled',
+    await waitVoice(`(() => { const b = document.getElementById('lvcvoice-btn'); return (!b || b.hidden) ? 'ok' : 'visible' })()`))
+  lvchat.mockState.voiceEnabled = true
+  check('voice button appears when the module is enabled',
+    await waitVoice(`(() => { const b = document.getElementById('lvcvoice-btn'); return !!b && !b.hidden && b.textContent === 'Voice' && 'ok' })()`))
+  await js(voiceWin(), `document.getElementById('lvcvoice-btn').click()`)
+  await waitFor(() => lvchat.mockState.lastVoiceJoin !== null)
+  check('voice join posted the channel', lvchat.mockState.lastVoiceJoin && lvchat.mockState.lastVoiceJoin.channel === 'general', JSON.stringify(lvchat.mockState.lastVoiceJoin))
+  lvchat.mockState.voiceEnabled = false
 
   const connAgain = await js(win, `window.lvchat.connectProfile({ id: '${add.profile.id}' })`)
   check('reconnecting reuses the existing window', connAgain.ok && connAgain.reused === true && chatWindows.size === 1, JSON.stringify(connAgain))

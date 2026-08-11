@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
+
 declare(strict_types=1);
 
 /**
@@ -17,11 +36,11 @@ foreach ([$DB, $DB . '-wal', $DB . '-shm'] as $f) {
 }
 
 $server = proc_open(
-    ['php', '-S', "127.0.0.1:$PORT", '-t', __DIR__ . '/../public'],
+    ['php', '-S', "127.0.0.1:$PORT", '-t', __DIR__ . '/../public', __DIR__ . '/../public/router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/http-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/http-test-server.log', 'a']],
     $pipes,
     dirname(__DIR__),
-    array_merge($_ENV, ['CHAT_DB' => $DB, 'LVC_EMBED_ALLOW_LOCAL' => '1'])
+    array_merge($_ENV, ['CHAT_DB' => $DB, 'CHAT_MODULES' => __DIR__ . '/fixtures/modules', 'LVC_EMBED_ALLOW_LOCAL' => '1'])
 );
 sleep(1);
 
@@ -536,7 +555,7 @@ check('no groups after delete', count(jsonDecode($b)['groups'] ?? []) === 0, $b)
 
 // ── Admin actions ────────────────────────────────────────────────────────────
 echo "== admin ==\n";
-foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks', '/admin/support'] as $p) {
+foreach (['/admin', '/admin/analytics', '/admin/users', '/admin/channels', '/admin/bans', '/admin/spamfilters', '/admin/motd', '/admin/sounds', '/admin/logs', '/admin/settings', '/admin/webhooks', '/admin/support', '/admin/modules'] as $p) {
     [$s] = req('GET', $p, [], $cjA);
     check("GET $p 200", $s === 200, (string) $s);
 }
@@ -581,6 +600,58 @@ $j = jsonDecode($b);
 check('webhook POST posts a message', $s === 200 && ($j['ok'] ?? false) === true, "$s $b");
 [$s] = req('POST', '/api/webhooks/' . str_repeat('0', 48), ['content' => 'x']);
 check('webhook unknown token 404', $s === 404, (string) $s);
+
+// ── Modules system (fixture modules in tests/fixtures/modules) ───────────────
+echo "== modules ==\n";
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('admin modules page 200', $s === 200, (string) $s);
+check('modules page lists good-module', str_contains($b, 'Good Module') && str_contains($b, 'good-module'), '');
+[$s, , $b] = req('GET', '/admin', [], $cjA);
+check('module admin nav entry renders', str_contains($b, 'Good Module Settings'), '');
+[$s, , $b] = req('GET', '/api/good-module/ping');
+$j = jsonDecode($b);
+check('module route registered', $s === 200 && ($j['ok'] ?? false) === true && ($j['module'] ?? '') === 'good-module', "$s $b");
+[$s, $h, $b] = req('GET', '/modules/good-module/assets/css/style.css');
+check('module css served', $s === 200 && str_contains($b, 'body') && str_contains($h['content-type'] ?? '', 'text/css'), "$s $b");
+[$s, $h, $b] = req('GET', '/modules/good-module/assets/js/app.js');
+check('module js served', $s === 200 && str_contains($b, 'good-module assets loaded') && str_contains($h['content-type'] ?? '', 'javascript'), "$s");
+[$s] = req('GET', '/modules/good-module/assets/css/missing.css');
+check('missing module asset 404', $s === 404, (string) $s);
+[$s] = req('GET', '/modules/good-module/assets/%2e%2e/module.json');
+check('module asset traversal blocked', $s === 404, (string) $s);
+[$s] = req('GET', '/modules/nope/assets/x.css');
+check('unknown module asset 404', $s === 404, (string) $s);
+[$s] = req('GET', '/modules/disabled-mod/assets/x.css');
+check('.disabled module asset 404', $s === 404, (string) $s);
+[$s, , $b] = req('GET', '/api/good-module/ping');
+check('module route public (no auth needed)', $s === 200, (string) $s);
+[$s] = req('GET', '/admin/modules', [], $cjB);
+check('non-admin denied modules page', $s === 403, (string) $s);
+
+// Enable/disable toggle (soft off in the modules table; takes effect next boot).
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_toggle', 'id' => 'good-module', 'back' => '/admin/modules'], $cjA);
+check('module_toggle action 302', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('modules page shows disabled after toggle', str_contains($b, '>disabled<'), $b);
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_toggle', 'id' => 'good-module', 'back' => '/admin/modules'], $cjA);
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('modules page shows running after re-enable', str_contains($b, '>running<'), '');
+
+// License key save/clear (raw key stored; validation is the licensing layer's job).
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'good-module', 'license' => 'LVC-TESTKEY-1234', 'back' => '/admin/modules'], $cjA);
+check('module_save license 302', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('modules page shows saved license', str_contains($b, 'LVC-TESTKEY-1234'), '');
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'good-module', 'license' => '', 'back' => '/admin/modules'], $cjA);
+check('module_save clears license', $s === 302, (string) $s);
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'ghost-module', 'license' => 'x', 'back' => '/admin/modules'], $cjA);
+check('module_save rejects unknown module', $s === 302, (string) $s);
+
 
 // Staff-created support tickets (user + email) and assignment.
 $tA = csrf(req('GET', '/admin/support', [], $cjA)[2]);
@@ -1132,6 +1203,46 @@ check('embed follows redirects server-side', $s === 200 && str_contains($b, '<h1
 // Non-HTML payloads pass through untouched.
 [$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/img.png"), [], $cjA);
 check('embed passes non-HTML payloads through', $s === 200 && str_starts_with($h['content-type'] ?? '', 'image/png'), ($h['content-type'] ?? ''));
+// Heavy JS sites crash in the opaque-origin sandbox (history/localStorage/cookie
+// access throws), so the injected bootstrap shims them. The lvc-resilience
+// marker + the shim identifiers must be present in every served page.
+[$s, , $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/framed"), [], $cjA);
+check('embed injects opaque-origin resilience shims', $s === 200 && str_contains($b, 'lvc-resilience') && str_contains($b, 'history.pushState') && str_contains($b, '"localStorage"') && str_contains($b, '"cookie"'), '');
+// Stylesheets and inline <style> url() refs are rerouted through the resource
+// proxy so fonts/backgrounds survive the origin-'null' CORS gate. Non-style
+// <link>s (preload) are left alone.
+[$s, $h, $b] = req('GET', '/api/embed?url=' . rawurlencode("$emb/styled"), [], $cjA);
+check('embed proxies stylesheet links + inline style urls', $s === 200
+    && str_contains($b, 'href="/api/embed/res?url=http%3A%2F%2F127.0.0.1%3A8097%2Fapp.css"')
+    && str_contains($b, 'src:url(/api/embed/res?url=http%3A%2F%2F127.0.0.1%3A8097%2Ffont.woff2)')
+    && str_contains($b, 'rel="preload" as="style" href="/app.css"')
+    && !str_contains($b, 'rel="preload" as="style" href="/api/embed/res'), "$s");
+
+// ── Channel-URL resource proxy (/api/embed/res) ──────────────────────────────
+echo "== embed resource proxy ==\n";
+[$s] = req('GET', '/api/embed/res?url=' . rawurlencode("$emb/font.woff2"));
+check('embed res requires a session', $s === 403, (string) $s);
+[$s, $h, $b] = req('GET', '/api/embed/res?url=' . rawurlencode('not-a-url'), [], $cjA);
+check('embed res rejects non-http(s) URLs', $s === 400, "$s $b");
+[$s, $h, $b] = req('GET', '/api/embed/res?url=' . rawurlencode('https://10.0.0.5/x'), [], $cjA);
+check('embed res rejects private addresses (SSRF guard)', $s === 403, "$s $b");
+// CSS is served with ACAO * and nested url()/@import refs are proxied too.
+[$s, $h, $b] = req('GET', '/api/embed/res?url=' . rawurlencode("$emb/app.css"), [], $cjA);
+check('embed res serves rewritten CSS with ACAO *', $s === 200
+    && ($h['access-control-allow-origin'] ?? '') === '*'
+    && str_starts_with($h['content-type'] ?? '', 'text/css')
+    && str_contains($b, 'url(/api/embed/res?url=http%3A%2F%2F127.0.0.1%3A8097%2Ffont.woff2)')
+    && str_contains($b, 'url(/api/embed/res?url=http%3A%2F%2F127.0.0.1%3A8097%2Fimg.png)')
+    && str_contains($b, '@import "/api/embed/res?url=http%3A%2F%2F127.0.0.1%3A8097%2Fdep.css"')
+    && str_contains($b, 'url(/api/embed/res?url=http%3A%2F%2Fcdn.example.test%2Flogo.png)')
+    && str_contains($b, 'url(data:image/png;base64,AAAA)'), "$s");
+// Non-CSS resources pass through byte-for-byte with ACAO * (overrides the
+// target's own restrictive CORS header, since the embed origin is 'null').
+[$s, $h, $b] = req('GET', '/api/embed/res?url=' . rawurlencode("$emb/font.woff2"), [], $cjA);
+check('embed res passes fonts through with ACAO *', $s === 200
+    && $b === 'wOF2'
+    && ($h['access-control-allow-origin'] ?? '') === '*'
+    && str_starts_with($h['content-type'] ?? '', 'font/woff2'), "$s " . ($h['content-type'] ?? ''));
 
 // ── Web-messenger token auth (login without relying on cookies/CSRF) ─────────
 echo "== messenger token auth ==\n";
@@ -1679,6 +1790,205 @@ $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
 req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'updater_enabled' => '0', 'updater_url' => '', 'back' => '/admin/settings'], $cjA);
 @unlink($updCache);
 if (is_resource($updSrv)) proc_terminate($updSrv);
+
+// ── WebRTC Voice module ─────────────────────────────────────────────────────
+echo "== webrtc voice module ==\n";
+
+// The webrtc module is a fixture symlink (tests/fixtures/modules/webrtc -> the
+// real module) so these tests exercise the shipped code. It defaults to off.
+$tV = csrf(req('GET', '/app', [], $cjA)[2]);
+$tW = csrf(req('GET', '/app', [], $cjB)[2]);
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjA);
+$j = jsonDecode($b);
+check('voice status before config: disabled', $s === 200 && $j['ok'] === true && $j['enabled'] === false, $b);
+check('voice status lists general (member) with voice off', $s === 200 && is_array($j['channels'] ?? null), $b);
+
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tV, 'channel' => 'general'], $cjA);
+check('voice join refused while module disabled', $s === 403, "$s $b");
+[$s] = req('POST', '/api/webrtc/voice/join', ['channel' => 'general']);
+check('voice join requires auth', $s === 401, (string) $s);
+
+// Non-op (bob) cannot enable voice on a channel.
+[$s, , $b] = req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tW, 'channel' => 'general', 'enabled' => '1'], $cjB);
+check('channel-voice toggle denied for non-op', $s === 403, "$s $b");
+
+// Admin enables + configures the module through its own admin page.
+[$s, $h, $b] = req('POST', '/admin/voice/save', [
+    'csrf' => $tV, 'voice_enabled' => '1',
+    'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey', 'livekit_api_secret' => 'topsecret',
+    'voice_max_users' => '2', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000',
+], $cjA);
+check('admin voice save redirects', $s === 302 && str_contains($h['location'] ?? '', '/admin/voice'), "$s " . ($h['location'] ?? ''));
+check('voice_enabled persisted', dbq("SELECT value FROM server_config WHERE key='voice_enabled'")[0]['value'] === '1');
+check('secret persisted', dbq("SELECT value FROM server_config WHERE key='livekit_api_secret'")[0]['value'] === 'topsecret');
+[$s, , $b] = req('GET', '/admin/voice', [], $cjA);
+check('admin voice page renders', $s === 200 && str_contains($b, 'Voice — LiveKit'), (string) $s);
+check('admin voice secret marked stored, never echoed', str_contains($b, 'stored') && !str_contains($b, 'topsecret'), '');
+check('module admin nav entry present', str_contains($b, '/admin/voice'), '');
+
+// Module assets are served with correct MIME types.
+[$s, , $b] = req('GET', '/modules/webrtc/assets/js/voice.js', [], $cjA);
+check('module js asset served', $s === 200 && str_contains($b, 'LVCVoice'), "$s " . substr($b, 0, 40));
+[$s, , $b] = req('GET', '/modules/webrtc/assets/vendor/livekit-client.umd.js', [], $cjA);
+check('module vendor asset served (livekit UMD)', $s === 200 && str_contains($b, 'LivekitClient'), "$s " . substr($b, 0, 40));
+[$s, , $b] = req('GET', '/modules/webrtc/assets/css/voice.css', [], $cjA);
+check('module css asset served', $s === 200 && str_contains($b, 'lvcvoice'), (string) $s);
+
+// Chat app head injects module assets (docs/modules.md manifest `assets`).
+[$s, , $b] = req('GET', '/app', [], $cjA);
+check('/app injects module vendor script', $s === 200 && str_contains($b, '/modules/webrtc/assets/vendor/livekit-client.umd.js'), (string) $s);
+check('/app injects module voice script after vendor', $s === 200
+    && strpos($b, 'vendor/livekit-client.umd.js') < strpos($b, 'js/voice.js'), '');
+
+// Enabled status + join flow.
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjA);
+$j = jsonDecode($b);
+check('voice status after config: enabled', $s === 200 && $j['enabled'] === true && $j['max'] === 2, $b);
+
+[$s, , $b] = req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tV, 'channel' => 'general', 'enabled' => '1'], $cjA);
+check('admin enables voice on #general', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('channels.voice_enabled persisted', dbq("SELECT voice_enabled FROM channels WHERE slug = 'general'")[0]['voice_enabled'] === 1);
+
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tV, 'channel' => 'general'], $cjA);
+$j = jsonDecode($b);
+check('alice joins voice on general', $s === 200 && $j['ok'] === true, "$s $b");
+check('join returns room chan:general', ($j['room'] ?? '') === 'chan:general', $b);
+check('join returns talker cap + bitrate', (int) ($j['talker_cap'] ?? 0) === 8 && (int) ($j['bitrate'] ?? 0) === 40000, $b);
+$tok = (string) ($j['token'] ?? '');
+check('join mints a 3-segment JWT', substr_count($tok, '.') === 2, $tok);
+$dec = [];
+if (substr_count($tok, '.') === 2) {
+    $dec = json_decode(base64_decode(str_replace('_', '/', str_replace('-', '+', explode('.', $tok)[1])), true), true) ?: [];
+}
+check('JWT carries livekit grant + room', ($dec['iss'] ?? '') === 'devkey' && ($dec['video']['room'] ?? '') === 'chan:general' && !empty($dec['video']['maxParticipants']), json_encode($dec));
+check('alice has a voice session row', (int) dbq('SELECT COUNT(*) AS n FROM voice_sessions')[0]['n'] === 1);
+
+// Cap enforcement (join gate): lower the cap and have bob hit it.
+req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '1', 'voice_max_users' => '1', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+[$s, $h, $b] = req('POST', '/api/join', ['csrf' => $tW, 'name' => '#general'], $cjB);
+check('bob joins general', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW, 'channel' => 'general'], $cjB);
+$j = jsonDecode($b);
+check('bob voice join rejected at cap (409 full)', $s === 409 && str_contains($j['error'] ?? '', 'full'), "$s $b");
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjA);
+check('voice status shows full at cap', jsonDecode($b)['full'] === true, $b);
+
+// Leave clears the session (and frees the cap).
+[$s, , $b] = req('POST', '/api/webrtc/voice/leave', ['csrf' => $tV], $cjA);
+check('alice leaves voice', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('voice_sessions empty after leave', (int) dbq('SELECT COUNT(*) AS n FROM voice_sessions')[0]['n'] === 0);
+
+// One-on-one call flow: alice -> bob.
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tV, 'user' => 'bob'], $cjA);
+$j = jsonDecode($b);
+check('alice initiates call to bob', $s === 200 && $j['ok'] === true && ($j['peer'] ?? '') === 'bob', "$s $b");
+$callId = (int) ($j['call_id'] ?? 0);
+$room = (string) ($j['room'] ?? '');
+check('call row created ringing', dbq('SELECT status FROM call_sessions WHERE id = ?', [$callId])[0]['status'] === 'ringing');
+
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjB);
+$j = jsonDecode($b);
+$inc = $j['calls']['incoming'] ?? [];
+check('bob sees the incoming call', count($inc) === 1 && ($inc[0]['peer'] ?? '') === 'alice' && ($inc[0]['call_id'] ?? 0) === $callId, json_encode($inc));
+
+[$s, , $b] = req('POST', '/api/webrtc/call/accept', ['csrf' => $tW, 'call_id' => (string) $callId], $cjB);
+$j = jsonDecode($b);
+check('bob accepts and gets a join payload', $s === 200 && $j['ok'] === true && ($j['peer'] ?? '') === 'alice' && ($j['room'] ?? '') === $room && substr_count((string) ($j['token'] ?? ''), '.') === 2, "$s $b");
+check('call is active after accept', dbq('SELECT status FROM call_sessions WHERE id = ?', [$callId])[0]['status'] === 'active');
+
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjA);
+$j = jsonDecode($b);
+check('alice sees the active call', $j['calls']['active'] !== null && ($j['calls']['active']['call_id'] ?? 0) === $callId, json_encode($j['calls']));
+[$s, , $b] = req('POST', '/api/webrtc/call/join', ['csrf' => $tV, 'call_id' => (string) $callId], $cjA);
+$j = jsonDecode($b);
+check('alice joins the active call (token minted)', $s === 200 && $j['ok'] === true && ($j['room'] ?? '') === $room, "$s $b");
+
+[$s, , $b] = req('POST', '/api/webrtc/call/end', ['csrf' => $tW, 'call_id' => (string) $callId], $cjB);
+check('bob ends the call', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('call ended in db', dbq('SELECT status FROM call_sessions WHERE id = ?', [$callId])[0]['status'] === 'ended');
+check('call voice sessions cleared', (int) dbq('SELECT COUNT(*) AS n FROM voice_sessions')[0]['n'] === 0);
+
+// Decline + validation paths.
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tV, 'user' => 'bob'], $cjA);
+$callId2 = (int) (jsonDecode($b)['call_id'] ?? 0);
+[$s, , $b] = req('POST', '/api/webrtc/call/decline', ['csrf' => $tW, 'call_id' => (string) $callId2], $cjB);
+check('bob declines the call', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('declined call recorded', dbq('SELECT status FROM call_sessions WHERE id = ?', [$callId2])[0]['status'] === 'declined');
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tV, 'user' => 'alice'], $cjA);
+check('calling yourself rejected', $s === 400, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tV, 'user' => 'nobody-here'], $cjA);
+check('calling unknown user rejected', $s === 404, "$s $b");
+[$s] = req('POST', '/api/webrtc/call/initiate', ['user' => 'bob']);
+check('call initiate requires auth', $s === 401, (string) $s);
+
+// Meeting rooms (#mtg-XXXXXX): private, invite-only, keyed, voice-enabled,
+// hidden from the public channel list, and offline invitees are not added.
+[$s, , $b] = req('POST', '/api/webrtc/mtg/create', ['csrf' => $tV], $cjA);
+$j = jsonDecode($b);
+check('alice creates a meeting room', $s === 200 && $j['ok'] === true && preg_match('/^#mtg-\d{6}$/', $j['name'] ?? '') === 1, "$s $b");
+$mtgSlug = (string) ($j['slug'] ?? '');
+$mtgKey = (string) ($j['key'] ?? '');
+$mtgUrl = (string) ($j['url'] ?? '');
+check('meeting url bakes the key in', str_contains($mtgUrl, '/mtg/' . $mtgSlug . '?key=') && $mtgKey !== '', $mtgUrl);
+check('meeting channel is private + invite-only + voice', dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['visibility'] === 'private'
+    && dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['invite_only'] === 1
+    && dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['voice_enabled'] === 1
+    && !empty(dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['key_hash']));
+[$s, , $b] = req('GET', '/api/browse', [], $cjB);
+$j = jsonDecode($b);
+$pubSlugs = array_column($j['channels'] ?? [], 'slug');
+check('meeting channel hidden from the public list (non-member browse)', $s === 200 && !in_array($mtgSlug, $pubSlugs, true), $b);
+[$s, , $b] = req('GET', '/api/browse', [], $cjA);
+$j = jsonDecode($b);
+$mySlugs = array_column($j['myChannels'] ?? [], 'slug');
+check('creator sees the meeting in their own sidebar', $s === 200 && in_array($mtgSlug, $mySlugs, true), (string) $s);
+
+// Register carol (never signs in → offline). Fresh jar so a stale session from
+// an earlier run can never collide with the fresh DB.
+$cjC = '/tmp/opencode/httptest-c.txt';
+@unlink($cjC);
+$tC = csrf(req('GET', '/register', [], $cjC)[2]);
+[$s] = req('POST', '/register', ['csrf' => $tC, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjC);
+check('register carol', $s === 302, (string) $s);
+// Registration auto-logs-in (last_seen set); force carol offline so the invite
+// rule "offline users cannot be added" is actually exercised.
+dbq("UPDATE users SET last_seen = NULL WHERE username = 'carol'");
+
+// Invite: bob is online → added immediately; carol is offline → not added; ghost is unknown.
+[$s, , $b] = req('POST', '/api/webrtc/mtg/invite', ['csrf' => $tV, 'channel' => $mtgSlug, 'users' => 'bob, carol, ghost'], $cjA);
+$j = jsonDecode($b);
+check('meeting invite returns added/offline/unknown', $s === 200 && $j['ok'] === true && in_array('bob', $j['added'] ?? [], true) && in_array('carol', $j['offline'] ?? [], true) && in_array('ghost', $j['unknown'] ?? [], true), "$s $b");
+check('online invitee added immediately (no accept)', (int) dbq('SELECT COUNT(*) AS n FROM channel_members cm JOIN channels c ON c.id = cm.channel_id WHERE c.slug = ? AND cm.user_id = ?', [$mtgSlug, dbq("SELECT id FROM users WHERE username='bob'")[0]['id']])[0]['n'] === 1);
+check('offline invitee not added', (int) dbq('SELECT COUNT(*) AS n FROM channel_members cm JOIN channels c ON c.id = cm.channel_id WHERE c.slug = ? AND cm.user_id = ?', [$mtgSlug, dbq("SELECT id FROM users WHERE username='carol'")[0]['id']])[0]['n'] === 0);
+[$s, , $b] = req('POST', '/api/webrtc/mtg/invite', ['csrf' => $tW, 'channel' => $mtgSlug, 'users' => 'bob'], $cjB);
+check('non-manager cannot invite to a meeting', $s === 403, "$s $b");
+
+// Invited member opens the invite link → straight into the channel.
+[$s, $h] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey, [], $cjB);
+check('invited member auto-joins via link', $s === 302 && str_contains($h['location'] ?? '', '/app?channel=' . $mtgSlug), "$s " . ($h['location'] ?? ''));
+
+// Logged-out visitor is bounced to login preserving the key.
+[$s, $h] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey);
+check('logged-out meeting link → /login?next= (key preserved)', $s === 302 && str_contains($h['location'] ?? '', '/login?next=') && str_contains(rawurldecode($h['location'] ?? ''), 'key=' . $mtgKey), "$s " . ($h['location'] ?? ''));
+
+// Carol signs in, then tries the link: key is valid but she was never invited → denied.
+$tC2 = csrf(req('GET', '/login', [], $cjC)[2]);
+[$s, $h] = req('POST', '/login', ['csrf' => $tC2, 'username' => 'carol', 'password' => 'password123', 'next' => '/app'], $cjC);
+check('carol logs in', $s === 302, (string) $s);
+[$s, , $b] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey, [], $cjC);
+check('uninvited key holder is denied', $s === 200 && str_contains($b, 'invite-only'), "$s " . substr($b, 0, 80));
+[$s, , $b] = req('GET', '/mtg/' . $mtgSlug, [], $cjC);
+check('missing key is denied with key message', $s === 200 && str_contains($b, 'key from the invite link'), (string) $s);
+
+// A meeting the user is invited to joins straight away (alice invites carol now that she's online).
+[$s, , $b] = req('POST', '/api/webrtc/mtg/invite', ['csrf' => $tV, 'channel' => $mtgSlug, 'users' => 'carol'], $cjA);
+check('online carol is now added', in_array('carol', jsonDecode($b)['added'] ?? [], true), $b);
+[$s, $h] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey, [], $cjC);
+check('newly invited member joins via link', $s === 302 && str_contains($h['location'] ?? '', '/app?channel=' . $mtgSlug), "$s " . ($h['location'] ?? ''));
+
+// Restore admin config defaults for the rest of the suite.
+req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '0', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tV, 'channel' => 'general', 'enabled' => '0'], $cjA);
 
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);

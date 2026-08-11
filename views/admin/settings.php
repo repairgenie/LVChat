@@ -1,4 +1,23 @@
-<?php $title = 'Settings'; $active = 'settings';
+<?php
+
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+ $title = 'Settings'; $active = 'settings';
 // SMTP fields are genuinely disabled when SMTP is off: they are neither
 // constraint-validated (a hidden port must not block saving) nor submitted,
 // so the stored config survives toggling SMTP off and back on.

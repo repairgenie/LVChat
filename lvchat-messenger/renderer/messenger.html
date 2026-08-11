@@ -1,3 +1,10 @@
+<!--
+  LVChat — Discord-style web chat (PHP + SQLite)
+  Copyright (C) LVChat contributors
+  SPDX-License-Identifier: AGPL-3.0-only
+  License: GNU Affero General Public License v3 only — see the LICENSE file.
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,6 +12,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' https: http: data: blob:; connect-src https: http: ws: wss:" />
   <title>LVChat Messenger</title>
   <link rel="stylesheet" href="messenger.css" />
+  <link rel="stylesheet" href="voice.css" />
 </head>
 <body class="theme-dark">
 
@@ -257,5 +265,7 @@
   <script src="emoji.js"></script>
   <script src="api.js"></script>
   <script src="messenger.js"></script>
+  <script src="vendor/livekit-client.umd.js"></script>
+  <script src="voice.js"></script>
 </body>
 </html>

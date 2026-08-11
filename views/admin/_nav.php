@@ -1,4 +1,23 @@
 <?php
+
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
 // The whole admin dashboard uses the full-width layout (like the chat logs page).
 $fullWidth = true;
 $donateFooter = true;
@@ -33,8 +52,14 @@ function admin_nav(string $active, array $user): void {
     'invites' => ['/admin/invites', 'Invites', $isAdmin],
     'legal' => ['/admin/legal', 'Terms & Privacy', $isAdmin],
     'updates' => ['/admin/updates', 'Updates', $isAdmin],
+    'modules' => ['/admin/modules', 'Modules', $isAdmin],
     'settings' => ['/admin/settings', 'Settings', $isAdmin],
   ];
+  // Modules can add their own admin pages via their manifest `admin` block.
+  foreach (ModuleLoader::adminNav() as $k => $entry) {
+    $visible = $isAdmin || ($isStaff && in_array('staff', $entry['roles'], true));
+    $items[$k] = [$entry['url'], $entry['label'], $visible];
+  }
   echo '<div class="flex flex-wrap gap-1 mb-6 bg-discord-850 border border-discord-700 rounded-lg p-1">';
   foreach ($items as $k => [$href, $label, $visible]) {
     if (!$visible) {

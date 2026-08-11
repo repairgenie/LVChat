@@ -1,4 +1,21 @@
 #!/usr/bin/env node
+/*
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 'use strict'
 
 /* LVChat Messenger Web — static build.
@@ -149,6 +166,9 @@ function build (opts) {
     './emoji.js',
     './web-bridge.js',
     './config.js',
+    './voice.css',
+    './voice.js',
+    './vendor/livekit-client.umd.js',
     './manifest.webmanifest',
     './offline.html',
     './icons/icon-192.png',
@@ -161,7 +181,10 @@ function build (opts) {
     path.join(SRC, 'api.js'),
     path.join(SRC, 'emoji.js'),
     path.join(SRC, 'web-bridge.js'),
-    path.join(SRC, 'sw.template.js')
+    path.join(SRC, 'sw.template.js'),
+    path.join(SRC, 'voice.css'),
+    path.join(SRC, 'voice.js'),
+    path.join(SRC, 'vendor', 'livekit-client.umd.js')
   ])
   const sw = fs.readFileSync(path.join(SRC, 'sw.template.js'), 'utf8')
     .replace(/__CACHE_VERSION__/g, cacheVersion)
@@ -169,9 +192,11 @@ function build (opts) {
   write(path.join(OUT, 'sw.js'), sw)
 
   // Static assets.
-  for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'web-bridge.js', 'offline.html']) {
+  for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'web-bridge.js', 'voice.css', 'voice.js', 'offline.html']) {
     copy(path.join(SRC, f), path.join(OUT, f))
   }
+  fs.mkdirSync(path.join(OUT, 'vendor'), { recursive: true })
+  copy(path.join(SRC, 'vendor', 'livekit-client.umd.js'), path.join(OUT, 'vendor', 'livekit-client.umd.js'))
   fs.mkdirSync(path.join(OUT, 'icons'), { recursive: true })
   for (const f of fs.readdirSync(path.join(SRC, 'icons'))) {
     copy(path.join(SRC, 'icons', f), path.join(OUT, 'icons', f))

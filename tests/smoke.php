@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+
+
 declare(strict_types=1);
 
 // Smoke test: exercises the core flows against a scratch SQLite DB.
@@ -11,6 +30,10 @@ if (file_exists(getenv('CHAT_DB'))) {
     @unlink(getenv('CHAT_DB') . '-wal');
     @unlink(getenv('CHAT_DB') . '-shm');
 }
+
+// Modules load from the fixture directory so the smoke suite can assert the
+// loader behavior deterministically (see the "modules" section at the end).
+putenv('CHAT_MODULES=' . __DIR__ . '/fixtures/modules');
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 
@@ -1490,6 +1513,55 @@ $themeFit = ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight'
 check('theme bg defaults to contain', str_contains($themeFit, 'background-size:contain;') && !str_contains($themeFit, 'background-size:cover;'));
 check('no bg -> no image rules', ThemeService::chatBgCss(ThemeService::render(['preset' => 'midnight'])) === '#messages{}');
 check('manifest colors derive from server theme', str_starts_with(ThemeService::manifestColors()['theme_color'], '#'));
+
+// ── Modules system ──────────────────────────────────────────────────────────
+echo "== modules ==\n";
+check('good-module discovered + booted', ModuleLoader::get('good-module') !== null);
+check('good-module enabled() contains it', in_array('good-module', ModuleLoader::enabled(), true));
+check('good-module command registered', CommandRegistry::get('goodmod') !== null);
+$res = CommandParser::run('/goodmod', ['id' => 1, 'role' => 'user'], null);
+check('good-module command runs', ($res['replies'][0] ?? '') === 'good-module says hi', json_encode($res));
+check('good-module settings seeded', config_get('good_setting') === 'seed_value');
+check('good-module schema table exists', Database::scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='good_module_items'") === 1);
+check('good-module admin nav entry', isset(ModuleLoader::adminNav()['good-module-settings']) && ModuleLoader::adminNav()['good-module-settings']['url'] === '/admin/good-module');
+check('good-module service class loads', class_exists('GoodModuleService'));
+check('.disabled module not loaded', ModuleLoader::get('disabled-mod') === null);
+check('missing-manifest module ignored', ModuleLoader::get('invalid-module') === null);
+check('malformed manifest ignored', ModuleLoader::get('bad-json') === null);
+check('requires mismatch module skipped', ModuleLoader::get('old-module') === null);
+check('old-module init.php not run', CommandRegistry::get('oldcmd') === null);
+check('warnings recorded for bad manifests + requires', count(ModuleLoader::warnings()) >= 3, implode(' | ', ModuleLoader::warnings()));
+$dbRow = Database::row('SELECT enabled FROM modules WHERE id = ?', ['good-module']);
+check('good-module DB row enabled', $dbRow !== null && (int) $dbRow['enabled'] === 1);
+check('.disabled module keeps its DB row', Database::row('SELECT id FROM modules WHERE id = ?', ['disabled-mod']) !== null);
+check('removed module pruned', Database::scalar('SELECT COUNT(*) FROM modules WHERE id = ?', ['ghost-module']) === 0);
+check('isLicensed true for free module', ModuleLoader::isLicensed('good-module') === true);
+$saved = config_get('good_setting', 'missing');
+config_set('good_setting', 'admin_value');
+ModuleLoader::reset();
+ModuleLoader::boot();
+check('re-boot does not overwrite admin-set settings', config_get('good_setting') === 'admin_value');
+ModuleLoader::reset();
+ModuleLoader::boot();
+config_set('good_setting', $saved);
+
+// Empty / missing modules directory is a silent no-op.
+$emptyDir = sys_get_temp_dir() . '/opencode-empty-modules';
+@mkdir($emptyDir);
+file_put_contents($emptyDir . '/.gitkeep', '');
+ModuleLoader::reset();
+putenv('CHAT_MODULES=' . $emptyDir);
+ModuleLoader::boot();
+check('empty modules dir is a silent no-op', ModuleLoader::all() === [] && ModuleLoader::warnings() === [] && ModuleLoader::enabled() === []);
+$missingDir = sys_get_temp_dir() . '/opencode-no-such-modules-dir';
+ModuleLoader::reset();
+putenv('CHAT_MODULES=' . $missingDir);
+ModuleLoader::boot();
+check('missing modules dir is a silent no-op', ModuleLoader::all() === [] && ModuleLoader::warnings() === []);
+ModuleLoader::reset();
+putenv('CHAT_MODULES=' . __DIR__ . '/fixtures/modules');
+ModuleLoader::boot();
+check('restore fixture modules', ModuleLoader::get('good-module') !== null);
 
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

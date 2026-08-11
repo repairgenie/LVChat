@@ -19,7 +19,7 @@ nod to IRC rather than an implementation of it.
 - **Email (SMTP)** — a dependency-free SMTP client configured under **Admin → Settings** (host, port, STARTTLS/SSL, auth, from address) with a one-click **Send test email**; used for invite and welcome emails
 - **Channels** — create, register/deregister (temp channels vanish when empty, founder passes on), public/private/secret, invite-only, keyed, moderated, member limits, topics, ban lists, AKICK, access lists
 - **Channel settings (control panel)** — channel ops, admins, founders, and server admins/opers open a tabbed **⚙ Settings** modal from the channel header (or right-click → **Channel settings**): manage channel bans (add by nick or mask with duration + reason, remove), the registered **ops & half-ops** access list, the channel **topic** (respecting `+t`), and the **Channel URL**. Available in the web app, the desktop app, and both Messenger clients; every action reuses the same permission gates as the `/ban`, `/unban`, `/access`, and `/topic` slash commands
-- **Channel URL** — an operator can give a channel a web page that opens in a **pane above the chat** (the left/right sidebars stay put; the message list takes the bottom half). The pane has a header bar (host, **Open** in a new tab, **Refresh**, collapse ▾ — remembered per channel) and a sandboxed `<iframe>`; only `http://`/`https://` pages are allowed, and the URL updates live for everyone. Set or clear it from the settings modal. Pages load through a **server-side embed proxy** (`GET /api/embed`), so sites that refuse to be framed (`X-Frame-Options` / CSP `frame-ancestors`) or are plain `http://` still render — the proxy fetches the page server-side, strips the frame blocks, injects a `<base>` so relative resources resolve to the target, and reroutes in-pane link clicks back through itself. The proxied document runs in an opaque-origin sandbox (no `allow-same-origin`), so embedded scripts can never touch the chat app. Access is limited to signed-in sessions and guarded against SSRF (no loopback/private/link-local targets) and the **Blocked URLs** list. On **mobile the pane defaults to collapsed** (less screen space) and the page isn't fetched until you expand it; desktop defaults to expanded.
+- **Channel URL** — an operator can give a channel a web page that opens in a **pane above the chat** (the left/right sidebars stay put; the message list takes the bottom half). The pane has a header bar (host, **Open** in a new tab, **Refresh**, collapse ▾ — remembered per channel) and a sandboxed `<iframe>`; only `http://`/`https://` pages are allowed, and the URL updates live for everyone. Set or clear it from the settings modal. Pages load through a **server-side embed proxy** (`GET /api/embed`), so sites that refuse to be framed (`X-Frame-Options` / CSP `frame-ancestors`) or are plain `http://` still render — the proxy fetches the page server-side, strips the frame blocks, injects a `<base>` so relative resources resolve to the target, and reroutes in-pane link clicks back through itself. The proxied document runs in an opaque-origin sandbox (no `allow-same-origin`), so embedded scripts can never touch the chat app. To keep that sandbox from crashing heavy JS sites (Next.js-style SPAs, consent managers), the proxy injects **resilience shims** that tolerate the opaque-origin `history`/`localStorage`/`cookie` restrictions, and re-serves the page's stylesheets and fonts through a **resource proxy** (`GET /api/embed/res`, served with `Access-Control-Allow-Origin: *`), so `@font-face` and CSS `url()` loads that would be CORS-blocked from origin `null` still render. Access is limited to signed-in sessions and guarded against SSRF (no loopback/private/link-local targets) and the **Blocked URLs** list. On **mobile the pane defaults to collapsed** (less screen space) and the page isn't fetched until you expand it; desktop defaults to expanded.
 - **Admin → Blocked URLs** — a global list of domains (exact host or any subdomain) that may never be used as a Channel URL. Enforced at set time (rejected with the reason) **and** at render time (a URL whose domain gets banned later simply stops showing until the ban is lifted)
 - **Friends** — registered users send/accept/decline friend requests, remove friends, block/unblock users; the right sidebar shows a Friends panel with online/offline grouping, pending requests with accept/decline buttons, and a request count badge; friend requests and acceptances appear in the notification bell; `/ignore` and `/unignore` now delegate to the friend block system
 - **Admin tools** — see every user's IP, ban by nick or IP/CIDR with duration and reason (kline/gline/zline/shun), manage the bad-word filter (censor to `****` or block the whole message with a ChanServ notice) via **Admin → Bad words**, per-channel `+C` flag, and a clickable mode bar with tooltips above each channel
@@ -505,7 +505,7 @@ Runs **1090 automated assertions** in three layers:
   (sqline/cqline), `/sanick` gating + availability, the `#oper-log` mirror, the
   channel-URL validator and banned-domain list (exact + subdomain), and the
   ChannelService URL/`canManageChannel` helpers.
-- **`tests/http_test.php`** (480) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (487) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
@@ -517,7 +517,10 @@ Runs **1090 automated assertions** in three layers:
   room-browser API (`/api/browse`), the **kick** flow (target's poll returns a
   one-shot redirect carrying the kick reason + actor), the **channel-URL
   embed proxy** (`/api/embed`: framing-header stripping, injected `<base>`,
-  redirects, non-HTML passthrough, plus auth/banned-domain/SSRF guards), and the
+  redirects, non-HTML passthrough, opaque-origin resilience shims, stylesheet
+  rewrite, plus auth/banned-domain/SSRF guards) and its **resource proxy**
+  (`/api/embed/res`: CSS `url()`/`@import` rewriting, `Access-Control-Allow-Origin: *`
+  re-serving of fonts/styles, same guards), and the
   web-messenger **bearer-token auth** (login/mfa/logout, header-authenticated
   `/api/me` + POSTs without cookies, token revocation, single-use MFA tickets,
   and the CORS preflight allowing the custom headers).
@@ -680,3 +683,13 @@ verifies the service worker, manifest MIME type, and icons after every upload.
 - Operators authenticate with per-user **o:lines** (IRC-style operator lines, **Admin → O-lines**) against an
   operator class (netadmin, serveradmin, globalop, localop, or custom) — there is no
   shared operator password; `/oper` only works for the nick the o:line is tied to
+
+## License
+
+LVChat is free software released under the **GNU Affero General Public License,
+version 3 only** (SPDX `AGPL-3.0-only`) — see `LICENSE`. Modules shipped in this
+repository (e.g. `modules/webrtc`) are AGPL-3.0-only like the core; modules
+distributed separately may carry their own license. Bundled third-party code
+keeps its own license (see `THIRD_PARTY_NOTICES.md`). Contributions are accepted
+under the Developer Certificate of Origin — see `CONTRIBUTING.md` and
+`docs/licensing.md`.

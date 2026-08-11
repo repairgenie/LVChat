@@ -1,4 +1,23 @@
-<?php $pageTitle = 'Status'; ?>
+<?php
+
+/**
+ * LVChat — Discord-style web chat (PHP + SQLite)
+ *
+ * Copyright (C) LVChat contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+ $pageTitle = 'Status'; ?>
 <div class="card">
   <h2>Update feed</h2>
   <p class="muted">This server publishes the current versions of the LVChat apps and where each one can be downloaded. Community server admins point their <code>updater_url</code> here (or at their own mirror) to resolve versions and download links for their installs.</p>
