@@ -44,6 +44,9 @@
   // Self-hosted MediaPipe selfie-segmentation, lazy-loaded (see vendor/).
   var BG_BASE = '/modules/webrtc/assets/vendor/selfie-segmentation/';
 
+  var ICON_CALL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
+  var ICON_HANGUP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(135deg)"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
+
   var state = {
     enabled: false,
     active: 0,
@@ -1049,45 +1052,87 @@
 
   /* ── DOM ────────────────────────────────────────────────────────────── */
   function ensureEls() {
-    if (els.btn) return;
+    if (els.dropdown) return;
     var header = document.querySelector('header .relative.ml-auto.flex.items-center.gap-2');
     if (!header) return;
 
-    els.btn = makeButton('lvcvoice-btn', 'btn-ghost text-xs hidden md:flex', onMainClick);
-    header.appendChild(els.btn);
+    var dd = document.createElement('div');
+    dd.id = 'lvcvoice-dropdown';
+    dd.className = 'lvcvoice-dropdown hidden md:block';
 
-    els.settingsBtn = makeButton('lvcvoice-settings-btn', 'btn-ghost text-xs hidden md:flex', openSettings);
-    els.settingsBtn.textContent = '⚙ Settings';
-    els.settingsBtn.title = 'Voice & video settings';
-    header.appendChild(els.settingsBtn);
+    var trigger = document.createElement('button');
+    trigger.id = 'lvcvoice-dd-trigger';
+    trigger.type = 'button';
+    trigger.className = 'btn-ghost text-xs lvcvoice-dd-trigger';
+    trigger.innerHTML = '<span class="lvcvoice-dd-dot"></span><span class="lvcvoice-dd-icon">' + ICON_CALL + '</span><span class="lvcvoice-dd-arrow">▾</span>';
+    trigger.addEventListener('click', toggleDropdown);
+    dd.appendChild(trigger);
 
-    els.mtgBtn = makeButton('lvcvoice-mtg-btn', 'btn-ghost text-xs hidden md:flex', function () {
-      openMeetingModal();
+    var menu = document.createElement('div');
+    menu.id = 'lvcvoice-dd-menu';
+    menu.className = 'lvcvoice-dd-menu hidden';
+
+    els.ddCallItem = document.createElement('button');
+    els.ddCallItem.type = 'button';
+    els.ddCallItem.className = 'lvcvoice-dd-item';
+    els.ddCallItem.innerHTML = '<span class="lvcvoice-dd-item-icon" style="color:#22c55e">' + ICON_CALL + '</span><span class="lvcvoice-dd-item-label">Call</span>';
+    els.ddCallItem.addEventListener('click', function () {
+      closeDropdown();
+      if (state.calls.active || state.calls.outgoing[0]) { endCall(); return; }
+      if (state.inVoice) { leaveVoice(); return; }
+      onMainClick();
     });
-    els.mtgBtn.textContent = 'Meeting';
-    header.appendChild(els.mtgBtn);
+    menu.appendChild(els.ddCallItem);
+
+    els.ddMtgItem = document.createElement('button');
+    els.ddMtgItem.type = 'button';
+    els.ddMtgItem.className = 'lvcvoice-dd-item';
+    els.ddMtgItem.innerHTML = '<span class="lvcvoice-dd-item-icon">📹</span><span class="lvcvoice-dd-item-label">Meeting</span>';
+    els.ddMtgItem.addEventListener('click', function () { closeDropdown(); openMeetingModal(); });
+    menu.appendChild(els.ddMtgItem);
+
+    els.ddSettingsItem = document.createElement('button');
+    els.ddSettingsItem.type = 'button';
+    els.ddSettingsItem.className = 'lvcvoice-dd-item';
+    els.ddSettingsItem.innerHTML = '<span class="lvcvoice-dd-item-icon">⚙</span><span class="lvcvoice-dd-item-label">Voice & video settings</span>';
+    els.ddSettingsItem.addEventListener('click', function () { closeDropdown(); openSettings(); });
+    menu.appendChild(els.ddSettingsItem);
+
+    dd.appendChild(menu);
+    header.appendChild(dd);
+    els.dropdown = dd;
+    els.ddTrigger = trigger;
+    els.ddMenu = menu;
+    els.ddDot = trigger.querySelector('.lvcvoice-dd-dot');
+    els.ddIcon = trigger.querySelector('.lvcvoice-dd-icon');
 
     var pill = document.createElement('span');
     pill.id = 'lvcvoice-callpill';
     pill.className = 'hidden text-xs';
-    pill.innerHTML = '<span class="dot"></span><span class="pill-text"></span><button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger" style="margin-left:6px">End</button>';
+    pill.innerHTML = '<span class="dot"></span><span class="pill-text"></span><button type="button" class="lvcvoice-btn-ghost lvcvoice-pill-hangup" style="margin-left:6px" title="End call">' + ICON_HANGUP + '</button>';
     pill.querySelector('button').addEventListener('click', endCall);
-    header.insertBefore(pill, els.btn);
+    header.insertBefore(pill, dd);
     els.pill = pill;
 
     document.body.appendChild(buildPane());
     document.body.appendChild(buildRing());
-    document.body.appendChild(buildMtgModal());
+    els.mtgModal = buildMtgModal();
+    document.body.appendChild(els.mtgModal);
     buildSettings();
+
+    document.addEventListener('click', function (e) {
+      if (els.dropdown && !els.dropdown.contains(e.target)) closeDropdown();
+    });
   }
 
-  function makeButton(id, cls, handler) {
-    var b = document.createElement('button');
-    b.id = id;
-    b.type = 'button';
-    b.className = cls;
-    b.addEventListener('click', handler);
-    return b;
+  function toggleDropdown(e) {
+    e.stopPropagation();
+    if (!els.ddMenu) return;
+    els.ddMenu.classList.toggle('hidden');
+  }
+
+  function closeDropdown() {
+    if (els.ddMenu) els.ddMenu.classList.add('hidden');
   }
 
   function buildPane() {
@@ -1212,37 +1257,50 @@
   /* ── Rendering ──────────────────────────────────────────────────────── */
   function render() {
     ensureEls();
-    if (!els.btn) return;
+    if (!els.dropdown) return;
     var dm = currentDm();
     var slug = currentChannel();
 
-    // Header: voice / call button.
+    els.dropdown.classList.toggle('hidden', !state.enabled);
+    if (!state.enabled) {
+      if (els.pill) els.pill.classList.add('hidden');
+      if (els.pane) els.pane.classList.add('hidden');
+      if (els.ring) els.ring.classList.add('hidden');
+      return;
+    }
+
+    var dotColor = '#80848e';
+    if (state.calls.active || state.inVoice) dotColor = '#22c55e';
+    else if (state.calls.outgoing[0]) dotColor = '#f59e0b';
+    if (els.ddDot) els.ddDot.style.background = dotColor;
+
     if (dm) {
-      els.btn.classList.remove('hidden');
-      els.btn.textContent = callLabel();
-      els.btn.classList.remove('in-voice');
-    } else if (slug && state.channels[slug] && state.enabled) {
-      els.btn.classList.remove('hidden');
-      els.btn.textContent = voiceLabel();
-      els.btn.classList.toggle('in-voice', state.inVoice);
-      els.btn.classList.toggle('disabled', state.full && !state.inVoice);
-    } else {
-      els.btn.classList.add('hidden');
-    }
-
-    // Header: Meeting button (module enabled; meeting channels get it too).
-    if (els.mtgBtn) {
-      if (state.enabled && !dm) {
-        els.mtgBtn.classList.remove('hidden');
+      var cl = callLabel();
+      els.ddCallItem.querySelector('.lvcvoice-dd-item-label').textContent = cl;
+      var ci = els.ddCallItem.querySelector('.lvcvoice-dd-item-icon');
+      if (state.calls.active || state.calls.outgoing[0]) {
+        ci.style.color = '#ef4444'; ci.innerHTML = ICON_HANGUP;
       } else {
-        els.mtgBtn.classList.add('hidden');
+        ci.style.color = '#22c55e'; ci.innerHTML = ICON_CALL;
       }
+      if (els.ddIcon) { els.ddIcon.style.color = dotColor; els.ddIcon.innerHTML = state.calls.active ? ICON_HANGUP : ICON_CALL; }
+    } else if (slug && state.channels[slug]) {
+      var vl = voiceLabel();
+      els.ddCallItem.querySelector('.lvcvoice-dd-item-label').textContent = vl;
+      var ci2 = els.ddCallItem.querySelector('.lvcvoice-dd-item-icon');
+      if (state.inVoice) {
+        ci2.style.color = '#ef4444'; ci2.innerHTML = ICON_HANGUP;
+      } else {
+        ci2.style.color = '#22c55e'; ci2.innerHTML = ICON_CALL;
+      }
+      if (els.ddIcon) { els.ddIcon.style.color = dotColor; els.ddIcon.innerHTML = state.inVoice ? ICON_HANGUP : ICON_CALL; }
+    } else {
+      els.ddCallItem.querySelector('.lvcvoice-dd-item-label').textContent = 'Call';
+      els.ddCallItem.querySelector('.lvcvoice-dd-item-icon').style.color = '#80848e';
+      if (els.ddIcon) { els.ddIcon.style.color = '#80848e'; els.ddIcon.innerHTML = ICON_CALL; }
     }
 
-    // Header: Voice settings gear (always reachable while voice is on).
-    if (els.settingsBtn) {
-      els.settingsBtn.classList.toggle('hidden', !state.enabled);
-    }
+    if (els.ddMtgItem) els.ddMtgItem.classList.toggle('hidden', !!dm);
 
     // Call pill.
     var call = state.calls.active;

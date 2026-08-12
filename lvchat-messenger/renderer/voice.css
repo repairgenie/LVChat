@@ -166,6 +166,7 @@
   align-items: center;
   justify-content: center;
 }
+.lvcvoice-settings-overlay[hidden] { display: none !important; }
 .lvcvoice-settings-card {
   width: 460px;
   max-width: calc(100vw - 32px);

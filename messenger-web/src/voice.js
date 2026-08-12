@@ -384,7 +384,7 @@
   function openSettings () {
     ensureEls()
     if (!els.settings) return
-    els.settings.classList.remove('hidden')
+    els.settings.hidden = false
     state.settingsOpen = true
     refreshDevices().then(function () {
       populateSettings()
@@ -393,7 +393,7 @@
   }
 
   function closeSettings () {
-    if (els.settings) els.settings.classList.add('hidden')
+    if (els.settings) els.settings.hidden = true
     state.settingsOpen = false
     stopCamTest()
     stopMicTest()
