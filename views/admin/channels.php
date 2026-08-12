@@ -79,7 +79,7 @@
                 <input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
                 <input type="hidden" name="forbid" value="<?= $c['forbidden'] ? 0 : 1 ?>">
                 <button name="action" value="channel_forbid" class="btn-ghost text-xs !py-1"><?= $c['forbidden'] ? 'Un-forbid' : 'Forbid' ?></button>
-                <button name="action" value="channel_drop" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Drop this channel permanently?')">Drop</button>
+                <button name="action" value="channel_drop" class="btn-ghost text-xs !py-1 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Drop this channel permanently?')">Drop</button>
               </form>
             </div>
           </details>

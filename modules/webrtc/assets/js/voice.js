@@ -309,7 +309,9 @@
   }
 
   function endCall() {
-    var call = state.calls.active;
+    // Covers both the active call and a still-ringing outgoing call — the pill's
+    // End button must cancel the ring server-side, not just disconnect locally.
+    var call = state.calls.active || state.calls.outgoing[0] || null;
     if (call) api('/api/webrtc/call/end', { call_id: call.call_id });
     state.pendingCall = null;
     if (state.room) { try { state.room.disconnect(); } catch (e) {} }
@@ -321,11 +323,17 @@
 
   function handleCallTransitions() {
     var active = state.calls.active;
+    if (active) state.pendingCall = null;
     if (active && state.room && state.room.state === 'connected') return;
     if (active && !state.room && !state.connecting) {
       api('/api/webrtc/call/join', { call_id: active.call_id }).then(function (j) {
         if (j.ok) { state.inVoice = true; connectLivekit(j.url, j.token, j.room); }
       });
+    }
+    // An outgoing ring vanished without connecting → declined / missed / cancelled.
+    if (state.pendingCall && !active && !state.calls.outgoing[0]) {
+      state.pendingCall = null;
+      toast('Call ended — no answer.');
     }
   }
 

@@ -25,7 +25,15 @@ define('ROOT', dirname(__DIR__));
 define('LVC_VERSION', '1.7.1');
 
 error_reporting(E_ALL);
-ini_set('display_errors', '1');
+// Never leak stack traces, file paths, or DB details to browsers in production
+// (verbose error disclosure). Errors are always logged server-side; developers
+// and the test harness can opt back into on-screen errors with LVC_DEBUG=1.
+if (PHP_SAPI === 'cli' || getenv('LVC_DEBUG') === '1') {
+    ini_set('display_errors', '1');
+} else {
+    ini_set('display_errors', '0');
+    ini_set('log_errors', '1');
+}
 
 // Sessions must survive cross-site iframe contexts (the public embed widget),
 // so use SameSite=None over HTTPS. Plain-HTTP/local installs fall back to Lax.
@@ -97,6 +105,8 @@ require ROOT . '/src/controllers/OpenClawController.php';
 require ROOT . '/src/controllers/PushController.php';
 require ROOT . '/src/controllers/EmbedController.php';
 require ROOT . '/src/controllers/MessengerController.php';
+require ROOT . '/src/services/LicenseKeys.php';
+require ROOT . '/src/services/LicensingService.php';
 require ROOT . '/src/ModuleLoader.php';
 require ROOT . '/src/controllers/ModuleController.php';
 

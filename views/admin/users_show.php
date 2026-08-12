@@ -95,7 +95,7 @@
       </form>
       <?php endif; ?>
       <?php if (!empty($user['totp_enabled_at'])): ?>
-      <form method="post" action="/admin/action" onsubmit="return confirm('Reset MFA for this user? Their active sessions will end and they will need to set MFA up again.');">
+      <form method="post" action="/admin/action" data-confirm="Reset MFA for this user? Their active sessions will end and they will need to set MFA up again.">
         <?= Csrf::field() ?>
         <input type="hidden" name="back" value="/admin/users/<?= (int) $user['id'] ?>">
         <input type="hidden" name="id" value="<?= (int) $user['id'] ?>">

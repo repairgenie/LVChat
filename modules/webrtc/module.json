@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "description": "One-on-one audio calls and per-channel voice via a self-hosted LiveKit SFU.",
   "author": "LVChat",
-  "license": "AGPL-3.0-only",
   "requires": {
     "lvchat": ">=1.7.1",
     "php": ">=8.1"
@@ -21,7 +20,8 @@
     "voice_max_users": "50",
     "voice_talker_cap": "8",
     "voice_bitrate": "40000",
-    "voice_quality_preset": "moderate"
+    "voice_quality_preset": "moderate",
+    "call_ring_seconds": "25"
   },
   "assets": {
     "css": ["css/voice.css"],

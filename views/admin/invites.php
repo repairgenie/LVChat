@@ -94,7 +94,7 @@
             <button name="action" value="invite_resend" class="btn-ghost text-xs !py-1">Resend</button>
           </form>
           <?php endif; ?>
-          <form method="post" action="/admin/action" class="inline" onsubmit="return confirm('Revoke this invite? Its link stops working immediately.');">
+          <form method="post" action="/admin/action" class="inline" data-confirm="Revoke this invite? Its link stops working immediately.">
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/invites">
             <input type="hidden" name="id" value="<?= (int) $i['id'] ?>">
@@ -110,7 +110,7 @@
 <script>
 function promptCopy(title, value) {
   navigator.clipboard.writeText(value).then(function() {
-    alert(title + ' copied to clipboard.');
+    LVCDialog.alert(title + ' copied to clipboard.');
   }).catch(function() {
     const ta = document.createElement('textarea');
     ta.value = value;
@@ -118,7 +118,7 @@ function promptCopy(title, value) {
     ta.select();
     try { document.execCommand('copy'); } catch (e) {}
     document.body.removeChild(ta);
-    alert(title + ' copied to clipboard: ' + value);
+    LVCDialog.alert(title + ' copied to clipboard: ' + value);
   });
 }
 </script>

@@ -339,8 +339,32 @@ function resetForm () {
   updateRegisterState()
 }
 
+/* ── Confirm modal (replaces window.confirm; styled to match the app) ─────── */
+
+let confirmResolve = null
+
+function showConfirm ({ title, message, okLabel = 'Delete' }) {
+  return new Promise((resolve) => {
+    confirmResolve = resolve
+    document.getElementById('modal-title').textContent = title
+    document.getElementById('modal-message').textContent = message || ''
+    document.getElementById('modal-ok').textContent = okLabel
+    document.getElementById('modal').hidden = false
+    document.getElementById('modal-cancel').focus()
+  })
+}
+
+function settleConfirm (value) {
+  document.getElementById('modal').hidden = true
+  if (confirmResolve) { confirmResolve(value); confirmResolve = null }
+}
+
 async function removeProfile (profile) {
-  if (!window.confirm(`Delete "${profile.name}" from your servers?`)) return
+  const ok = await showConfirm({
+    title: 'Remove server',
+    message: `Delete "${profile.name}" from your servers?`
+  })
+  if (!ok) return
   await api.removeProfile({ id: profile.id })
   await loadAll()
 }
@@ -461,6 +485,15 @@ async function loadAll () {
 }
 
 connectionsRefresh.addEventListener('click', loadConnections)
+
+document.getElementById('modal-ok').addEventListener('click', () => settleConfirm(true))
+document.getElementById('modal-cancel').addEventListener('click', () => settleConfirm(false))
+document.getElementById('modal-backdrop').addEventListener('click', () => settleConfirm(false))
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal')
+  if (modal.hidden) return
+  if (e.key === 'Escape') settleConfirm(false)
+})
 
 loadAll()
 setInterval(loadConnections, 4000)

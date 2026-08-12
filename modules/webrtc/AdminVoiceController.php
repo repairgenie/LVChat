@@ -25,6 +25,12 @@
  * Routes (registered by routes.php):
  *   GET  /admin/voice       — settings form + status panel (module view)
  *   POST /admin/voice/save  — persist + validate (write-only secret, like SMTP)
+ *
+ * Autoconfigure (POST /admin/voice/save with autoconfigure=1): generates a
+ * strong API key + secret, writes them into the user-space config
+ * (data/livekit/livekit.yaml), starts livekit-server as the site user via
+ * nohup, and enables voice. Everything stays inside the web user's account —
+ * no /etc, no systemd, no sudo (see modules/webrtc/README.md).
  */
 final class AdminVoiceController
 {
@@ -50,6 +56,7 @@ final class AdminVoiceController
         return [
             'voice_enabled', 'livekit_url', 'livekit_api_key', 'livekit_api_secret',
             'voice_max_users', 'voice_talker_cap', 'voice_bitrate', 'voice_quality_preset',
+            'call_ring_seconds',
         ];
     }
 
@@ -68,22 +75,23 @@ final class AdminVoiceController
             'settings' => $settings,
             'status' => LiveKitService::status(),
             'health' => LiveKitService::health(),
+            'daemon' => LiveKitService::daemonInfo(),
             'module' => ModuleLoader::get('webrtc'),
         ], 'layout');
     }
 
-    /** POST /admin/voice/save */
+    /** POST /admin/voice/save — plain save, or autoconfigure when flagged. */
     public static function save(): void
     {
         self::requireAdmin();
         self::requireCsrf();
 
-        config_set('voice_enabled', ($_POST['voice_enabled'] ?? '0') === '1' ? '1' : '0');
-
-        $url = trim((string) ($_POST['livekit_url'] ?? ''));
-        if ($url !== '' && preg_match('#^(ws|wss|http|https)://[^\s]+$#', $url)) {
-            config_set('livekit_url', $url);
+        if (!empty($_POST['autoconfigure'])) {
+            self::autoconfigure($_POST);
+            return;
         }
+
+        self::applyFields($_POST);
 
         config_set('livekit_api_key', trim((string) ($_POST['livekit_api_key'] ?? '')));
         $secret = (string) ($_POST['livekit_api_secret'] ?? '');
@@ -91,23 +99,77 @@ final class AdminVoiceController
             config_set('livekit_api_secret', $secret);
         }
 
-        config_set('voice_max_users', (string) max(1, min(200, (int) ($_POST['voice_max_users'] ?? 50))));
-        config_set('voice_talker_cap', (string) max(1, min(50, (int) ($_POST['voice_talker_cap'] ?? 8))));
+        log_audit('voice_settings', null, 'saved by ' . (Auth::user()['username'] ?? 'admin'));
+        flash('Voice settings saved.');
+        redirect('/admin/voice');
+    }
 
-        $preset = (string) ($_POST['voice_quality_preset'] ?? 'moderate');
+    /** Persist the non-secret voice fields (shared by save + autoconfigure). */
+    private static function applyFields(array $post): void
+    {
+        config_set('voice_enabled', ($post['voice_enabled'] ?? '0') === '1' ? '1' : '0');
+
+        $url = trim((string) ($post['livekit_url'] ?? ''));
+        if ($url !== '' && preg_match('#^(ws|wss|http|https)://[^\s]+$#', $url)) {
+            config_set('livekit_url', $url);
+        }
+
+        config_set('voice_max_users', (string) max(1, min(200, (int) ($post['voice_max_users'] ?? 50))));
+        config_set('voice_talker_cap', (string) max(1, min(50, (int) ($post['voice_talker_cap'] ?? 8))));
+        config_set('call_ring_seconds', (string) max(10, min(120, (int) ($post['call_ring_seconds'] ?? 25))));
+
+        $preset = (string) ($post['voice_quality_preset'] ?? 'moderate');
         if (!in_array($preset, ['high', 'moderate', 'minimum'], true)) {
             $preset = 'moderate';
         }
         config_set('voice_quality_preset', $preset);
         $bitrate = ['high' => '64000', 'moderate' => '40000', 'minimum' => '16000'][$preset];
-        $custom = (int) ($_POST['voice_bitrate'] ?? 0);
+        $custom = (int) ($post['voice_bitrate'] ?? 0);
         if ($custom > 0) {
             $bitrate = (string) max(16000, min(64000, $custom));
         }
         config_set('voice_bitrate', $bitrate);
+    }
 
-        log_audit('voice_settings', null, 'saved by ' . (Auth::user()['username'] ?? 'admin'));
-        flash('Voice settings saved.');
+    /** Autoconfigure: generate keys, push them into LiveKit, restart, enable voice. */
+    private static function autoconfigure(array $post): void
+    {
+        $key = self::generateApiKey();
+        $secret = self::generateSecret();
+
+        self::applyFields($post);
+        if (trim((string) (config_get('livekit_url', '') ?? '')) === '') {
+            config_set('livekit_url', 'ws://127.0.0.1:7880'); // module default
+        }
+        config_set('livekit_api_key', $key);
+        config_set('livekit_api_secret', $secret);
+        config_set('voice_enabled', '1');
+
+        $written = LiveKitService::writeKeysConfig($key, $secret);
+        $run = LiveKitService::ensureRunning($written['config']);
+
+        $msg = 'LiveKit autoconfigured. API key: ' . $key;
+        if ($written['written']) {
+            $msg .= ' — keys written to ' . $written['config'];
+        } else {
+            $msg .= ' — could not write ' . $written['config'] . ', add manually and restart: ' . $key . ': ' . $secret;
+        }
+        $msg .= $run['running']
+            ? ' — ' . $run['message'] . '.'
+            : ' — ' . $run['message'] . ' (voice stays disabled until LiveKit accepts these keys).';
+
+        log_audit('voice_settings', null, 'autoconfigured livekit keys by ' . (Auth::user()['username'] ?? 'admin'));
+        flash($msg);
         redirect('/admin/voice');
+    }
+
+    private static function generateApiKey(): string
+    {
+        return 'LVCHAT' . strtoupper(bin2hex(random_bytes(4)));
+    }
+
+    private static function generateSecret(): string
+    {
+        return bin2hex(random_bytes(24)); // matches the README's `openssl rand -hex 24`
     }
 }

@@ -78,6 +78,13 @@ if (!$alice || !$bob) {
     echo "SKIP  could not create test users\n";
     exit(0);
 }
+// Real membership (WS subscriptions are authorized against channel_members):
+// registration seeds #general but does not auto-join, so join it explicitly.
+$general = ChannelService::findBySlug('general');
+if ($general) {
+    ChannelService::join($general, $alice);
+    ChannelService::join($general, $bob);
+}
 
 // ── Spawn the daemon ────────────────────────────────────────────────────────
 $cmd = 'WS_PORT=' . $wsPort
@@ -257,6 +264,56 @@ wcheck('reconnect frame broadcast', strpos(implode(' ', $framesR), '"reconnect"'
 
 fclose($connA);
 fclose($connB);
+
+// ── WS authorization regression (private channels + DM eavesdropping) ──────
+// A connection may only subscribe to a channel it is a member of, and may only
+// receive DMs it is a participant in. Previously any authenticated user could
+// subscribe to any slug/name and receive private traffic in WS mode (the
+// poll/SSE paths already enforce these checks).
+Auth::register('rtcarol', 'rtcarol@example.com', 'password123', true);
+$carol = Auth::attempt('rtcarol', 'password123');
+if (!$carol) {
+    echo "SKIP  could not create rtcarol\n";
+    exit(0);
+}
+$priv = ChannelService::create($carol, '#secretws', ['visibility' => 'private']);
+$privSlug = is_array($priv) ? (string) ($priv['slug'] ?? 'secretws') : 'secretws';
+wcheck('private channel created for carol', is_array($priv) && !empty($priv['id']), json_encode($priv));
+
+// rtalice (admin) is NOT a member of #secretws — the subscribe must be rejected.
+$connPriv = wsOpen($wsUrl, Realtime::mintTicket($alice));
+wcheck('non-member connection opens', is_resource($connPriv));
+if (is_resource($connPriv)) {
+    wsSend($connPriv, json_encode(['action' => 'subscribe', 'channel' => $privSlug]));
+    $ack = wsReceive($connPriv, 2);
+    wcheck('non-member channel subscribe rejected', isset($ack[0]) && strpos($ack[0], '"ok":false') !== false, implode('|', $ack));
+    fclose($connPriv);
+}
+
+// rtalice subscribes to carol's DM stream (she is not a participant).
+$connEv = wsOpen($wsUrl, Realtime::mintTicket($alice));
+wcheck('dm-eavesdrop connection opens', is_resource($connEv));
+if (is_resource($connEv)) {
+    wsSend($connEv, json_encode(['action' => 'subscribe', 'dm' => 'rtcarol']));
+    wsReceive($connEv, 2); // drain ack
+    // A DM between rtbob and rtcarol must never reach rtalice's connection.
+    Realtime::dm($bob, $carol, ['id' => 600004, 'kind' => 'message', 'content' => 'ws secret dm', 'username' => 'rtbob', 'is_pm' => true]);
+    $framesEv = wsReceive($connEv, 2);
+    wcheck('third party never receives a DM they are not part of', strpos(implode(' ', $framesEv), 'ws secret dm') === false, implode('|', $framesEv));
+    fclose($connEv);
+}
+
+// A legitimate participant (carol) still receives her DMs in realtime.
+$connCarol = wsOpen($wsUrl, Realtime::mintTicket($carol));
+wcheck('participant connection opens', is_resource($connCarol));
+if (is_resource($connCarol)) {
+    wsSend($connCarol, json_encode(['action' => 'subscribe', 'dm' => 'rtbob']));
+    wsReceive($connCarol, 2); // drain ack
+    Realtime::dm($bob, $carol, ['id' => 600005, 'kind' => 'message', 'content' => 'ws legit dm', 'username' => 'rtbob', 'is_pm' => true]);
+    $framesCarol = wsReceive($connCarol, 2);
+    wcheck('participant still receives their DM', strpos(implode(' ', $framesCarol), 'ws legit dm') !== false, implode('|', $framesCarol));
+    fclose($connCarol);
+}
 
 // ── Invalid ticket rejected ─────────────────────────────────────────────────
 $bad = wsOpen($wsUrl, 'not-a-real-ticket');

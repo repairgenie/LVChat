@@ -62,6 +62,34 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     </div>
   </div>
   <div class="pt-4 border-t border-discord-700">
+    <div class="text-sm font-medium text-white mb-1">Licensing</div>
+    <p class="text-xs text-discord-400 mb-3">Paid modules (those with <code class="text-discord-300">"license": true</code> in their manifest) validate their key <strong>offline first</strong> (Ed25519 signature), then ask your license server to confirm the key exists and is active. See <code class="text-discord-300">docs/protocol/licensing.md</code>.</p>
+    <div class="mt-3">
+      <label class="label">License server URL</label>
+      <input class="input font-mono text-xs" name="license_url" value="<?= h($settings['license_url'] ?? '') ?>" placeholder="https://licenses.example.com" autocomplete="off" spellcheck="false">
+      <p class="text-xs text-discord-400 mt-1">Base URL of the LVChat License Server. Empty = no external checks (the internal key check still applies).</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <div>
+        <label class="label">Offline policy</label>
+        <select name="license_policy" class="input !py-1.5">
+          <?php foreach (['grace' => 'Grace (cache + trial window)', 'strict' => 'Strict (refuse when unreachable)', 'offline' => 'Offline (internal check only)'] as $pv => $pl): ?>
+          <option value="<?= $pv ?>" <?= ($settings['license_policy'] ?? 'grace') === $pv ? 'selected' : '' ?>><?= $pl ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div>
+        <label class="label">Grace days (never-confirmed keys)</label>
+        <input class="input" type="number" min="0" name="license_grace_days" value="<?= h($settings['license_grace_days'] ?? '7') ?>">
+      </div>
+      <div>
+        <label class="label">Re-check interval (hours)</label>
+        <input class="input" type="number" min="1" name="license_recheck_hours" value="<?= h($settings['license_recheck_hours'] ?? '24') ?>">
+      </div>
+    </div>
+    <p class="text-xs text-discord-400 mt-2">Grace: a key that once validated keeps working when the server is unreachable; a key that never confirmed gets the grace window above, then stops. Strict refuses immediately when unreachable.</p>
+  </div>
+  <div class="pt-4 border-t border-discord-700">
     <div class="text-sm font-medium text-white mb-1">Desktop apps &amp; downloads</div>
     <p class="text-xs text-discord-400 mb-3">Custom download links shown in the chat's "Download the desktop app" modal. These <strong>override the upstream feed</strong> — ideal for white-labelled builds tailored to this community. Leave a URL empty to fall back to the upstream link (or hide the button when no feed is configured); the version shown comes from the feed unless you type one.</p>
     <?php

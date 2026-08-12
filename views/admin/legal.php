@@ -290,16 +290,18 @@
           case 'horizontalRule': editor.chain().focus().setHorizontalRule().run(); break;
           case 'align': editor.chain().focus().setTextAlign(v).run(); break;
           case 'link': {
-            var url = prompt('Link URL (https://…):', editor.getAttributes('link').href || 'https://');
-            if (url === null) return;
-            if (url === '') { editor.chain().focus().unsetLink().run(); }
-            else { editor.chain().focus().setLink({ href: url }).run(); }
+            LVCDialog.prompt('Link URL (https://…):', editor.getAttributes('link').href || 'https://').then(function (url) {
+              if (url === null) return;
+              if (url === '') { editor.chain().focus().unsetLink().run(); }
+              else { editor.chain().focus().setLink({ href: url }).run(); }
+            });
             break;
           }
           case 'unlink': editor.chain().focus().unsetLink().run(); break;
           case 'image': {
-            var src = prompt('Image URL (https://…):', 'https://');
-            if (src && /^https?:\/\//i.test(src)) { editor.chain().focus().setImage({ src: src }).run(); }
+            LVCDialog.prompt('Image URL (https://…):', 'https://').then(function (src) {
+              if (src && /^https?:\/\//i.test(src)) { editor.chain().focus().setImage({ src: src }).run(); }
+            });
             break;
           }
           case 'table': editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break;
@@ -351,9 +353,11 @@
 
   document.querySelectorAll('[data-reset]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      if (!confirm('Replace the current ' + btn.dataset.reset.replace('-', ' ') + ' with the US/Nevada boilerplate?')) return;
-      document.getElementById('legal-reset-which').value = btn.dataset.reset;
-      document.getElementById('legal-reset-form').submit();
+      LVCDialog.confirm('Replace the current ' + btn.dataset.reset.replace('-', ' ') + ' with the US/Nevada boilerplate?').then(function (ok) {
+        if (!ok) return;
+        document.getElementById('legal-reset-which').value = btn.dataset.reset;
+        document.getElementById('legal-reset-form').submit();
+      });
     });
   });
 })();

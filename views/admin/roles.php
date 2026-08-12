@@ -96,7 +96,7 @@ $permLabels = [
       </label>
       <div class="flex gap-2">
         <button name="action" value="role_save" class="btn-primary text-xs !py-1.5">Save</button>
-        <button name="action" value="role_del" class="btn-ghost text-xs !py-1.5 text-red-400" onclick="return confirm('Delete this role? Members lose its permissions.')">Delete</button>
+        <button name="action" value="role_del" class="btn-ghost text-xs !py-1.5 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Delete this role? Members lose its permissions.')">Delete</button>
       </div>
     </form>
   </details>

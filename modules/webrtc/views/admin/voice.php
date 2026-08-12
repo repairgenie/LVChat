@@ -59,7 +59,12 @@ $s = $settings;
       </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="flex items-center gap-3 pt-1">
+      <button type="submit" name="autoconfigure" value="1" class="btn-secondary">Generate &amp; autoconfigure keys</button>
+      <p class="text-xs text-discord-400">Generates a strong API key + secret, writes them to the LiveKit config under this app's <code>data/</code>, and starts the <code>livekit-server</code> binary as the site user (no root needed). Requires <code>livekit-server</code> to be installed somewhere in the user's path.</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
       <div>
         <label class="label">Max concurrent voice users</label>
         <input class="input" type="number" min="1" max="200" name="voice_max_users" value="<?= h($s['voice_max_users'] ?? '50') ?>">
@@ -81,6 +86,11 @@ $s = $settings;
           ?>
         </select>
         <p class="text-xs text-discord-400 mt-1">Sets the Opus bitrate. The exact value is stored in voice_bitrate below.</p>
+      </div>
+      <div>
+        <label class="label">Ring timeout (seconds)</label>
+        <input class="input" type="number" min="10" max="120" name="call_ring_seconds" value="<?= h($s['call_ring_seconds'] ?? '25') ?>">
+        <p class="text-xs text-discord-400 mt-1">Unanswered calls auto-fail after this long (default 25s ≈ 5 rings).</p>
       </div>
     </div>
 
@@ -115,6 +125,24 @@ $s = $settings;
         <div class="flex items-center justify-between gap-3">
           <dt class="text-discord-400">Voice enabled</dt>
           <dd class="font-mono"><?= $status['enabled'] ? 'yes' : 'no' ?></dd>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-discord-400">Managed process</dt>
+          <dd class="font-mono">
+            <?php if ((int) $daemon['pid'] > 0): ?>
+              <span class="text-green-400">running (pid <?= (int) $daemon['pid'] ?>)</span>
+            <?php else: ?>
+              <span class="text-red-400">not running</span>
+            <?php endif; ?>
+          </dd>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-discord-400">Config</dt>
+          <dd class="font-mono text-xs truncate max-w-[14rem]" title="<?= h($daemon['config']) ?>"><?= h($daemon['config']) ?></dd>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-discord-400">Binary</dt>
+          <dd class="font-mono text-xs truncate max-w-[14rem]" title="<?= h($daemon['binary']) ?>"><?= h($daemon['binary'] ?: 'not installed') ?></dd>
         </div>
       </dl>
       <?php if (!$health['running'] && $health['error']): ?>

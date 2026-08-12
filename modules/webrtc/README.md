@@ -26,63 +26,58 @@ README.md                       this file
 
 ## Deploy (server)
 
-1. **Install LiveKit** (one static binary) on the app host:
+The module runs LiveKit **as the site user** — the same way the WebSocket
+gateway runs. Config, pidfile, and log live under the app's own `data/livekit/`
+(owned by the web user, never needing root), and the process is spawned with
+`nohup`. This works on shared hosting (HestiaCP etc.); no `/etc`, no systemd,
+no sudo.
+
+1. **Install the LiveKit binary** somewhere on the site user's PATH (it only
+   needs to be runnable by that user):
    ```bash
-   curl -sSL https://get.livekit.io | bash
+   curl -sSL https://get.livekit.io | bash          # installs to /usr/local/bin
    ```
-   or a release from `github.com/livekit/livekit/releases`.
+   or drop a static release under `~/.local/bin/livekit-server` (checked
+   automatically). The autoconfigure button reports the binary it found.
 
-2. **`/etc/livekit.yaml`**:
-   ```yaml
-   port: 7880                # WebRTC + signaling
-   rtc:
-     tcp_port: 7881
-     port_range_start: 50000
-     port_range_end: 50200
-   keys:
-     <api_key>: <api_secret>
-   turn:
-     enabled: true           # or point at coturn
-   ```
-   Generate a strong key pair once: `openssl rand -hex 24`.
+2. **Admin → Voice → Generate & autoconfigure keys**: the button generates a
+   strong API key + secret, writes `data/livekit/livekit.yaml` (starter config:
+   `port: 7880`, `rtc.tcp_port: 7881`, UDP range 50000–50200, plus the keys
+   block — existing keys are preserved), starts `livekit-server --config …` as
+   the site user with nohup, records the pid, enables voice, and shows a status
+   flash. Set **LiveKit URL** first if your setup is not `ws://127.0.0.1:7880`.
 
-3. **systemd** (`/etc/systemd/system/livekit.service`):
-   ```ini
-   [Unit]
-   Description=LVChat LiveKit media server
-   After=network.target
-   [Service]
-   User=livekit
-   ExecStart=/usr/local/bin/livekit-server --config /etc/livekit.yaml
-   Restart=always
-   RestartSec=3
-   [Install]
-   WantedBy=multi-user.target
-   ```
-   `systemctl enable --now livekit`.
-
-4. **NAT / TURN**: WebRTC needs ICE reachable. On a VPS with a public IP,
+3. **NAT / TURN**: WebRTC needs ICE reachable. On a VPS with a public IP,
    LiveKit's built-in TURN covers most cases; for strict networks add
    **coturn** (`apt install coturn`) and point `turn.udp_port`/`turn.tls_port`
    at it. Firewall: **UDP 7880**, **TCP 7881**, **UDP 50000–50200**, plus
    coturn **UDP/TCP 3478** if used.
 
-5. **TLS**: serve `wss://` — either terminate at LiveKit (`https_port`) with
+4. **TLS**: serve `wss://` — either terminate at LiveKit (`https_port`) with
    the site's Let's Encrypt cert or reverse-proxy `/` and `/rtc` through the
    existing nginx. Set **LiveKit URL** in Admin → Voice to the `wss://` URL.
 
-6. **Admin → Voice**: enable the master switch, paste the API key + secret,
-   set the caps, save. No daemon restart is ever needed — LiveKit applies room
-   `max_participants` at runtime.
+5. **Restart on reboot**: a `nohup` process doesn't survive reboots. Re-run the
+   autoconfigure button after a server restart, or add a cron `@reboot` entry
+   for the site user: `livekit-server --config <ROOT>/data/livekit/livekit.yaml`.
+
+Room settings apply at runtime — no daemon restart is needed for
+`max_participants`, talker caps, or bitrate changes.
 
 ## Admin
 
 **Admin → Voice (LiveKit)** (added by this module's manifest `admin` block):
 - Master switch, LiveKit URL, API key/secret (write-only)
+- **Generate & autoconfigure keys** — generates a strong key pair, writes it to
+  the user-space config (`data/livekit/livekit.yaml`, preserving existing keys),
+  starts/restarts `livekit-server` as the site user with nohup (pid in
+  `data/livekit/livekit.pid`), and enables voice. Degrades with a clear message
+  when the binary isn't installed or the port is taken by an instance the user
+  can't manage.
 - `voice_max_users` — global concurrent-voice cap (join gate + room max)
 - `voice_talker_cap` — active speakers each listener hears (downlink bound)
 - Quality preset / bitrate
-- Live status panel: `/health` probe + connected users / max
+- Live status panel: `/health` probe, managed-process pid, config path, binary
 
 ## API contract
 

@@ -152,6 +152,12 @@ final class VoiceController
             } elseif ($isCaller) {
                 $outgoing[] = $row;
             } else {
+                if (self::callerSilenced($call, $actor)) {
+                    // Blocked or muted caller: never disturb the callee — silently
+                    // fail the ring so the caller's side clears too.
+                    Database::query("UPDATE call_sessions SET status = 'missed' WHERE id = ?", [(int) $call['id']]);
+                    continue;
+                }
                 $incoming[] = $row;
             }
         }
@@ -261,5 +267,31 @@ final class VoiceController
             return $g ? (string) $g['nick'] : 'guest';
         }
         return 'unknown';
+    }
+
+    /**
+     * Whether a ringing call to $actor should never be surfaced: the caller is
+     * a real user $actor has blocked or muted. Mutes/blocks only apply between
+     * registered users (guests can't be blocked/muted, and guests don't set them).
+     */
+    private static function callerSilenced(array $call, array $actor): bool
+    {
+        $callerUid = (int) ($call['caller_user_id'] ?? 0);
+        if ($callerUid === 0 || (int) ($call['caller_guest_id'] ?? 0) !== 0 || Auth::isGuest($actor)) {
+            return false;
+        }
+        $me = (int) $actor['id'];
+        $blocked = Database::scalar(
+            'SELECT 1 FROM friendships WHERE status = "blocked"
+               AND ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))',
+            [$me, $callerUid, $callerUid, $me]
+        );
+        if ($blocked) {
+            return true;
+        }
+        return (bool) Database::scalar(
+            'SELECT 1 FROM user_mutes WHERE user_id = ? AND muted_user_id = ?',
+            [$me, $callerUid]
+        );
     }
 }

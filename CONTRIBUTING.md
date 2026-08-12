@@ -57,6 +57,11 @@ a sign-off, amend or rebase to add it before opening a pull request.
 - If you changed views or assets, rebuild the committed stylesheet and bundles
   (only this machine needs Node): `npm run build`
 - Update `docs/` when you change behavior that is documented there
+- If you change the **module system** (`src/ModuleLoader.php`, module fixtures,
+  or a shipped module), extend the module tests: the suites boot against
+  `tests/fixtures/modules/` via the `CHAT_MODULES` env var, with loader-level
+  assertions in `tests/smoke.php` and HTTP assertions in `tests/http_test.php`
+  (see "Testing the module system" in `docs/modules.md`).
 
 ## Reporting issues
 

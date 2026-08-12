@@ -380,6 +380,7 @@ operclass permissions**.
 | **Poll interval (s)** | Client realtime poll frequency (default 2; raise to 3–5 to cut request volume) |
 | **Realtime mode** | `Polling` (shared-hosting friendly) or `SSE` (streams updates per client; holds a PHP worker each — use on php-fpm/VPS) |
 | **Email (SMTP)** | Host, port, encryption (STARTTLS / SSL / none), username, password, from address/name. Used for invite, welcome, and support-reply emails. |
+| **Licensing** | **License server URL** (`license_url`), **offline policy** (`license_policy`: `grace`/`strict`/`offline`), **grace days** (`license_grace_days`), **re-check interval hours** (`license_recheck_hours`). Paid modules validate their key offline first (Ed25519 signature), then ask the license server to confirm it exists/active/within seat budget. See `docs/protocol/licensing.md`. |
 
 **Sending email** is a dependency-free SMTP client — no `mail()`, no Composer.
 The **Send test email** box under the settings form (or the **SMTP test** flash
@@ -510,6 +511,31 @@ API is documented in **§6.5** below. This page manages them:
 - Each row shows the channel, name, creator, and last use. All webhooks can be
   switched off globally with **Settings → Webhooks** (`webhooks_enabled`).
   Creating/deleting is audited (`webhook_create`, `webhook_delete`).
+
+### 2.24 Modules (`/admin/modules`)
+
+Installed feature packs in the `modules/` directory (see `docs/modules.md`).
+The page lists every discovered module: id, name, version, load order, state
+badge, license key field, and boot warnings.
+
+- **State badges** — `running` (enabled + loadable), `disabled` (soft-off in the
+  DB), `disabled (.disabled)` (hard-off: directory renamed to
+  `<id>.disabled`), `skipped at boot` (unmet `requires`), `not on disk`
+  (directory gone; the stale row is pruned next boot).
+- **Enable / Disable** — flips the soft `enabled` flag; takes effect on the next
+  request/boot (restart the Workerman daemon to unload from it).
+- **License key** — for paid modules (`"license": true` in their manifest),
+  paste the key issued by your license server. The status badge shows the
+  two-layer validation result: `license valid`, `no license key`, `license not
+  checked` (in the offline grace window), `server refused`, or `invalid: <why>`.
+  **re-check** forces a fresh validation. Saving a different key clears the
+  cached result so the next check re-validates.
+- **Boot warnings** — any manifest problems, unmet requirements, or a module
+  whose `init.php`/`schema.php`/`routes.php` threw at boot; a broken module is
+  recorded here and never takes the app down.
+
+Licensing is configured under **Settings → Licensing** (§2.17) and the full
+protocol is documented in `docs/protocol/licensing.md`.
 
 ---
 
@@ -643,6 +669,11 @@ DESC LIMIT 100;"`).
 | `download_{desktop\|messenger}_{win\|mac\|linux_rpm\|linux_deb\|linux_appimage}_url` | — | Download URL for a desktop-client platform (empty hides that button in the chat's "Download the desktop app" modal) |
 | `download_{desktop\|messenger}_{win\|mac\|linux_rpm\|linux_deb\|linux_appimage}_version` | — | Version label shown next to that download |
 | `download_update_url` | — | Where existing desktop-client users fetch the latest version (shown in the download modal) |
+| `license_url` | — | Base URL of the license server paid modules validate against (empty = internal check only, no revocation/seats) |
+| `license_policy` | `grace` | `grace` (cache + trial window), `strict` (refuse when unreachable), or `offline` (never dial out) |
+| `license_grace_days` | `7` | How long a never-confirmed key runs while the license server is unreachable |
+| `license_recheck_hours` | `24` | How long a `valid` result is cached before the app asks the license server again |
+| `license_server_id` | — | Per-install fingerprint bound to license seats (generated once; keep `data/` backups) |
 | `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |
 | `max_channels_per_user` | `100` | Owned-channel cap |
 | `smtp_enabled` | `0` | Master switch for email sending |

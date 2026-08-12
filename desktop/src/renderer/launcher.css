@@ -181,3 +181,21 @@ button.danger:hover:not(:disabled) { background: var(--danger-hover); color: #ff
 .update-status.is-ready .update-dot { background: var(--green); }
 .update-status.is-error .update-dot { background: var(--danger); }
 .server-update { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+
+/* Confirm modal (replaces window.confirm) */
+#modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; }
+#modal[hidden] { display: none; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.45); }
+.modal {
+  position: relative;
+  width: 380px;
+  max-width: calc(100vw - 40px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.modal-title { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+.modal-message { color: var(--text); font-size: 13.5px; margin-bottom: 12px; white-space: pre-wrap; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }

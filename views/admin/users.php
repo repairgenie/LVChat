@@ -94,7 +94,7 @@
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/users">
             <input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
-            <select name="role_id" class="input !py-0.5 text-xs" onchange="if(confirm('Change this user\'s custom role?'))this.form.submit();else this.value='<?= (int) $u['role_id'] ?>';">
+            <select name="role_id" class="input !py-0.5 text-xs" onchange="var s=this; LVCDialog.confirm('Change this user\'s custom role?').then(ok => { if (ok) s.form.submit(); else s.value='<?= (int) $u['role_id'] ?>'; });">
               <option value="0">— none —</option>
               <?php foreach ($roles as $r): ?>
               <option value="<?= (int) $r['id'] ?>" <?= (int) $u['role_id'] === (int) $r['id'] ? 'selected' : '' ?>><?= h($r['name']) ?></option>
@@ -128,7 +128,7 @@
               <button name="action" value="user_ban" class="btn-ghost text-xs !py-1 text-red-400" onclick="return promptReason(event, 'Reason for ban:')">Ban</button>
               <?php endif; ?>
               <?php if (!empty($u['last_ip'])): ?>
-              <button name="action" value="user_zline_ip" class="btn-ghost text-xs !py-1 text-orange-400" onclick="return confirm('Zline (ban) this IP?')">Zline IP</button>
+              <button name="action" value="user_zline_ip" class="btn-ghost text-xs !py-1 text-orange-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Zline (ban) this IP?')">Zline IP</button>
               <?php endif; ?>
               <?php if ($u['role'] === 'admin'): ?>
               <button name="action" value="user_deadmin" class="btn-ghost text-xs !py-1">Demote</button>
@@ -139,8 +139,8 @@
               <button name="action" value="user_staff" class="btn-ghost text-xs !py-1 text-blurple">Make staff</button>
               <button name="action" value="user_admin" class="btn-ghost text-xs !py-1 text-amber-400">Make admin</button>
               <?php endif; ?>
-              <button name="action" value="user_reset" class="btn-ghost text-xs !py-1" onclick="return confirm('Reset password? New password shown on next page.')">Reset pw</button>
-              <button name="action" value="user_delete" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Permanently delete this user? Their account, sessions, memberships and reactions are removed. Channel/PM messages are kept (shown without the name); the chat log archive keeps everything.')">Delete</button>
+              <button name="action" value="user_reset" class="btn-ghost text-xs !py-1" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Reset password? New password shown on next page.')">Reset pw</button>
+              <button name="action" value="user_delete" class="btn-ghost text-xs !py-1 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Permanently delete this user? Their account, sessions, memberships and reactions are removed. Channel/PM messages are kept (shown without the name); the chat log archive keeps everything.')">Delete</button>
             <?php endif; ?>
           </form>
         </td>
@@ -151,17 +151,20 @@
 </div>
 <script>
 function promptReason(event, msg) {
-  var reason = prompt(msg, '');
-  if (reason === null) return false;
-  var form = event.currentTarget.closest('form');
-  var inp = form.querySelector('input[name="reason"]');
-  if (!inp) {
-    inp = document.createElement('input');
-    inp.type = 'hidden';
-    inp.name = 'reason';
-    form.appendChild(inp);
-  }
-  inp.value = reason;
-  return true;
+  event.preventDefault();
+  LVCDialog.prompt(msg, '').then(function (reason) {
+    if (reason === null) return;
+    var form = event.currentTarget.closest('form');
+    var inp = form.querySelector('input[name="reason"]');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = 'reason';
+      form.appendChild(inp);
+    }
+    inp.value = reason;
+    form.submit();
+  });
+  return false;
 }
 </script>

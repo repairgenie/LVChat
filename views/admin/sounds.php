@@ -64,7 +64,7 @@
             <input type="hidden" name="id" value="<?= (int) $s['id'] ?>">
             <button name="action" value="sound_toggle" class="btn-ghost text-xs !py-1"><?= (int) $s['enabled'] === 1 ? 'Disable' : 'Enable' ?></button>
           </form>
-          <form method="post" action="/admin/action" class="inline" onsubmit="return confirm('Delete this sound? Users who selected it fall back to their defaults.');">
+          <form method="post" action="/admin/action" class="inline" data-confirm="Delete this sound? Users who selected it fall back to their defaults.">
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/sounds">
             <input type="hidden" name="id" value="<?= (int) $s['id'] ?>">

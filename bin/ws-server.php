@@ -180,15 +180,21 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
                 });
                 break;
             case 'dm':
-                // A private message: deliver to every connection viewing either side
-                // of the conversation (so both participants' open tabs update).
-                $targets = [
-                    strtolower((string) ($event['from'] ?? '')),
-                    strtolower((string) ($event['to'] ?? '')),
-                ];
-                $broadcast(['messages' => [$event['message'] ?? []]], static function (array $st) use ($targets): bool {
-                    return ($st['sub']['type'] ?? null) === 'dm'
-                        && in_array(strtolower((string) ($st['sub']['target'] ?? '')), $targets, true);
+                // A private message: deliver only to connections whose
+                // authenticated actor is one of the two participants (matched
+                // by id + guest flag). A subscriber of a name is never treated
+                // as a participant, so a third party can't eavesdrop on a DM.
+                $fromId = (int) ($event['from_id'] ?? 0);
+                $fromG = (int) ($event['from_guest'] ?? 0);
+                $toId = (int) ($event['to_id'] ?? 0);
+                $toG = (int) ($event['to_guest'] ?? 0);
+                $broadcast(['messages' => [$event['message'] ?? []]], static function (array $st) use ($fromId, $fromG, $toId, $toG): bool {
+                    if (($st['sub']['type'] ?? null) !== 'dm') {
+                        return false;
+                    }
+                    $uid = (int) ($st['user']['id'] ?? 0);
+                    $ug = (int) ($st['user']['guest'] ?? 0);
+                    return ($uid === $fromId && $ug === $fromG) || ($uid === $toId && $ug === $toG);
                 });
                 break;
             case 'bell':
@@ -306,12 +312,32 @@ $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $pre
             ], JSON_UNESCAPED_UNICODE));
             break;
         case 'subscribe':
+            // Authorization: a connection may only subscribe to a channel it is
+            // actually a member of, and only to a DM target that resolves to a
+            // real actor (delivery is additionally gated by participant identity
+            // in the 'dm' fan-out above). This closes the WS-mode information
+            // leak where any authenticated user could subscribe to a private
+            // channel slug or a username and receive traffic they weren't part
+            // of — the poll/SSE paths already enforce these same checks.
             if (!empty($msg['channel'])) {
-                $st['sub'] = ['type' => 'channel', 'target' => (string) $msg['channel']];
-                $conn->send(json_encode(['ok' => true, 'sub' => $st['sub']], JSON_UNESCAPED_UNICODE));
+                $slug = (string) $msg['channel'];
+                $ch = ChannelService::findBySlug($slug);
+                if ($ch && AccessService::member((int) $ch['id'], $st['user'])) {
+                    $st['sub'] = ['type' => 'channel', 'target' => $slug];
+                    $conn->send(json_encode(['ok' => true, 'sub' => $st['sub']], JSON_UNESCAPED_UNICODE));
+                } else {
+                    $st['sub'] = ['type' => null, 'target' => null];
+                    $conn->send(json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_UNICODE));
+                }
             } elseif (!empty($msg['dm'])) {
-                $st['sub'] = ['type' => 'dm', 'target' => strtolower((string) $msg['dm'])];
-                $conn->send(json_encode(['ok' => true, 'sub' => $st['sub']], JSON_UNESCAPED_UNICODE));
+                $target = strtolower((string) $msg['dm']);
+                if (!Auth::findActor($target)) {
+                    $st['sub'] = ['type' => null, 'target' => null];
+                    $conn->send(json_encode(['ok' => false, 'error' => 'no such user'], JSON_UNESCAPED_UNICODE));
+                } else {
+                    $st['sub'] = ['type' => 'dm', 'target' => $target];
+                    $conn->send(json_encode(['ok' => true, 'sub' => $st['sub']], JSON_UNESCAPED_UNICODE));
+                }
             } else {
                 $st['sub'] = ['type' => null, 'target' => null];
             }

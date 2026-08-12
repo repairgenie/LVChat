@@ -63,7 +63,7 @@
           </form>
           <form method="post" action="/admin/action">
             <?= Csrf::field() ?><input type="hidden" name="back" value="/admin/badwords"><input type="hidden" name="id" value="<?= (int) $w['id'] ?>">
-            <button name="action" value="badword_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Delete this bad word?')">Delete</button>
+            <button name="action" value="badword_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Delete this bad word?')">Delete</button>
           </form>
         </td>
       </tr>

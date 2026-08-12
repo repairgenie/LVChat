@@ -94,6 +94,34 @@
                    placeholder="LVC-…" <?= $m['onDisk'] ? '' : 'disabled' ?>>
             <button class="btn-ghost text-xs !py-1" <?= $m['onDisk'] ? '' : 'disabled' ?>>Save</button>
           </form>
+          <?php
+          $ls = (string) ($row['license_status'] ?? '');
+          $paid = $manifest && !empty($manifest['license']);
+          $badge = ['label' => '', 'class' => 'text-discord-500'];
+          if (!$paid && $ls === '') {
+              $badge = ['label' => 'free module', 'class' => 'text-discord-500'];
+          } elseif ($ls === 'valid') {
+              $badge = ['label' => 'license valid', 'class' => 'text-green-400'];
+          } elseif (in_array($ls, ['unvalidated', ''], true) && $paid) {
+              $badge = ['label' => 'license not checked', 'class' => 'text-amber-400'];
+          } elseif ($ls === 'no_key') {
+              $badge = ['label' => 'no license key', 'class' => 'text-red-400'];
+          } elseif (in_array($ls, ['unreachable_grace', 'unreachable_strict', 'server_refused', 'malformed', 'bad_signature', 'wrong_module', 'unsupported_version', 'expired'], true)) {
+              $badge = ['label' => $ls === 'server_refused' ? 'server refused' : ($ls === 'expired' ? 'expired' : 'invalid: ' . $ls), 'class' => 'text-red-400'];
+          }
+          ?>
+          <?php if ($paid): ?>
+          <div class="text-xs <?= $badge['class'] ?> mt-1"><?= h($badge['label']) ?>
+            <?php if ($row['license_checked_at']): ?><span class="text-discord-500">· <?= relative_time($row['license_checked_at']) ?></span><?php endif; ?>
+            <form method="post" action="/admin/action" class="inline">
+              <?= Csrf::field() ?>
+              <input type="hidden" name="action" value="module_recheck">
+              <input type="hidden" name="id" value="<?= h($id) ?>">
+              <input type="hidden" name="back" value="/admin/modules">
+              <button class="text-blurple-300 hover:underline underline-offset-2" <?= $m['onDisk'] ? '' : 'disabled' ?>>re-check</button>
+            </form>
+          </div>
+          <?php endif; ?>
         </td>
         <td class="px-4 py-2 text-right">
           <?php if ($m['onDisk']): ?>

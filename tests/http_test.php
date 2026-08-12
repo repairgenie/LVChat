@@ -31,26 +31,154 @@ $PORT = 8098;
 $DB = '/tmp/opencode/httptest.db';
 $BASE = "http://127.0.0.1:$PORT";
 
+// Licensing client tests mint keys with their own Ed25519 keypair; the public
+// half goes to the app server + the fixture license server via env
+// (see docs/protocol/licensing.md).
+require_once __DIR__ . '/../src/services/LicenseKeys.php';
+$__licSeed = random_bytes(SODIUM_CRYPTO_SIGN_SEEDBYTES);
+$__licKp = sodium_crypto_sign_seed_keypair($__licSeed);
+$licSk = sodium_crypto_sign_secretkey($__licKp);
+$licPk = base64_encode(sodium_crypto_sign_publickey($__licKp));
+putenv('LVC_LICENSE_PUBLIC_KEY=' . $licPk);
+
 foreach ([$DB, $DB . '-wal', $DB . '-shm'] as $f) {
     if (file_exists($f)) unlink($f);
 }
+
+// ── Staging modules directory ───────────────────────────────────────────────
+// The committed fixtures stay untouched; the server runs against a fresh copy
+// (plus an extra cycle-mod) so the .disabled rename lifecycle can be exercised
+// over HTTP: renaming cycle-mod -> cycle-mod.disabled on disk is observed by
+// the next request, because the built-in server re-boots modules per hit.
+function rrmdir(string $dir): void {
+    foreach (scandir($dir) ?: [] as $e) {
+        if ($e === '.' || $e === '..') continue;
+        $p = $dir . '/' . $e;
+        if (is_dir($p) && !is_link($p)) rrmdir($p); else @unlink($p);
+    }
+    @rmdir($dir);
+}
+function rcp(string $src, string $dst): void {
+    if (is_link($src)) {
+        symlink(readlink($src), $dst);
+        return;
+    }
+    if (is_dir($src)) {
+        @mkdir($dst, 0775, true);
+        foreach (scandir($src) ?: [] as $e) {
+            if ($e === '.' || $e === '..') continue;
+            rcp($src . '/' . $e, $dst . '/' . $e);
+        }
+    } else {
+        copy($src, $dst);
+    }
+}
+$STAGE_MODULES = '/tmp/opencode/httptest-modules';
+if (is_dir($STAGE_MODULES)) rrmdir($STAGE_MODULES);
+mkdir($STAGE_MODULES, 0775, true);
+rcp(__DIR__ . '/fixtures/modules', $STAGE_MODULES);
+// Recreate the webrtc symlink pointing at the shipped module code (the fixture
+// symlink's relative target would not resolve from /tmp).
+if (is_dir($STAGE_MODULES . '/webrtc')) rrmdir($STAGE_MODULES . '/webrtc');
+@unlink($STAGE_MODULES . '/webrtc');
+symlink(dirname(__DIR__) . '/modules/webrtc', $STAGE_MODULES . '/webrtc');
+// cycle-mod: a tiny rename-lifecycle fixture present only in the staging copy.
+@mkdir($STAGE_MODULES . '/cycle-mod', 0775, true);
+file_put_contents($STAGE_MODULES . '/cycle-mod/module.json', json_encode([
+    'id' => 'cycle-mod', 'name' => 'Cycle Module', 'version' => '1.0.0',
+    'description' => 'Rename-cycle test module (load/unload/disable).',
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+file_put_contents($STAGE_MODULES . '/cycle-mod/routes.php', "<?php\n\ndeclare(strict_types=1);\n\n// Rename-cycle fixture: proves the .disabled hard-disable over HTTP.\nreturn static function (Router \$router): void {\n    \$router->get('/api/cycle-mod/ping', static function (array \$params): void {\n        json_out(['ok' => true, 'module' => 'cycle-mod']);\n    });\n};\n");
 
 $server = proc_open(
     ['php', '-S', "127.0.0.1:$PORT", '-t', __DIR__ . '/../public', __DIR__ . '/../public/router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/http-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/http-test-server.log', 'a']],
     $pipes,
     dirname(__DIR__),
-    array_merge($_ENV, ['CHAT_DB' => $DB, 'CHAT_MODULES' => __DIR__ . '/fixtures/modules', 'LVC_EMBED_ALLOW_LOCAL' => '1'])
+    array_merge($_ENV, ['CHAT_DB' => $DB, 'CHAT_MODULES' => $STAGE_MODULES, 'LVC_LICENSE_PUBLIC_KEY' => $licPk, 'LVC_EMBED_ALLOW_LOCAL' => '1', 'LVC_DEBUG' => '1'])
 );
 sleep(1);
 
 // Mock web server for the /api/embed proxy tests (framing headers, redirects).
 $embedDir = '/tmp/opencode/embedtest';
+// Build the mock target's router here so the suite is self-contained — this
+// fixture used to be created manually under /tmp, which silently broke the
+// embed tests (502s) on machines where the file was missing.
+@mkdir($embedDir, 0775, true);
+file_put_contents($embedDir . '/router.php', <<<'PHP'
+<?php
+$path = rtrim((string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/') ?: '/';
+switch ($path) {
+    case '/framed':
+        header('X-Frame-Options: DENY');
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><h1>framed</h1><p>framed page</p>';
+        return true;
+    case '/csp':
+        header("Content-Security-Policy: default-src 'self'; frame-ancestors 'none'");
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<p>csp-frame-ancestors-none</p>';
+        return true;
+    case '/rel':
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><base href="https://evil.example/"><p>relative page</p><a href="/other">x</a>';
+        return true;
+    case '/redirect':
+        header('Location: /plain', true, 302);
+        return true;
+    case '/plain':
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<h1>plain</h1>';
+        return true;
+    case '/img.png':
+        header('Content-Type: image/png');
+        echo base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+        return true;
+    case '/styled':
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><head>'
+            . '<link rel="stylesheet" href="/app.css">'
+            . '<link rel="preload" as="style" href="/app.css">'
+            . '<style>@font-face{font-family:X;src:url(/font.woff2)}</style>'
+            . '</head><body>styled</body>';
+        return true;
+    case '/app.css':
+        header('Content-Type: text/css; charset=utf-8');
+        echo 'body{font-family:X}@import "dep.css";'
+            . '.a{background:url(font.woff2)}'
+            . '.b{background:url(img.png)}'
+            . '.c{background:url(http://cdn.example.test/logo.png)}'
+            . '.d{background:url(data:image/png;base64,AAAA)}';
+        return true;
+    case '/dep.css':
+        header('Content-Type: text/css; charset=utf-8');
+        echo 'body{color:red}';
+        return true;
+    case '/font.woff2':
+        header('Content-Type: font/woff2');
+        echo 'wOF2';
+        return true;
+    default:
+        http_response_code(404);
+        echo 'not found';
+        return true;
+}
+PHP);
 $embedServer = proc_open(
     ['php', '-S', '127.0.0.1:8097', '-t', $embedDir, $embedDir . '/router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/embed-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/embed-test-server.log', 'a']],
     $embedPipes,
     $embedDir
+);
+sleep(1);
+
+// Fixture license server for the licensing client tests (docs/protocol/licensing.md).
+$licenseServer = proc_open(
+    ['php', '-S', '127.0.0.1:8096', __DIR__ . '/fixtures/license_server.php'],
+    [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/license-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/license-test-server.log', 'a']],
+    $licensePipes,
+    __DIR__ . '/fixtures',
+    array_merge($_ENV, ['LVC_LICENSE_PUBLIC_KEY' => $licPk])
 );
 sleep(1);
 
@@ -218,6 +346,7 @@ check('alice can open /app', $s === 200, (string) $s);
 check('chat has desktop download button', str_contains($appBody, 'id="download-open-btn"'), '');
 check('chat has desktop download modal', str_contains($appBody, 'id="download-modal"'), '');
 check('chat download modal explains Desktop vs Messenger', str_contains($appBody, 'LVChat Messenger') && str_contains($appBody, 'streamlined'), '');
+check('chat download modal shows both app icons', str_contains($appBody, '/assets/apps/lvchat-desktop.png') && str_contains($appBody, '/assets/apps/lvchat-messenger.png'), '');
 
 // share link: logged-in user auto-joins via /c/slug
 [$s, $h] = req('GET', '/c/general', [], $cjA);
@@ -606,6 +735,8 @@ echo "== modules ==\n";
 [$s, , $b] = req('GET', '/admin/modules', [], $cjA);
 check('admin modules page 200', $s === 200, (string) $s);
 check('modules page lists good-module', str_contains($b, 'Good Module') && str_contains($b, 'good-module'), '');
+check('modules page shows disabled-mod (.disabled) badge', str_contains($b, 'disabled-mod') && str_contains($b, 'disabled (.disabled)'), $b);
+check('modules page shows boot warnings block', str_contains($b, 'Boot warnings'), $b);
 [$s, , $b] = req('GET', '/admin', [], $cjA);
 check('module admin nav entry renders', str_contains($b, 'Good Module Settings'), '');
 [$s, , $b] = req('GET', '/api/good-module/ping');
@@ -628,16 +759,32 @@ check('module route public (no auth needed)', $s === 200, (string) $s);
 [$s] = req('GET', '/admin/modules', [], $cjB);
 check('non-admin denied modules page', $s === 403, (string) $s);
 
+// Module view: the fixture renders a module view inside the standard layout.
+[$s, , $b] = req('GET', '/admin/good-module', [], $cjA);
+check('module view renders inside the layout', $s === 200 && str_contains($b, 'Good Module view') && str_contains($b, 'from fixture view') && str_contains($b, 'bg-discord-900'), "$s");
+
 // Enable/disable toggle (soft off in the modules table; takes effect next boot).
 $tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_toggle', 'id' => 'good-module', 'back' => '/admin/modules'], $cjA);
 check('module_toggle action 302', $s === 302, (string) $s);
 [$s, , $b] = req('GET', '/admin/modules', [], $cjA);
 check('modules page shows disabled after toggle', str_contains($b, '>disabled<'), $b);
+// Soft-disable must actually unload the module: routes un-wire, assets unserve.
+[$s] = req('GET', '/api/good-module/ping');
+check('disabled module route unloaded (404)', $s === 404, (string) $s);
+[$s] = req('GET', '/modules/good-module/assets/js/app.js');
+check('disabled module assets unserved (404)', $s === 404, (string) $s);
+[$s] = req('GET', '/admin/good-module', [], $cjA);
+check('disabled module view route unloaded (404)', $s === 404, (string) $s);
 $tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_toggle', 'id' => 'good-module', 'back' => '/admin/modules'], $cjA);
 [$s, , $b] = req('GET', '/admin/modules', [], $cjA);
 check('modules page shows running after re-enable', str_contains($b, '>running<'), '');
+// Re-enabling must actually load it again.
+[$s] = req('GET', '/api/good-module/ping');
+check('re-enabled module route reloaded (200)', $s === 200, (string) $s);
+[$s] = req('GET', '/modules/good-module/assets/js/app.js');
+check('re-enabled module assets served again (200)', $s === 200, (string) $s);
 
 // License key save/clear (raw key stored; validation is the licensing layer's job).
 $tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
@@ -651,6 +798,38 @@ check('module_save clears license', $s === 302, (string) $s);
 $tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'ghost-module', 'license' => 'x', 'back' => '/admin/modules'], $cjA);
 check('module_save rejects unknown module', $s === 302, (string) $s);
+
+// ── .disabled rename cycle over HTTP (staging modules dir) ──────────────────
+// cycle-mod lives only in the staging copy; renaming its directory on disk is
+// observed by the next request (the built-in server re-boots modules per hit).
+[$s, , $b] = req('GET', '/api/cycle-mod/ping');
+$j = jsonDecode($b);
+check('cycle-mod loads from staging dir', $s === 200 && ($j['module'] ?? '') === 'cycle-mod', "$s $b");
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('cycle-mod shows running on admin page', str_contains($b, 'cycle-mod') && str_contains($b, '>running<'), '');
+
+// Rename to cycle-mod.disabled → hard off. DB state (enabled=1) must survive.
+if (!rename($STAGE_MODULES . '/cycle-mod', $STAGE_MODULES . '/cycle-mod.disabled')) {
+    check('cycle-mod rename to .disabled', false, 'rename() failed');
+} else {
+    [$s, , $b] = req('GET', '/api/cycle-mod/ping');
+    check('cycle-mod unloaded after .disabled rename', $s === 404, (string) $s);
+    [$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+    check('cycle-mod shows disabled (.disabled) after rename', str_contains($b, 'cycle-mod') && str_contains($b, 'disabled (.disabled)'), $b);
+    $row = dbq('SELECT enabled FROM modules WHERE id = ?', ['cycle-mod']);
+    check('cycle-mod DB row preserved + still enabled (hard beats soft)', count($row) === 1 && (int) $row[0]['enabled'] === 1, json_encode($row));
+
+    // Rename back → loads again, state intact.
+    if (!rename($STAGE_MODULES . '/cycle-mod.disabled', $STAGE_MODULES . '/cycle-mod')) {
+        check('cycle-mod rename back', false, 'rename() failed');
+    } else {
+        [$s, , $b] = req('GET', '/api/cycle-mod/ping');
+        $j = jsonDecode($b);
+        check('cycle-mod reloaded after rename back', $s === 200 && ($j['module'] ?? '') === 'cycle-mod', "$s $b");
+        [$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+        check('cycle-mod shows running again', str_contains($b, 'cycle-mod') && str_contains($b, '>running<'), $b);
+    }
+}
 
 
 // Staff-created support tickets (user + email) and assignment.
@@ -1990,6 +2169,38 @@ check('newly invited member joins via link', $s === 302 && str_contains($h['loca
 req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '0', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
 req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tV, 'channel' => 'general', 'enabled' => '0'], $cjA);
 
+// ── Licensing client (fixture license server on :8096) ───────────────────────
+echo "== licensing client ==\n";
+$mkLic = static fn (array $c): string => LicenseKeys::generate($c, $licSk);
+$okKey = $mkLic(['mod' => 'paid-mod', 'type' => 'pro', 'holder' => 'Http Test', 'exp' => date('Y-m-d', strtotime('+1 year')), 'act' => 3, 'iss' => date('Y-m-d')]);
+$refuseKey = $mkLic(['mod' => 'paid-mod', 'type' => 'pro', 'holder' => 'REFUSE', 'exp' => '', 'iss' => date('Y-m-d')]);
+
+// Point the install at the fixture license server.
+$tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'settings_save', 'site_name' => 'LVChat', 'registration_enabled' => '1', 'license_url' => 'http://127.0.0.1:8096', 'license_policy' => 'grace', 'back' => '/admin/settings'], $cjA);
+check('settings_save persists license_url', $s === 302, (string) $s);
+
+// A valid signed key + re-check → the fixture server confirms it (status valid).
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'paid-mod', 'license' => $okKey, 'back' => '/admin/modules'], $cjA);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_recheck', 'id' => 'paid-mod', 'back' => '/admin/modules'], $cjA);
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('recheck with valid key → license valid badge', str_contains($b, 'license valid'), substr($b, 0, 200));
+
+// A signed key the fixture refuses (holder=REFUSE) → server_refused.
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'paid-mod', 'license' => $refuseKey, 'back' => '/admin/modules'], $cjA);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_recheck', 'id' => 'paid-mod', 'back' => '/admin/modules'], $cjA);
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('recheck with refused key → server refused badge', str_contains($b, 'server refused'), substr($b, 0, 200));
+
+// A malformed key is rejected offline and never reaches the network.
+$tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_save', 'id' => 'paid-mod', 'license' => 'garbage', 'back' => '/admin/modules'], $cjA);
+[$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_recheck', 'id' => 'paid-mod', 'back' => '/admin/modules'], $cjA);
+[$s, , $b] = req('GET', '/admin/modules', [], $cjA);
+check('malformed key fails offline → invalid badge', str_contains($b, 'invalid: malformed'), substr($b, 0, 200));
+
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);
 check('logout redirects', $s === 302 && ($h['location'] ?? '') === '/login', "$s " . ($h['location'] ?? ''));
@@ -2002,5 +2213,8 @@ $sseBody = (string) shell_exec(
 check('SSE stream emits data frames', str_contains($sseBody, 'data:'), $sseBody);
 
 proc_terminate($server);
+if (isset($licenseServer) && is_resource($licenseServer)) {
+    proc_terminate($licenseServer);
+}
 echo "\n" . $GLOBALS['pass'] . " passed, " . $GLOBALS['fail'] . " failed\n";
 exit($GLOBALS['fail'] > 0 ? 1 : 0);

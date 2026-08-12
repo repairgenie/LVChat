@@ -92,7 +92,7 @@ $permLabels = [
       <div class="flex gap-2">
         <button name="action" value="operclass_save" class="btn-primary text-xs !py-1.5">Save</button>
         <?php if (!$c['is_default']): ?>
-        <button name="action" value="operclass_del" class="btn-ghost text-xs !py-1.5 text-red-400" onclick="return confirm('Delete this class? Its o:lines are removed too.')">Delete</button>
+        <button name="action" value="operclass_del" class="btn-ghost text-xs !py-1.5 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Delete this class? Its o:lines are removed too.')">Delete</button>
         <?php endif; ?>
       </div>
     </form>

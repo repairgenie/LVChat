@@ -266,7 +266,10 @@ final class Realtime
         self::publish(['type' => 'message', 'channel' => $channelSlug, 'message' => $message]);
     }
 
-    /** Push a private message to both conversation participants' clients. */
+    /** Push a private message to both conversation participants' clients.
+     *  The event carries the participants' actor ids + guest flags so the
+     *  gateway can authorize delivery by identity — a subscriber is only ever
+     *  a participant, never a third party listening on a name. */
     public static function dm(array $from, array $to, array $message): void
     {
         if (!self::enabled()) {
@@ -276,6 +279,10 @@ final class Realtime
             'type' => 'dm',
             'from' => (string) ($from['username'] ?? ''),
             'to' => (string) ($to['username'] ?? ''),
+            'from_id' => (int) ($from['id'] ?? 0),
+            'from_guest' => (int) ($from['guest'] ?? 0),
+            'to_id' => (int) ($to['id'] ?? 0),
+            'to_guest' => (int) ($to['guest'] ?? 0),
             'message' => $message,
         ]);
     }

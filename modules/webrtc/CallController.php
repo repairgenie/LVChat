@@ -32,8 +32,10 @@
  * Ring/accept is driven by GET /api/webrtc/voice/status (both sides poll it):
  * the caller sees `outgoing` until the callee accepts, then `active`; the
  * callee sees `incoming` while ringing. Status also expires unanswered calls
- * to 'missed' after 30 s. Tokens are minted at connect time only (accept/join)
- * so a 60 s TTL is never a problem.
+ * to 'missed' after the ring timeout (~5 rings; call_ring_seconds). Calls from
+ * blocked or muted users are never surfaced — they silently fail as 'missed'.
+ * Tokens are minted at connect time only (accept/join) so a 60 s TTL is never
+ * a problem.
  */
 final class CallController
 {

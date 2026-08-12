@@ -407,7 +407,7 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
     fd.append('csrf', csrf);
     fetch('/api/mfa/begin', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
       .then(r => r.json()).then(j => {
-        if (j.error) { alert(j.error); return; }
+        if (j.error) { LVCDialog.alert(j.error); return; }
         document.getElementById('mfa-enroll').classList.add('hidden');
         document.getElementById('mfa-setup').classList.remove('hidden');
         document.getElementById('mfa-secret').textContent = j.secret;
@@ -430,19 +430,20 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
   const mfaDisable = document.getElementById('mfa-disable-form');
   if (mfaDisable) mfaDisable.addEventListener('submit', e => {
     e.preventDefault();
-    if (!confirm('Disable two-factor authentication?')) return;
-    post('/api/mfa/disable', new FormData(mfaDisable), () => location.reload());
+    LVCDialog.confirm('Disable two-factor authentication?').then(ok => {
+      if (ok) post('/api/mfa/disable', new FormData(mfaDisable), () => location.reload());
+    });
   });
   const msg = document.getElementById('profile-msg');
   function post(url, fd, ok) {
     fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
-      .then(r => r.json()).then(j => { if (j.error) { alert(j.error); return; } if (ok) ok(); });
+      .then(r => r.json()).then(j => { if (j.error) { LVCDialog.alert(j.error); return; } if (ok) ok(); });
   }
   const pw = document.getElementById('pw-form');
   if (pw) pw.addEventListener('submit', e => {
     e.preventDefault();
     const fd = new FormData(pw);
-    post('/api/password', fd, () => { pw.reset(); alert('Password changed.'); });
+    post('/api/password', fd, () => { pw.reset(); LVCDialog.alert('Password changed.'); });
   });
   const vh = document.getElementById('vhost-form');
   if (vh) vh.addEventListener('submit', e => {
@@ -467,7 +468,7 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
   const sndMsg = document.getElementById('sounds-msg');
   function sndPost(url, fd, ok) {
     fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
-      .then(r => r.json()).then(j => { if (j.error) { alert(j.error); return; } if (ok) ok(); });
+      .then(r => r.json()).then(j => { if (j.error) { LVCDialog.alert(j.error); return; } if (ok) ok(); });
   }
   function playSound(id) {
     const u = SOUND_URLS[id] || '';
@@ -640,7 +641,7 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
       fd.append('username', uname);
       fetch(url, { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
         .then(r => r.json()).then(j => {
-          if (j.error) { alert(j.error); return; }
+          if (j.error) { LVCDialog.alert(j.error); return; }
           if (fmsg) { fmsg.textContent = j.message || 'Done.'; fmsg.classList.remove('hidden'); }
           if (ok) ok();
           setTimeout(() => location.reload(), 800);
@@ -655,9 +656,9 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
     const declineBtn = document.getElementById('friend-decline');
     if (declineBtn) declineBtn.addEventListener('click', () => friendPost('/api/friend/decline'));
     const removeBtn = document.getElementById('friend-remove');
-    if (removeBtn) removeBtn.addEventListener('click', () => { if (confirm('Remove this friend?')) friendPost('/api/friend/remove'); });
+    if (removeBtn) removeBtn.addEventListener('click', () => LVCDialog.confirm('Remove this friend?').then(ok => { if (ok) friendPost('/api/friend/remove'); }));
     const blockBtn = document.getElementById('friend-block');
-    if (blockBtn) blockBtn.addEventListener('click', () => { if (confirm('Block this user?')) friendPost('/api/friend/block'); });
+    if (blockBtn) blockBtn.addEventListener('click', () => LVCDialog.confirm('Block this user?').then(ok => { if (ok) friendPost('/api/friend/block'); }));
     const unblockBtn = document.getElementById('friend-unblock');
     if (unblockBtn) unblockBtn.addEventListener('click', () => friendPost('/api/friend/unblock'));
   }
@@ -771,16 +772,18 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
       fd.append('chat_bg_overlay', pState.chat_bg_overlay);
       fd.append('chat_bg_image', pState.chat_bg_image);
       fetch('/api/theme', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
-        .then(r => r.json()).then(j => { if (j.error) { alert(j.error); return; } location.reload(); });
+        .then(r => r.json()).then(j => { if (j.error) { LVCDialog.alert(j.error); return; } location.reload(); });
     });
     const pReset = document.getElementById('p-theme-reset');
     if (pReset) pReset.addEventListener('click', () => {
-      if (!confirm('Reset your theme to the server default?')) return;
-      const fd = new FormData();
-      fd.append('csrf', csrf);
-      fd.append('preset', '');
-      fetch('/api/theme', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
-        .then(r => r.json()).then(j => { if (!j.error) location.reload(); });
+      LVCDialog.confirm('Reset your theme to the server default?').then(ok => {
+        if (!ok) return;
+        const fd = new FormData();
+        fd.append('csrf', csrf);
+        fd.append('preset', '');
+        fetch('/api/theme', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+          .then(r => r.json()).then(j => { if (!j.error) location.reload(); });
+      });
     });
     const pBg = document.getElementById('p-theme-bg-file');
     if (pBg) pBg.addEventListener('change', () => {

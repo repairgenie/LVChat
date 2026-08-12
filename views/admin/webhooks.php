@@ -74,7 +74,7 @@
         <td class="px-4 py-2"><?= (int) $w['enabled'] === 1 ? '<span class="text-green-400">enabled</span>' : '<span class="text-red-400">disabled</span>' ?></td>
         <td class="px-4 py-2 text-discord-400"><?= $w['last_used'] ? relative_time($w['last_used']) : 'never' ?></td>
         <td class="px-4 py-2 text-right">
-          <form method="post" action="/admin/webhooks/action" class="inline" onsubmit="return confirm('Delete this webhook? Its token stops working immediately.');">
+          <form method="post" action="/admin/webhooks/action" class="inline" data-confirm="Delete this webhook? Its token stops working immediately.">
             <?= Csrf::field() ?>
             <input type="hidden" name="id" value="<?= (int) $w['id'] ?>">
             <button name="action" value="webhook_delete" class="btn-ghost text-xs text-red-400 !py-1">Delete</button>

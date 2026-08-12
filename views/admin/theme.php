@@ -292,19 +292,23 @@ $bgImage = $ov['chat_bg_image'] ?? '';
   });
   const bgRemove = document.getElementById('theme-bg-remove');
   if (bgRemove) bgRemove.addEventListener('click', () => {
-    if (!confirm('Remove the chat background image?')) return;
-    const fd = new FormData();
-    fd.append('csrf', csrf);
-    fd.append('action', 'theme_bg_remove');
-    fetch('/admin/action', { method: 'POST', body: fd }).then(() => location.reload());
+    LVCDialog.confirm('Remove the chat background image?').then((ok) => {
+      if (!ok) return;
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('action', 'theme_bg_remove');
+      fetch('/admin/action', { method: 'POST', body: fd }).then(() => location.reload());
+    });
   });
   const resetBtn = document.getElementById('theme-reset');
   if (resetBtn) resetBtn.addEventListener('click', () => {
-    if (!confirm('Reset the server theme to the default preset?')) return;
-    const fd = new FormData();
-    fd.append('csrf', csrf);
-    fd.append('action', 'theme_reset');
-    fetch('/admin/action', { method: 'POST', body: fd }).then(() => location.reload());
+    LVCDialog.confirm('Reset the server theme to the default preset?').then((ok) => {
+      if (!ok) return;
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('action', 'theme_reset');
+      fetch('/admin/action', { method: 'POST', body: fd }).then(() => location.reload());
+    });
   });
 
   renderPreview();

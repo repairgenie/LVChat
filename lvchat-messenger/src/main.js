@@ -15,7 +15,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, shell, session, clipboard } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, shell, session, clipboard, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const profiles = require('./profiles')
@@ -25,6 +25,30 @@ const { createStaticServer } = require('./server')
 app.setName('LVChat Messenger')
 // Required for Windows toast notifications to appear.
 app.setAppUserModelId('com.lasvegasbestinternet.lvchatmessenger')
+
+// Single-instance: only one copy of the app may run at a time. If another
+// instance already holds the lock, tell the user and quit instead of silently
+// spawning a second, invisible copy. (Tests set their own userData dir before
+// requiring this module, so the lock is per-test and never trips the harness.)
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.whenReady().then(() => {
+    dialog.showMessageBox({
+      type: 'error',
+      title: app.getName() + ' is already running',
+      message: app.getName() + ' is already running.',
+      detail: 'Another instance of ' + app.getName() + ' is already open. Use the running copy — this instance will now close.',
+      buttons: ['OK'],
+      noLink: true
+    }).finally(() => app.quit()).catch(() => {})
+  })
+  return
+}
+app.on('second-instance', () => {
+  // A second launch was attempted — bring the running app's windows forward
+  // instead of letting the second instance start.
+  showMessengerOrLauncher()
+})
 
 let launcherWindow = null
 let tray = null
@@ -263,10 +287,13 @@ function connectProfile (profile) {
   win.on('closed', drop)
   win.on('destroyed', drop)
   // Closing with the X hides to the tray instead of quitting; a real quit (or
-  // disconnect/logout) bypasses this via destroy() / isQuitting.
+  // disconnect/logout) bypasses this via destroy() / isQuitting. The flag stops
+  // ready-to-show from re-showing a window the user already closed to the tray.
+  let userClosed = false
   win.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault()
+      userClosed = true
       win.hide()
     }
   })
@@ -277,7 +304,7 @@ function connectProfile (profile) {
   profiles.touch(profile.id)
 
   win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(profile.id))
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => { if (!userClosed && !win.isDestroyed()) win.show() })
   rebuildTrayMenu()
   return { ok: true, id: webContentsId, reused: false }
 }
@@ -322,10 +349,13 @@ function openChatWindow (profile, type, id) {
   const drop = () => { messengerWindows.delete(webContentsId) }
   win.on('closed', drop)
   win.on('destroyed', drop)
-  // Same close-to-tray behavior as the main messenger window.
+  // Same close-to-tray behavior as the main messenger window. The flag stops
+  // ready-to-show from re-showing a window the user already closed to the tray.
+  let userClosed = false
   win.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault()
+      userClosed = true
       win.hide()
     }
   })
@@ -334,7 +364,7 @@ function openChatWindow (profile, type, id) {
   messengerWindows.set(webContentsId, record)
 
   win.loadURL(appOrigin + '/messenger.html?profile=' + encodeURIComponent(profile.id) + '&chat=' + encodeURIComponent(type + ':' + id))
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => { if (!userClosed && !win.isDestroyed()) win.show() })
   return { ok: true, id: webContentsId, reused: false }
 }
 

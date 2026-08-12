@@ -35,6 +35,14 @@ if (file_exists(getenv('CHAT_DB'))) {
 // loader behavior deterministically (see the "modules" section at the end).
 putenv('CHAT_MODULES=' . __DIR__ . '/fixtures/modules');
 
+// The license algorithm tests mint their own Ed25519 keypair; expose its public
+// half to LicenseKeys via the env override (see docs/protocol/licensing.md). The paid-mod
+// fixture boots with no key, so boot-time validation never touches the codec.
+$__testSeed = random_bytes(SODIUM_CRYPTO_SIGN_SEEDBYTES);
+$__testKp = sodium_crypto_sign_seed_keypair($__testSeed);
+putenv('LVC_LICENSE_PUBLIC_KEY=' . base64_encode(sodium_crypto_sign_publickey($__testKp)));
+$GLOBALS['license_test_sk'] = sodium_crypto_sign_secretkey($__testKp);
+
 require dirname(__DIR__) . '/src/bootstrap.php';
 
 $GLOBALS['passed'] = 0;
@@ -1530,7 +1538,10 @@ check('missing-manifest module ignored', ModuleLoader::get('invalid-module') ===
 check('malformed manifest ignored', ModuleLoader::get('bad-json') === null);
 check('requires mismatch module skipped', ModuleLoader::get('old-module') === null);
 check('old-module init.php not run', CommandRegistry::get('oldcmd') === null);
-check('warnings recorded for bad manifests + requires', count(ModuleLoader::warnings()) >= 3, implode(' | ', ModuleLoader::warnings()));
+check('broken-mod loaded (valid manifest) despite boot throw', ModuleLoader::get('broken-mod') !== null);
+check('broken-mod throw caught with a boot warning', in_array(true, array_map(static fn (string $w): bool => str_contains($w, "Module 'broken-mod' failed to boot"), ModuleLoader::warnings()), true), implode(' | ', ModuleLoader::warnings()));
+check('app keeps running after a module boot failure', ModuleLoader::get('good-module') !== null && CommandRegistry::get('goodmod') !== null);
+check('warnings recorded for bad manifests + requires', count(ModuleLoader::warnings()) >= 4, implode(' | ', ModuleLoader::warnings()));
 $dbRow = Database::row('SELECT enabled FROM modules WHERE id = ?', ['good-module']);
 check('good-module DB row enabled', $dbRow !== null && (int) $dbRow['enabled'] === 1);
 check('.disabled module keeps its DB row', Database::row('SELECT id FROM modules WHERE id = ?', ['disabled-mod']) !== null);
@@ -1562,6 +1573,176 @@ ModuleLoader::reset();
 putenv('CHAT_MODULES=' . __DIR__ . '/fixtures/modules');
 ModuleLoader::boot();
 check('restore fixture modules', ModuleLoader::get('good-module') !== null);
+
+// ── Module lifecycle: load / unload / disable (.disabled rename) ───────────
+function lc_rrmdir(string $dir): void {
+    foreach (scandir($dir) ?: [] as $e) {
+        if ($e === '.' || $e === '..') continue;
+        $p = $dir . '/' . $e;
+        if (is_dir($p) && !is_link($p)) lc_rrmdir($p); else @unlink($p);
+    }
+    @rmdir($dir);
+}
+function lc_rcopy(string $src, string $dst): void {
+    if (!is_dir($src)) return;
+    if (!is_dir($dst)) mkdir($dst, 0775, true);
+    foreach (scandir($src) ?: [] as $e) {
+        if ($e === '.' || $e === '..') continue;
+        $s = $src . '/' . $e;
+        $d = $dst . '/' . $e;
+        if (is_dir($s)) lc_rcopy($s, $d); else copy($s, $d);
+    }
+}
+
+// dirExists() resolves both the active and the .disabled form of a module.
+check('dirExists true for active module', ModuleLoader::dirExists('good-module') === true);
+check('dirExists true for .disabled-only module', ModuleLoader::dirExists('disabled-mod') === true);
+check('dirExists false for absent module', ModuleLoader::dirExists('ghost-module') === false);
+// The fixture .disabled module is enabled=1 in the DB yet never loads: the hard
+// .disabled rename beats the soft enabled flag.
+check('hard .disabled beats soft enabled flag',
+    (int) Database::scalar('SELECT enabled FROM modules WHERE id = ?', ['disabled-mod']) === 1
+        && ModuleLoader::get('disabled-mod') === null);
+
+// Full rename lifecycle on a throwaway copy of good-module.
+$lc = sys_get_temp_dir() . '/opencode-module-lifecycle';
+if (is_dir($lc)) lc_rrmdir($lc);
+mkdir($lc, 0775, true);
+lc_rcopy(__DIR__ . '/fixtures/modules/good-module', $lc . '/good-module');
+ModuleLoader::reset();
+putenv('CHAT_MODULES=' . $lc);
+ModuleLoader::boot();
+check('lifecycle module loads from temp dir', ModuleLoader::get('good-module') !== null && CommandRegistry::get('goodmod') !== null);
+config_set('good_setting', 'lifecycle_admin_value');
+
+// Unload: rename good-module -> good-module.disabled.
+if (!rename($lc . '/good-module', $lc . '/good-module.disabled')) {
+    check('lifecycle rename to .disabled', false, 'rename() failed');
+} else {
+    ModuleLoader::reset();
+    ModuleLoader::boot();
+    check('module unloaded after .disabled rename', ModuleLoader::get('good-module') === null && !in_array('good-module', ModuleLoader::enabled(), true));
+    check('renamed module keeps its DB row', Database::row('SELECT id FROM modules WHERE id = ?', ['good-module']) !== null);
+    check('renamed module keeps its enabled flag', (int) Database::scalar('SELECT enabled FROM modules WHERE id = ?', ['good-module']) === 1);
+    check('dirExists still true while renamed', ModuleLoader::dirExists('good-module') === true);
+
+    // Reload: rename back.
+    if (!rename($lc . '/good-module.disabled', $lc . '/good-module')) {
+        check('lifecycle rename back', false, 'rename() failed');
+    } else {
+        ModuleLoader::reset();
+        ModuleLoader::boot();
+        check('module reloads after rename back', ModuleLoader::get('good-module') !== null && CommandRegistry::get('goodmod') !== null);
+        check('reload keeps admin-set settings', config_get('good_setting') === 'lifecycle_admin_value');
+        check('dirExists true again after rename back', ModuleLoader::dirExists('good-module') === true);
+    }
+}
+
+// Dependency gating: a module whose requires.modules dependency is soft-disabled
+// is skipped; enabling the dependency lets both load.
+@mkdir($lc . '/dep-child', 0775, true);
+file_put_contents($lc . '/dep-child/module.json', json_encode(['id' => 'dep-child', 'name' => 'Dep Child', 'version' => '1.0.0'], JSON_PRETTY_PRINT));
+@mkdir($lc . '/dep-parent', 0775, true);
+file_put_contents($lc . '/dep-parent/module.json', json_encode([
+    'id' => 'dep-parent', 'name' => 'Dep Parent', 'version' => '1.0.0',
+    'requires' => ['modules' => ['dep-child']],
+], JSON_PRETTY_PRINT));
+ModuleLoader::reset();
+ModuleLoader::boot();
+check('dep-child loads by default', ModuleLoader::get('dep-child') !== null);
+check('dep-parent loads when dependency enabled', ModuleLoader::get('dep-parent') !== null);
+// Soft-disable the dependency in the DB, re-boot → the parent is skipped.
+Database::query('UPDATE modules SET enabled = 0 WHERE id = ?', ['dep-child']);
+ModuleLoader::reset();
+ModuleLoader::boot();
+check('dep-child soft-disabled', ModuleLoader::get('dep-child') === null);
+check('dep-parent skipped while dependency disabled', ModuleLoader::get('dep-parent') === null);
+check('unmet module dependency produces a warning',
+    in_array(true, array_map(static fn (string $w): bool => str_contains($w, "requires module 'dep-child' enabled"), ModuleLoader::warnings()), true),
+    implode(' | ', ModuleLoader::warnings()));
+
+// Cleanup + restore the fixture modules dir.
+lc_rrmdir($lc);
+ModuleLoader::reset();
+putenv('CHAT_MODULES=' . __DIR__ . '/fixtures/modules');
+ModuleLoader::boot();
+check('restore fixture modules after lifecycle', ModuleLoader::get('good-module') !== null);
+
+// ── Licensing: offline Ed25519 key algorithm ─────────────────────────────────
+echo "== license keys ==\n";
+$lsk = $GLOBALS['license_test_sk'];
+$lmk = static fn (array $c): string => LicenseKeys::generate($c, $lsk);
+$future = date('Y-m-d', strtotime('+30 days'));
+$key = $lmk(['mod' => 'premium-badges', 'type' => 'pro', 'holder' => 'Acme', 'exp' => $future, 'act' => 3, 'iss' => date('Y-m-d')]);
+check('key format', (bool) preg_match('#^LVC-1-premium-badges-[A-Z2-7]+-[A-Z2-7]+$#', $key), $key);
+$v = LicenseKeys::verify($key, 'premium-badges');
+check('valid key verifies', $v['ok'] === true, $v['reason'] ?? '');
+check('claims roundtrip', ($v['claims']['type'] ?? '') === 'pro' && ($v['claims']['mod'] ?? '') === 'premium-badges');
+check('wrong module rejected offline', LicenseKeys::verify($key, 'other-module')['ok'] === false);
+check('tampered signature rejected', LicenseKeys::verify(substr_replace($key, 'A', -3), 'premium-badges')['ok'] === false);
+check('tampered payload rejected', LicenseKeys::verify(substr_replace($key, 'Q', 40, 1), 'premium-badges')['ok'] === false);
+check('expired key rejected', LicenseKeys::verify($lmk(['mod' => 'premium-badges', 'exp' => date('Y-m-d', strtotime('-1 day'))]), 'premium-badges')['ok'] === false);
+$fv = LicenseKeys::verify($lmk(['mod' => 'premium-badges', 'exp' => '']), 'premium-badges');
+check('forever (lifetime) key verifies', $fv['ok'] === true);
+check('malformed key rejected', LicenseKeys::verify('not-a-key', 'x')['ok'] === false);
+check('unsupported version rejected', LicenseKeys::verify('LVC-9-m-x-x', 'm')['ok'] === false);
+check('batch keys are unique', $lmk(['mod' => 'm']) !== $lmk(['mod' => 'm']));
+check('base32 roundtrip', LicenseKeys::b32decode(LicenseKeys::b32encode('the quick brown fox')) === 'the quick brown fox');
+$otherSk = sodium_crypto_sign_secretkey(sodium_crypto_sign_seed_keypair(random_bytes(32)));
+check('forged signature (wrong key) rejected', LicenseKeys::verify(LicenseKeys::generate(['mod' => 'premium-badges'], $otherSk), 'premium-badges')['ok'] === false);
+
+// ── Licensing: paid module boot integration + client policy ─────────────────
+echo "== licensing client ==\n";
+check('paid-mod discovered', ModuleLoader::get('paid-mod') !== null);
+check('paid-mod command registered', CommandRegistry::get('paidcmd') !== null);
+$row = Database::row('SELECT license_status FROM modules WHERE id = ?', ['paid-mod']);
+check('paid-mod boot recorded no_key status', ($row['license_status'] ?? '') === 'no_key', json_encode($row));
+check('paid-mod isLicensed false without key', ModuleLoader::isLicensed('paid-mod') === false);
+$res = CommandParser::run('/paidcmd', ['id' => 1, 'role' => 'user'], null);
+check('paid-mod feature gated without license', str_contains($res['replies'][0] ?? '', 'requires a paid-mod license'), json_encode($res));
+check('free module isLicensed true', ModuleLoader::isLicensed('good-module') === true);
+
+config_set('license_policy', 'offline');
+config_set('license_url', '');
+config_set('license_recheck_hours', '24');
+config_set('license_grace_days', '7');
+$r = LicensingService::validate('paid-mod', '');
+check('empty key -> no_key', $r['status'] === 'no_key');
+$paidKey = $lmk(['mod' => 'paid-mod', 'type' => 'pro', 'exp' => $future, 'act' => 1, 'iss' => date('Y-m-d')]);
+Database::query('UPDATE modules SET license = ? WHERE id = ?', [$paidKey, 'paid-mod']);
+$r = LicensingService::validate('paid-mod', $paidKey);
+check('offline policy: internal check is the gate', $r['status'] === 'valid' && !empty($r['offline']));
+check('isLicensed true after valid key', ModuleLoader::isLicensed('paid-mod') === true);
+$res = CommandParser::run('/paidcmd', ['id' => 1, 'role' => 'user'], null);
+check('paid-mod feature active when licensed', str_contains($res['replies'][0] ?? '', 'premium feature active'), json_encode($res));
+check('wrong_module offline status', LicensingService::validate('paid-mod', $lmk(['mod' => 'other', 'exp' => $future]))['status'] === 'wrong_module');
+check('expired offline status', LicensingService::validate('paid-mod', $lmk(['mod' => 'paid-mod', 'exp' => date('Y-m-d', strtotime('-1 day'))]))['status'] === 'expired');
+check('malformed offline status', LicensingService::validate('paid-mod', 'garbage')['status'] === 'malformed');
+
+// Grace policy against an unreachable license server (closed port).
+config_set('license_policy', 'grace');
+config_set('license_url', 'http://127.0.0.1:1');
+$gk = $lmk(['mod' => 'grace-mod', 'exp' => $future, 'act' => 1, 'iss' => date('Y-m-d')]);
+Database::query("INSERT INTO modules (id, name, version, enabled, license) VALUES ('grace-mod', 'Grace', '1.0.0', 1, ?)", [$gk]);
+$r = LicensingService::validate('grace-mod', $gk);
+check('grace: first unreachable check allowed', $r['status'] === 'valid' && !empty($r['grace']));
+check('grace: status recorded as unvalidated', Database::scalar('SELECT license_status FROM modules WHERE id = ?', ['grace-mod']) === 'unvalidated');
+$r = LicensingService::validate('grace-mod', $gk);
+check('grace: no repeat dial within window', $r['status'] === 'valid' && !empty($r['grace']));
+Database::query('UPDATE modules SET license_checked_at = datetime("now", "-8 days") WHERE id = ?', ['grace-mod']);
+$r = LicensingService::validate('grace-mod', $gk);
+check('grace: never-confirmed key stops after window', $r['status'] === 'unreachable_grace');
+Database::query("UPDATE modules SET license_status = 'valid', license_checked_at = datetime('now', '-25 hours') WHERE id = ?", ['grace-mod']);
+$r = LicensingService::validate('grace-mod', $gk);
+check('grace: last-known-good keeps working when unreachable', $r['status'] === 'valid' && !empty($r['grace']));
+
+// Strict policy: unreachable means refuse immediately.
+config_set('license_policy', 'strict');
+$stk = $lmk(['mod' => 'strict-mod', 'exp' => $future, 'iss' => date('Y-m-d')]);
+Database::query("INSERT INTO modules (id, name, version, enabled, license) VALUES ('strict-mod', 'Strict', '1.0.0', 1, ?)", [$stk]);
+$r = LicensingService::validate('strict-mod', $stk);
+check('strict: unreachable refuses', $r['status'] === 'unreachable_strict');
+config_set('license_policy', 'grace');
 
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

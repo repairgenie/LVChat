@@ -15,7 +15,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, shell, session, nativeImage, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, Tray, shell, session, nativeImage, Notification, dialog } = require('electron')
 const path = require('path')
 const profiles = require('./profiles')
 const updater = require('./updater')
@@ -23,6 +23,38 @@ const updater = require('./updater')
 app.setName('LVChat Desktop')
 // Required for Windows toast notifications to appear.
 app.setAppUserModelId('com.lasvegasbestinternet.lvchat')
+
+// Single-instance: only one copy of the app may run at a time. If another
+// instance already holds the lock, tell the user and quit instead of silently
+// spawning a second, invisible copy. (Tests set their own userData dir before
+// requiring this module, so the lock is per-test and never trips the harness.)
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.whenReady().then(() => {
+    dialog.showMessageBox({
+      type: 'error',
+      title: app.getName() + ' is already running',
+      message: app.getName() + ' is already running.',
+      detail: 'Another instance of ' + app.getName() + ' is already open. Use the running copy — this instance will now close.',
+      buttons: ['OK'],
+      noLink: true
+    }).finally(() => app.quit()).catch(() => {})
+  })
+  return
+}
+app.on('second-instance', () => {
+  // A second launch was attempted — bring the running app's windows forward
+  // instead of letting the second instance start.
+  const open = [...chatWindows.values()].filter((r) => !r.win.isDestroyed())
+  if (open.length > 0) {
+    const win = open[0].win
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    return
+  }
+  createLauncherWindow()
+})
 
 let launcherWindow = null
 let tray = null

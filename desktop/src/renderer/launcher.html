@@ -100,6 +100,18 @@
     <button id="test-notification" class="ghost" title="Verify OS notifications work on this machine">Test notification</button>
   </footer>
 
+  <div id="modal" hidden>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal">
+      <div id="modal-title" class="modal-title"></div>
+      <div id="modal-message" class="modal-message"></div>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="ghost">Cancel</button>
+        <button id="modal-ok" class="danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <script src="launcher.js"></script>
 </body>
 </html>

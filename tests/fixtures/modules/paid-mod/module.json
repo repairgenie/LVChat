@@ -1,0 +1,12 @@
+{
+  "id": "paid-mod",
+  "name": "Paid Module",
+  "version": "2.0.0",
+  "description": "Fixture paid plugin (license: true) used by the automated suites.",
+  "author": "LVChat Tests",
+  "order": 2,
+  "license": true,
+  "settings": {
+    "paid_setting": "paid_default"
+  }
+}

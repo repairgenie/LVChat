@@ -1,0 +1,26 @@
+[
+  {
+    "id": "H-02",
+    "track": "security",
+    "severity": "High",
+    "class": "BrokenAccessControl",
+    "file": "bin/ws-server.php",
+    "line": 312,
+    "code": "case 'subscribe': if (!empty($msg['channel'])) { $st['sub'] = ['type' => 'channel', 'target' => (string) $msg['channel']]; ... }",
+    "description": "WS-mode realtime authorization gap: the Workerman gateway accepted a subscribe for ANY channel slug or DM username from any authenticated/guest connection and fanned out traffic by that name. A logged-in user could subscribe to a private channel they were not a member of, or to another user's DM stream, and receive those private messages in realtime — bypassing the membership/participant checks the poll/SSE paths enforce. Fixed in round 5; re-verified green this round.",
+    "fix": "(1) Channel subscriptions authorized at subscribe time via AccessService::member(). (2) DM fan-out authorized at broadcast time by participant identity — Realtime::dm() now publishes the actors' id + guest flag, and the gateway delivers only to connections whose authenticated actor is one of the two participants. (3) 7 regression assertions in tests/ws_test.php (verified to fail against the pre-fix daemon).",
+    "source": "manual audit of bin/ws-server.php + regression test"
+  },
+  {
+    "id": "U-02",
+    "track": "uiux",
+    "severity": "Medium",
+    "class": "NativeDialog",
+    "file": "views/admin/* + views/user/profile.php",
+    "line": 0,
+    "code": "onsubmit=\"return confirm('...')\" / var reason = prompt(msg, '') / alert(j.error)",
+    "description": "Native dialog abuse: 34 window.confirm()/prompt()/alert() call sites across the admin views and the user profile page, while the chat app itself replaced native dialogs with a styled modal (inconsistent UX). window.prompt() is unsupported in the Electron desktop client (returns null), silently breaking admin flows there — the ban-reason prompt and the legal-page editor's link/image URL prompts.",
+    "fix": "Added public/assets/js/dialog.js — a self-contained styled-modal LVCDialog (confirm/prompt/alert, promise-based) plus a data-confirm form-submit interception and a confirmSubmit(button,msg) helper that preserves the submit button's name/value for /admin/action routing. Included on every page via views/layout.php. Converted all 34 call sites (forms → data-confirm; action buttons → confirmSubmit; JS flows → async LVCDialog.*). Verified with a throwaway Electron e2e (confirm OK/cancel, prompt value, data-confirm interception — 4/4).",
+    "source": "grep sweep across views/ + throwaway Electron e2e"
+  }
+]

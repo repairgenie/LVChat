@@ -1242,14 +1242,23 @@ function presence_label(array $u): string {
         <p class="text-sm text-discord-200">Two desktop apps are available — pick the one that fits how you work:</p>
 
         <div class="flex gap-1 mt-3 mb-4 rounded-lg bg-discord-850 p-1" role="tablist">
-          <button type="button" data-download-tab="desktop" class="download-tab flex-1 text-sm font-semibold py-1.5 px-3 rounded-md text-white bg-blurple" role="tab" aria-selected="true">LVChat Desktop</button>
-          <button type="button" data-download-tab="messenger" class="download-tab flex-1 text-sm font-semibold py-1.5 px-3 rounded-md text-discord-300" role="tab" aria-selected="false">LVChat Messenger</button>
+          <button type="button" data-download-tab="desktop" class="download-tab flex-1 inline-flex items-center justify-center gap-2 text-sm font-semibold py-1.5 px-3 rounded-md text-white bg-blurple" role="tab" aria-selected="true">
+            <img src="/assets/apps/lvchat-desktop.png" alt="" class="w-4 h-4 rounded-[4px] object-cover" aria-hidden="true">
+            LVChat Desktop
+          </button>
+          <button type="button" data-download-tab="messenger" class="download-tab flex-1 inline-flex items-center justify-center gap-2 text-sm font-semibold py-1.5 px-3 rounded-md text-discord-300" role="tab" aria-selected="false">
+            <img src="/assets/apps/lvchat-messenger.png" alt="" class="w-4 h-4 rounded-[4px] object-cover" aria-hidden="true">
+            LVChat Messenger
+          </button>
         </div>
 
         <div data-download-panel="desktop" class="download-panel space-y-4">
-          <div>
-            <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">LVChat Desktop</div>
-            <p class="text-sm text-discord-200">A desktop-based version of the normal <?= h($site) ?> experience — the full web chat in its own window, with native notifications and offline support. Choose this for the complete feature set.</p>
+          <div class="flex items-start gap-3">
+            <img src="/assets/apps/lvchat-desktop.png" alt="LVChat Desktop icon" class="w-11 h-11 rounded-xl object-cover shrink-0 ring-1 ring-black/40" width="512" height="512" loading="lazy">
+            <div class="min-w-0">
+              <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">LVChat Desktop</div>
+              <p class="text-sm text-discord-200">A desktop-based version of the normal <?= h($site) ?> experience — the full web chat in its own window, with native notifications and offline support. Choose this for the complete feature set.</p>
+            </div>
           </div>
           <div class="grid gap-2">
             <?= download_buttons_html('desktop', $downloadPlatforms) ?>
@@ -1257,9 +1266,12 @@ function presence_label(array $u): string {
         </div>
 
         <div data-download-panel="messenger" class="download-panel hidden space-y-4">
-          <div>
-            <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">LVChat Messenger</div>
-            <p class="text-sm text-discord-200">A more streamlined, instant-messaging-first experience. The layout is simplified around conversations, making it quicker to use day-to-day — which may appeal more to business settings. It's a separate, more focused desktop client rather than a web app.</p>
+          <div class="flex items-start gap-3">
+            <img src="/assets/apps/lvchat-messenger.png" alt="LVChat Messenger icon" class="w-11 h-11 rounded-xl object-cover shrink-0 ring-1 ring-black/40" width="512" height="512" loading="lazy">
+            <div class="min-w-0">
+              <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">LVChat Messenger</div>
+              <p class="text-sm text-discord-200">A more streamlined, instant-messaging-first experience. The layout is simplified around conversations, making it quicker to use day-to-day — which may appeal more to business settings. It's a separate, more focused desktop client rather than a web app.</p>
+            </div>
           </div>
           <div class="grid gap-2">
             <?= download_buttons_html('messenger', $downloadPlatforms) ?>

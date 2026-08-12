@@ -117,5 +117,6 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
     icon();
   })();
   </script>
+  <script src="/assets/js/dialog.js" defer></script>
 </body>
 </html>

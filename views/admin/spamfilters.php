@@ -61,7 +61,7 @@
           </form>
           <form method="post" action="/admin/action">
             <?= Csrf::field() ?><input type="hidden" name="back" value="/admin/spamfilters"><input type="hidden" name="id" value="<?= (int) $f['id'] ?>">
-            <button name="action" value="spamfilter_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Delete this spam filter?')">Delete</button>
+            <button name="action" value="spamfilter_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Delete this spam filter?')">Delete</button>
           </form>
         </td>
       </tr>

@@ -206,7 +206,7 @@ final class ModuleLoader
         return $row ? (string) $row['license'] : '';
     }
 
-    /** License validation state for a module (see docs/licensing.md). */
+    /** License validation state for a module (see docs/protocol/licensing.md). */
     public static function licenseStatus(string $id): array
     {
         $row = Database::row(
@@ -227,13 +227,14 @@ final class ModuleLoader
         $manifest = self::get($id);
         if ($manifest && !empty($manifest['license'])) {
             return (string) $row['license'] !== ''
-                && !in_array((string) $row['license_status'], ['invalid', 'expired', 'server_refused'], true);
+                && !in_array((string) $row['license_status'], LicensingService::INVALID_STATUSES, true);
         }
         return true;
     }
 
     /** Wire each enabled module's routes.php into the router. Called from
-     *  public/index.php before dispatch; core routes always win on collisions. */
+     *  public/index.php before dispatch; core routes always win on collisions.
+     *  A module whose routes.php throws is skipped (recorded as a warning). */
     public static function wireRoutes(Router $router): void
     {
         foreach (self::all() as $id => $manifest) {
@@ -241,9 +242,13 @@ final class ModuleLoader
             if (!is_file($routes)) {
                 continue;
             }
-            $fn = require $routes;
-            if (is_callable($fn)) {
-                $fn($router);
+            try {
+                $fn = require $routes;
+                if (is_callable($fn)) {
+                    $fn($router);
+                }
+            } catch (Throwable $e) {
+                self::$warnings[] = "Module '$id' routes failed: " . $e->getMessage();
             }
         }
     }
@@ -375,19 +380,35 @@ final class ModuleLoader
             }
         }
 
-        // Idempotent schema migrations.
-        $schema = $moduleDir . '/schema.php';
-        if (is_file($schema)) {
-            $fn = require $schema;
-            if (is_callable($fn)) {
-                $fn(Database::instance());
+        // A module whose schema/init code throws must never take down the whole
+        // request (or the Workerman daemon) — record it as a boot warning and
+        // continue. The module still shows on Admin → Modules so the failure is
+        // visible and fixable.
+        try {
+            // Idempotent schema migrations.
+            $schema = $moduleDir . '/schema.php';
+            if (is_file($schema)) {
+                $fn = require $schema;
+                if (is_callable($fn)) {
+                    $fn(Database::instance());
+                }
             }
-        }
 
-        // Boot hook.
-        $init = $moduleDir . '/init.php';
-        if (is_file($init)) {
-            require $init;
+            // Boot hook.
+            $init = $moduleDir . '/init.php';
+            if (is_file($init)) {
+                require $init;
+            }
+
+            // Paid plugins: run the two-layer license validation and record the
+            // status (drives isLicensed() + the Admin → Modules badge). Free
+            // modules skip this entirely. See docs/protocol/licensing.md.
+            if (!empty($manifest['license'])) {
+                $key = (string) Database::scalar('SELECT license FROM modules WHERE id = ?', [$id]);
+                LicensingService::validate($id, $key, $manifest);
+            }
+        } catch (Throwable $e) {
+            self::$warnings[] = "Module '$id' failed to boot: " . $e->getMessage();
         }
 
         Database::query('UPDATE modules SET version = ?, updated_at = datetime("now") WHERE id = ?', [$manifest['version'], $id]);

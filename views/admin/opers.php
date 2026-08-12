@@ -69,7 +69,7 @@
           </form>
           <form method="post" action="/admin/action">
             <?= Csrf::field() ?><input type="hidden" name="back" value="/admin/opers"><input type="hidden" name="id" value="<?= (int) $o['id'] ?>">
-            <button name="action" value="oper_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="return confirm('Remove this o:line?')">Delete</button>
+            <button name="action" value="oper_del" class="btn-ghost text-xs !py-1 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Remove this o:line?')">Delete</button>
           </form>
         </td>
       </tr>

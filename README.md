@@ -494,18 +494,30 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **1090 automated assertions** in three layers:
+Runs **1280 automated assertions** in three layers:
 
-- **`tests/smoke.php`** (598) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (673) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
   share links, guests, webhooks, account invites + SMTP, age verification, the
   moderation queue (filter hits, kicks, *lines), pending/suspended account status,
   staff notes, support tickets, legal-page sanitisation, forbidden nicks/channels
   (sqline/cqline), `/sanick` gating + availability, the `#oper-log` mirror, the
-  channel-URL validator and banned-domain list (exact + subdomain), and the
-  ChannelService URL/`canManageChannel` helpers.
-- **`tests/http_test.php`** (487) — full HTTP end-to-end: spins up the built-in server
+  channel-URL validator and banned-domain list (exact + subdomain), sound alerts,
+  themes, the ChannelService URL/`canManageChannel` helpers, and the **module
+  system**: discovery + manifest validation, `requires` gating (LVChat/PHP versions
+  and module-to-module dependencies), settings seeding + schema migrations + boot
+  hooks, soft disable (DB `enabled=0`) vs **hard disable via the `<id>.disabled`
+  rename** (unloads the module while preserving its DB row/license/enabled flag,
+  reload on rename-back, hard-over-soft precedence, `dirExists()`), empty/missing
+  `modules/` no-op, and `isLicensed()`.
+  The **licensing layer** (`docs/protocol/licensing.md`) is also exercised here:
+  the offline Ed25519 key algorithm (round-trip, tamper/wrong-module/expired/
+  forever/malformed/forged rejection, base32, batch uniqueness), paid-module boot
+  status + feature gating, and the client policy — offline, grace (first-check
+  window, no-repeat-dial, last-known-good) and strict — against an unreachable
+  license URL.
+- **`tests/http_test.php`** (588) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
@@ -520,16 +532,46 @@ Runs **1090 automated assertions** in three layers:
   redirects, non-HTML passthrough, opaque-origin resilience shims, stylesheet
   rewrite, plus auth/banned-domain/SSRF guards) and its **resource proxy**
   (`/api/embed/res`: CSS `url()`/`@import` rewriting, `Access-Control-Allow-Origin: *`
-  re-serving of fonts/styles, same guards), and the
+  re-serving of fonts/styles, same guards), the
   web-messenger **bearer-token auth** (login/mfa/logout, header-authenticated
   `/api/me` + POSTs without cookies, token revocation, single-use MFA tickets,
-  and the CORS preflight allowing the custom headers).
-- **`tests/ws_test.php`** (12) — WebSocket gateway integration: spawns the realtime
+  and the CORS preflight allowing the custom headers), the **updater** (feed
+  check, pin-to-upstream, gated downloads), **sound alerts**, and the **WebRTC
+  voice module** (`modules/webrtc`, exercised via a symlinked fixture): admin
+  config + write-only secret, LiveKit JWT join/leave, talker-cap enforcement,
+  one-on-one calls (initiate/accept/decline/end) and invite-only meeting rooms
+  (`#mtg-XXXXXX`).
+  It also drives the **module system over HTTP** against a throwaway copy of the
+  fixture modules: the Admin → Modules page (state badges including
+  `disabled (.disabled)`, boot warnings, license save/clear, enable/disable
+  actions that genuinely unload and reload routes/assets/views on the next
+  request), module asset serving (MIME types, traversal / unknown-module /
+  `.disabled` 404s), `ModuleLoader::view()` rendering inside the standard layout,
+  and   a **rename lifecycle** (`cycle-mod` → `cycle-mod.disabled` → back) proving
+  the `.disabled` mechanism hard-disables and reloads a module over the wire
+  while its DB state survives. The **licensing client** round-trips against a
+  minimal in-repo fixture license server (`tests/fixtures/license_server.php`):
+  saving a key + re-check confirms it (valid badge), a server-refused key shows
+  `server refused`, and a malformed key fails offline without any network.
+- **`tests/ws_test.php`** (19) — WebSocket gateway integration: spawns the realtime
   daemon against a scratch DB and verifies ticket auth, channel/DM subscriptions,
-  and message/msg-update fan-out (ports via `WS_PORT` / `WS_PUSH_PORT`).
+  and message/msg-update fan-out — plus **realtime authorization** regression
+  coverage: non-members are refused a channel subscription, a third party never
+  receives DMs they are not a participant in, and legitimate participants still
+  do (ports via `WS_PORT` / `WS_PUSH_PORT`).
 
 The two desktop clients also ship their own Electron end-to-end suites
 (`npm test` in each folder — see [Desktop clients](#desktop-clients)).
+
+**Test environment variables.** The suites are hermetic: `CHAT_DB` points at a
+scratch SQLite file; `CHAT_MODULES` points at `tests/fixtures/modules/` (with a
+throwaway staging copy under `/tmp` for the HTTP rename lifecycle); module/license
+tests mint their own Ed25519 keypair and pass the public half to the app under
+test via `LVC_LICENSE_PUBLIC_KEY`, backed by a fixture license server on
+`127.0.0.1:8096` (the main HTTP server uses `8098`, the embed mock `8097`).
+The real `modules/` folder and the license server at `~/Documents/lvchat-license-server`
+are never touched. See `docs/modules.md` and `docs/protocol/licensing.md` for
+full coverage tables.
 
 ## Desktop clients
 
@@ -658,8 +700,8 @@ bin/ws-server.php   Workerman realtime gateway (WebSocket + internal push endpoi
 bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/check-updates.php  CLI update check against the configured feed (cron-friendly)
 bin/test.sh      run the full automated test suite
-tests/smoke.php  598 command/service assertions
-tests/http_test.php  480 HTTP assertions
+tests/smoke.php  673 command/service assertions
+tests/http_test.php  588 HTTP assertions
 tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
 composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)
@@ -667,6 +709,8 @@ data/            SQLite database (beside public/, never web-served)
 desktop/         LVChat Desktop — the web app as a native Electron client (see above)
 lvchat-messenger/   LVChat Messenger — IM-first Electron client (see above)
 update-server/   the update feed web app (versions + download links + electron feeds)
+modules/         installed modules (each `<id>/` + optional `<id>.disabled/`) — see docs/modules.md
+docs/protocol/   wire-level specs, incl. the license key algorithm + validation protocol (licensing.md)
 ```
 
 The **PWA layer** ships as committed files — `public/sw.js` (service worker),

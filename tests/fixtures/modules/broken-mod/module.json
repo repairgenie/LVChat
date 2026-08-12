@@ -1,0 +1,7 @@
+{
+  "id": "broken-mod",
+  "name": "Broken Module",
+  "version": "0.1.0",
+  "description": "Fixture module whose init.php throws — must be caught with a boot warning, never fatal.",
+  "order": 3
+}

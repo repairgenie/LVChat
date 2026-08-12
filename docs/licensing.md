@@ -37,7 +37,9 @@ extension surfaces (manifest, routes, commands, hooks, assets, views — see
 Any module whose code lives in this repository is part of the LVChat project
 and is licensed **AGPL-3.0-only**, exactly like the core. The WebRTC module
 (`modules/webrtc/`) is the current example; it carries its own `LICENSE` file
-and is declared `"license": "AGPL-3.0-only"` in its `module.json`.
+and is open-sourced under the same terms (in its `module.json` the `license`
+field is set to `false`, meaning it is a free module rather than a paid plugin —
+see `docs/modules.md`).
 
 ### Modules distributed separately
 

@@ -78,7 +78,7 @@
         <input type="hidden" name="id" value="<?= (int) $bot['id'] ?>">
         <button name="action" value="openclaw_toggle" class="btn-ghost text-xs !py-1">Toggle</button>
       </form>
-      <form method="post" action="/admin/action" class="inline" onsubmit="return confirm('Delete this bot? Its user account will also be deleted.');">
+      <form method="post" action="/admin/action" class="inline" data-confirm="Delete this bot? Its user account will also be deleted.">
         <?= Csrf::field() ?>
         <input type="hidden" name="back" value="/admin/openclaw">
         <input type="hidden" name="id" value="<?= (int) $bot['id'] ?>">

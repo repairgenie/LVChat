@@ -1171,6 +1171,12 @@ final class AdminController
                 config_set('updater_enabled', ($_POST['updater_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('updater_url', rtrim(trim((string) ($_POST['updater_url'] ?? '')), '/'));
                 @unlink(UpdaterService::manifestPath());
+                // Licensing (docs/protocol/licensing.md): where to validate paid-module
+                // keys + the offline policy when that server is unreachable.
+                config_set('license_url', rtrim(trim((string) ($_POST['license_url'] ?? '')), '/'));
+                config_set('license_policy', in_array(($_POST['license_policy'] ?? 'grace'), ['grace', 'strict', 'offline'], true) ? (string) $_POST['license_policy'] : 'grace');
+                config_set('license_grace_days', (string) max(0, (int) ($_POST['license_grace_days'] ?? 7)));
+                config_set('license_recheck_hours', (string) max(1, (int) ($_POST['license_recheck_hours'] ?? 24)));
                 // Allowed web-messenger origins (CORS). Normalize: split on
                 // commas, trim, drop trailing slashes, de-dupe case-insensitively.
                 // Only http(s) origins with a host are kept; the built-in
@@ -1427,15 +1433,31 @@ final class AdminController
                 break;
             case 'module_save':
                 $id = (string) ($_POST['id'] ?? '');
-                $modRow = $id !== '' ? Database::row('SELECT id FROM modules WHERE id = ?', [$id]) : null;
+                $modRow = $id !== '' ? Database::row('SELECT id, license FROM modules WHERE id = ?', [$id]) : null;
                 if (!$modRow) {
                     $ok = false;
                     $message = 'Unknown module.';
                 } else {
                     $license = trim((string) ($_POST['license'] ?? ''));
                     Database::query('UPDATE modules SET license = ? WHERE id = ?', [$license, $id]);
+                    // A changed key invalidates any cached validation result so
+                    // the next check re-validates against the license server.
+                    if ($license !== (string) $modRow['license']) {
+                        Database::query("UPDATE modules SET license_status = '', license_checked_at = NULL, license_expires_at = NULL WHERE id = ?", [$id]);
+                    }
                     log_audit('module_save', 'module#' . $id, $license !== '' ? 'license set' : 'license cleared');
                     $message = $license !== '' ? 'License key saved.' : 'License key cleared.';
+                }
+                break;
+            case 'module_recheck':
+                $id = (string) ($_POST['id'] ?? '');
+                $modRow = $id !== '' ? Database::row('SELECT license FROM modules WHERE id = ?', [$id]) : null;
+                if (!$modRow) {
+                    $ok = false;
+                    $message = 'Unknown module.';
+                } else {
+                    $result = LicensingService::validate($id, (string) $modRow['license'], ModuleLoader::get($id) ?: []);
+                    $message = 'License check: ' . $result['status'];
                 }
                 break;
             default:
