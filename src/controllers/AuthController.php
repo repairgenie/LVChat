@@ -85,7 +85,7 @@ final class AuthController
     /** Park a password-verified user in a pre-auth MFA state (no session token yet). */
     private static function beginMfa(array $user, string $next): void
     {
-        session_regenerate_id(true);
+        @session_regenerate_id(true);
         $_SESSION['mfa_pending_uid'] = (int) $user['id'];
         $_SESSION['mfa_pending_next'] = $next;
     }

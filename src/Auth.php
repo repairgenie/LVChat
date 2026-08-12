@@ -192,7 +192,7 @@ final class Auth
             Database::query('UPDATE guests SET last_seen = NULL WHERE id = ?', [$user['id']]);
         }
         unset($_SESSION['token']);
-        session_regenerate_id(true);
+        @session_regenerate_id(true);
     }
 
     /** Kill sessions belonging to a user. Keeps the current session unless $includeCurrent. */
