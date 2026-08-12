@@ -1987,6 +1987,14 @@ check('voice join refused while module disabled', $s === 403, "$s $b");
 [$s] = req('POST', '/api/webrtc/voice/join', ['channel' => 'general']);
 check('voice join requires auth', $s === 401, (string) $s);
 
+// The module serves its lazy-loaded background-effect assets (JS + model + wasm).
+[$s, , $b] = req('GET', '/modules/webrtc/assets/vendor/selfie-segmentation/selfie_segmentation.js');
+check('module serves the background lib js', $s === 200 && str_contains($b, 'SelfieSegmentation'), (string) $s);
+[$s] = req('GET', '/modules/webrtc/assets/vendor/selfie-segmentation/selfie_segmentation.tflite');
+check('module serves the segmentation model', $s === 200, (string) $s);
+[$s] = req('GET', '/modules/webrtc/assets/vendor/selfie-segmentation/selfie_segmentation_solution_simd_wasm_bin.wasm');
+check('module serves the segmentation wasm', $s === 200, (string) $s);
+
 // Non-op (bob) cannot enable voice on a channel.
 [$s, , $b] = req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tW, 'channel' => 'general', 'enabled' => '1'], $cjB);
 check('channel-voice toggle denied for non-op', $s === 403, "$s $b");
@@ -2099,6 +2107,20 @@ check('calling yourself rejected', $s === 400, "$s $b");
 check('calling unknown user rejected', $s === 404, "$s $b");
 [$s] = req('POST', '/api/webrtc/call/initiate', ['user' => 'bob']);
 check('call initiate requires auth', $s === 401, (string) $s);
+
+// Ring timeout: an unanswered ringing call fails as 'missed' after the ring
+// window (default 20 s, admin-tunable via call_ring_seconds). Status poll
+// drives the expiry; the caller's client sees the recent outcome.
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tV, 'user' => 'bob'], $cjA);
+$timeoutId = (int) (jsonDecode($b)['call_id'] ?? 0);
+check('call ring seconds returned to caller', (int) (jsonDecode($b)['ring_seconds'] ?? 0) === 20, $b);
+$pdo->query("UPDATE call_sessions SET created_at = datetime('now', '-30 seconds') WHERE id = $timeoutId");
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjA);
+$j = jsonDecode($b);
+check('ring seconds surfaced in status', (int) ($j['ring_seconds'] ?? 0) === 20, $b);
+check('unanswered call expires to missed', dbq('SELECT status FROM call_sessions WHERE id = ?', [$timeoutId])[0]['status'] === 'missed', '');
+$recentMissed = array_filter($j['calls']['recent'] ?? [], fn($r) => (int) ($r['call_id'] ?? 0) === $timeoutId && ($r['status'] ?? '') === 'missed');
+check('caller sees the missed call in recent', count($recentMissed) === 1, json_encode($j['calls']['recent'] ?? []));
 
 // Meeting rooms (#mtg-XXXXXX): private, invite-only, keyed, voice-enabled,
 // hidden from the public channel list, and offline invitees are not added.

@@ -24,6 +24,11 @@ declare(strict_types=1);
 define('ROOT', dirname(__DIR__));
 define('LVC_VERSION', '1.7.1');
 
+// Load deployment secrets / developer config from ROOT/.env (if present).
+// Never overrides variables already set in the environment.
+require ROOT . '/src/Dotenv.php';
+Dotenv::load(ROOT . '/.env');
+
 error_reporting(E_ALL);
 // Never leak stack traces, file paths, or DB details to browsers in production
 // (verbose error disclosure). Errors are always logged server-side; developers

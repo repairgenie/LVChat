@@ -156,7 +156,8 @@ final class ChatController
         $members = [];
         $notifyMode = 'all';
         if ($channel) {
-            $messages = MessageService::hydrateReactions(MessageService::history((int) $channel['id']), $user);
+            $floor = class_exists('SaaSService') ? SaaSService::historyFloor((int) $channel['id'], $user) : null;
+            $messages = MessageService::hydrateReactions(MessageService::history((int) $channel['id'], 60, $floor), $user);
             $members = ChannelService::members((string) $channel['id']);
             foreach ($members as &$m) {
                 $m = array_merge($m, Auth::statusInfo($m));
@@ -456,7 +457,7 @@ final class ChatController
         if (!isset($_FILES['file']) || !UploadService::isImageUpload($_FILES['file'])) {
             json_out(['error' => 'Choose an image file first.'], 400);
         }
-        $stored = UploadService::store($_FILES['file'], 'upload');
+        $stored = UploadService::store($_FILES['file'], 'upload', $user);
         if (!$stored['ok']) {
             json_out(['error' => $stored['error']], 400);
         }
@@ -803,7 +804,8 @@ final class ChatController
             if (!AccessService::member($channel['id'], $user)) {
                 json_out(['error' => 'You are not a member of this channel.'], 403);
             }
-            $messages = MessageService::hydrateReactions(MessageService::historyBefore((int) $channel['id'], $before), $user);
+            $floor = class_exists('SaaSService') ? SaaSService::historyFloor((int) $channel['id'], $user) : null;
+            $messages = MessageService::hydrateReactions(MessageService::historyBefore((int) $channel['id'], $before, 50, $floor), $user);
             json_out(['ok' => true, 'messages' => $messages, 'channel' => $channel['slug']]);
         }
         if (isset($_GET['dm']) && $_GET['dm'] !== '') {

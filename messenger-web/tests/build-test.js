@@ -99,6 +99,15 @@ function readText (p) {
   check('messenger.html loads the voice scripts', readText(path.join(DIST, 'messenger.html')).includes('vendor/livekit-client.umd.js') && readText(path.join(DIST, 'messenger.html')).includes('voice.js'))
   check('voice.js gates on the server status endpoint', readText(path.join(DIST, 'voice.js')).includes('/api/webrtc/voice/status'))
   check('voice.js ships video (camera + screen share)', readText(path.join(DIST, 'voice.js')).includes('setCameraEnabled') && readText(path.join(DIST, 'voice.js')).includes('setScreenShareEnabled'))
+  // Background effects: MediaPipe selfie-segmentation ships + is precached.
+  for (const f of ['selfie_segmentation.js', 'selfie_segmentation.tflite', 'selfie_segmentation_solution_simd_wasm_bin.wasm']) {
+    const p = path.join(DIST, 'vendor', 'selfie-segmentation', f)
+    check('dist copies background effect asset ' + f, fs.existsSync(p) && fs.statSync(p).size > 100)
+  }
+  check('sw.js precaches the background lib', sw.includes('vendor/selfie-segmentation/selfie_segmentation.js'))
+  const vjs = readText(path.join(DIST, 'voice.js'))
+  check('voice.js ships device settings + camera/mic test', vjs.includes('enumerateDevices') && vjs.includes('getUserMedia') && vjs.includes('Test camera'))
+  check('voice.js ships background effects', vjs.includes('makeBgProcessor') && vjs.includes('selfie_segmentation.js'))
   for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'favicon.png']) {
     const p = path.join(DIST, 'icons', f)
     check('icon ' + f + ' exists', fs.existsSync(p) && fs.statSync(p).size > 100)

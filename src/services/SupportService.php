@@ -39,6 +39,15 @@ final class SupportService
     /** Create a ticket for a registered user (user-facing form). */
     public static function create(array $user, string $subject, string $content, array $attachments = []): array
     {
+        if (class_exists('SaaSService')) {
+            $cap = SaaSService::limit($user, 'open_tickets');
+            if ($cap !== null && $cap <= 0) {
+                return ['ok' => false, 'error' => 'Support tickets are not available on your plan.'];
+            }
+            if ($cap !== null && SaaSService::openTicketCount((int) $user['id']) >= $cap) {
+                return ['ok' => false, 'error' => "You have reached the open-ticket limit ($cap). Close a ticket before opening another."];
+            }
+        }
         return self::createTicket($user['id'], null, $user['id'], $subject, $content, null, $attachments);
     }
 

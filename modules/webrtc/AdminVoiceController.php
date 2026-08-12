@@ -116,7 +116,7 @@ final class AdminVoiceController
 
         config_set('voice_max_users', (string) max(1, min(200, (int) ($post['voice_max_users'] ?? 50))));
         config_set('voice_talker_cap', (string) max(1, min(50, (int) ($post['voice_talker_cap'] ?? 8))));
-        config_set('call_ring_seconds', (string) max(10, min(120, (int) ($post['call_ring_seconds'] ?? 25))));
+        config_set('call_ring_seconds', (string) max(10, min(120, (int) ($post['call_ring_seconds'] ?? 20))));
 
         $preset = (string) ($post['voice_quality_preset'] ?? 'moderate');
         if (!in_array($preset, ['high', 'moderate', 'minimum'], true)) {

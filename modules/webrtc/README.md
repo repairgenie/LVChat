@@ -99,7 +99,8 @@ GET  /mtg/{slug}?key=…                  → keyed auto-join landing (login bou
 Auth: browser session + CSRF, or the messenger bearer token (`X-LVC-Session`,
 CSRF-safe). Tokens are LiveKit JWTs (HS256, 60 s TTL) minted by this server —
 the API secret never reaches a browser. Unanswered calls expire to `missed`
-after 30 s; voice sessions without a heartbeat expire after 2 min.
+after `call_ring_seconds` (default 20 s) and the caller is told "no answer";
+voice sessions without a heartbeat expire after 2 min.
 
 ## Clients
 
@@ -123,6 +124,23 @@ after 30 s; voice sessions without a heartbeat expire after 2 min.
 All four clients vendor the same pinned `livekit-client` UMD, share the
 `/api/webrtc/*` contract, and keep the join/leave/call/meeting endpoints as the
 only voice interface (see `docs/webrtc-implementation.md`).
+
+## Device settings & video background
+
+Every client exposes a **Voice & video settings** modal (gear in the header /
+voice pane): microphone, camera and speaker device selection (persisted per
+machine in `localStorage`), a **camera test** (live `getUserMedia` preview,
+independent of LiveKit) and a **microphone test** (live input-level meter).
+Device prefs are applied at connect/toggle time via `setMicrophoneEnabled` /
+`setCameraEnabled` / `setSinkId`.
+
+**Background effects** (blur or a custom image behind you) use a lazily-loaded,
+self-hosted MediaPipe selfie-segmentation build (`assets/vendor/selfie-segmentation/`,
+also mirrored under `messenger-web/src/vendor/` and `renderer/vendor/`). A custom
+LiveKit `TrackProcessor` composites the segmented person over the blurred or
+image background; MediaPipe is only fetched while an effect is active and runs
+entirely in the browser. Effects apply whenever your camera is on (1:1 calls,
+channel voice, meetings).
 
 ## Meetings (#mtg-XXXXXX)
 

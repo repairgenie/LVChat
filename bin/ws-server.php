@@ -267,9 +267,45 @@ $ws->onWebSocketConnect = function (TcpConnection $conn) use (&$state, $writePre
         $conn->close();
         return;
     }
+
+    // Connection metering (SaaS module): peek the ticket so we can enforce the
+    // per-account pool and the global ceiling BEFORE burning the single-use
+    // ticket. Both the limit and the counts live in the shared DB + daemon
+    // state; the SaaS module is optional — without it nothing is gated.
+    $peeked = Realtime::peekTicket($ticket);
+    if (!$peeked) {
+        rt_log('reject ws connect: invalid/expired ticket');
+        $conn->close();
+        return;
+    }
+    if (class_exists('SaaSService')) {
+        $ceiling = SaaSService::globalConnectionCeiling();
+        if (count($state) >= $ceiling) {
+            rt_log('reject ws connect: global ceiling reached (' . count($state) . '/' . $ceiling . ')');
+            $conn->close(4501);
+            return;
+        }
+        $cap = SaaSService::connectionLimit($peeked);
+        if ($cap !== null) {
+            $uid = (int) $peeked['id'];
+            $ug = (int) ($peeked['guest'] ?? 0);
+            $mine = 0;
+            foreach ($state as $st) {
+                if ((int) $st['user']['id'] === $uid && (int) $st['user']['guest'] === $ug) {
+                    $mine++;
+                }
+            }
+            if ($mine >= $cap) {
+                rt_log('reject ws connect: ' . ($peeked['username'] ?? '?') . " at connection limit ($mine/$cap)");
+                $conn->close(4502);
+                return;
+            }
+        }
+    }
+
     $user = Realtime::consumeTicket($ticket);
     if (!$user) {
-        rt_log('reject ws connect: invalid/expired ticket');
+        rt_log('reject ws connect: ticket consumed concurrently');
         $conn->close();
         return;
     }

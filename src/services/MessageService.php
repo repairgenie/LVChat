@@ -246,27 +246,29 @@ final class MessageService
         return array_map([self::class, 'present'], $rows);
     }
 
-    public static function history(int $channelId, int $limit = 60): array
+    /** Newest messages of a channel. $floorId (inclusive, when not null) clamps
+     *  history to a sliding window — old messages fall off as new ones arrive. */
+    public static function history(int $channelId, int $limit = 60, ?int $floorId = null): array
     {
         $rows = Database::all(
             self::msgSelect() . '
-             WHERE m.channel_id = ? AND m.deleted = 0
+             WHERE m.channel_id = ? AND m.deleted = 0' . ($floorId !== null ? ' AND m.id >= ?' : '') . '
              ORDER BY m.id DESC
              LIMIT ?',
-            [$channelId, $limit]
+            $floorId !== null ? [$channelId, $floorId, $limit] : [$channelId, $limit]
         );
         return array_map([self::class, 'present'], array_reverse($rows));
     }
 
     /** Older messages than $beforeId (pagination). Returns ascending oldest→newest. */
-    public static function historyBefore(int $channelId, int $beforeId, int $limit = 50): array
+    public static function historyBefore(int $channelId, int $beforeId, int $limit = 50, ?int $floorId = null): array
     {
         $rows = Database::all(
             self::msgSelect() . '
-             WHERE m.channel_id = ? AND m.deleted = 0 AND m.id < ?
+             WHERE m.channel_id = ? AND m.deleted = 0 AND m.id < ?' . ($floorId !== null ? ' AND m.id >= ?' : '') . '
              ORDER BY m.id DESC
              LIMIT ?',
-            [$channelId, $beforeId, $limit]
+            $floorId !== null ? [$channelId, $beforeId, $floorId, $limit] : [$channelId, $beforeId, $limit]
         );
         return array_map([self::class, 'present'], array_reverse($rows));
     }
@@ -628,6 +630,10 @@ final class MessageService
         if ($term === '') {
             return [];
         }
+        // Optional SaaS history window: search only inside the newest N messages
+        // server-wide (free-tier lookback). Null when unenforced/unlimited.
+        $floorId = class_exists('SaaSService') ? SaaSService::historyFloorGlobal($actor) : null;
+        $floorSql = $floorId !== null ? ' AND m.id >= ?' : '';
         $join = Auth::isGuest($actor)
             ? 'JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.guest_id = ?'
             : 'JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = ?';
@@ -653,20 +659,24 @@ final class MessageService
                 self::msgSelect() . "
                  $join
                  WHERE m.deleted = 0 AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')
-                   AND m.id IN ($ph)
+                   AND m.id IN ($ph)$floorSql
                  ORDER BY m.id DESC
                  LIMIT ?",
-                array_merge([$actor['id']], $ids, [$limit])
+                $floorId !== null
+                    ? array_merge([$actor['id']], $ids, [$floorId, $limit])
+                    : array_merge([$actor['id']], $ids, [$limit])
             );
         } else {
             $rows = Database::all(
                 self::msgSelect() . "
                  $join
                  WHERE m.deleted = 0 AND m.kind NOT IN ('join','part','quit','kick','ban','topic','mode','nick','system','notice')
-                   AND m.content LIKE ? ESCAPE '\\'
+                   AND m.content LIKE ? ESCAPE '\\'$floorSql
                  ORDER BY m.id DESC
                  LIMIT ?",
-                [$actor['id'], '%' . str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $term) . '%', $limit]
+                $floorId !== null
+                    ? [$actor['id'], '%' . str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $term) . '%', $floorId, $limit]
+                    : [$actor['id'], '%' . str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $term) . '%', $limit]
             );
         }
         return array_map([self::class, 'present'], $rows);

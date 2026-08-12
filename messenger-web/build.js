@@ -169,6 +169,7 @@ function build (opts) {
     './voice.css',
     './voice.js',
     './vendor/livekit-client.umd.js',
+    './vendor/selfie-segmentation/selfie_segmentation.js',
     './manifest.webmanifest',
     './offline.html',
     './icons/icon-192.png',
@@ -184,7 +185,8 @@ function build (opts) {
     path.join(SRC, 'sw.template.js'),
     path.join(SRC, 'voice.css'),
     path.join(SRC, 'voice.js'),
-    path.join(SRC, 'vendor', 'livekit-client.umd.js')
+    path.join(SRC, 'vendor', 'livekit-client.umd.js'),
+    path.join(SRC, 'vendor', 'selfie-segmentation', 'selfie_segmentation.js')
   ])
   const sw = fs.readFileSync(path.join(SRC, 'sw.template.js'), 'utf8')
     .replace(/__CACHE_VERSION__/g, cacheVersion)
@@ -197,6 +199,10 @@ function build (opts) {
   }
   fs.mkdirSync(path.join(OUT, 'vendor'), { recursive: true })
   copy(path.join(SRC, 'vendor', 'livekit-client.umd.js'), path.join(OUT, 'vendor', 'livekit-client.umd.js'))
+  fs.mkdirSync(path.join(OUT, 'vendor', 'selfie-segmentation'), { recursive: true })
+  for (const f of fs.readdirSync(path.join(SRC, 'vendor', 'selfie-segmentation'))) {
+    copy(path.join(SRC, 'vendor', 'selfie-segmentation', f), path.join(OUT, 'vendor', 'selfie-segmentation', f))
+  }
   fs.mkdirSync(path.join(OUT, 'icons'), { recursive: true })
   for (const f of fs.readdirSync(path.join(SRC, 'icons'))) {
     copy(path.join(SRC, 'icons', f), path.join(OUT, 'icons', f))

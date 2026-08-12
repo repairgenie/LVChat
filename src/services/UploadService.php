@@ -63,9 +63,15 @@ final class UploadService
     }
 
     /** Validate the uploaded image, return ['ok' => true, 'ext' => 'webp'] or an error string. */
-    public static function validate(array $file, string $kind): array
+    public static function validate(array $file, string $kind, ?array $actor = null): array
     {
         $max = $kind === 'avatar' ? self::AVATAR_MAX_BYTES : self::IMAGE_MAX_BYTES;
+        if ($kind === 'upload' && $actor !== null && class_exists('SaaSService')) {
+            $planCap = SaaSService::limit($actor, 'upload_max_bytes');
+            if ($planCap !== null && $planCap > 0) {
+                $max = $planCap;
+            }
+        }
         if ((int) $file['error'] !== UPLOAD_ERR_OK) {
             return ['ok' => false, 'error' => 'Upload failed (error ' . (int) $file['error'] . ').'];
         }
@@ -130,9 +136,9 @@ final class UploadService
     }
 
     /** Store a validated upload with a random name. Returns the public URL path. */
-    public static function store(array $file, string $kind): array
+    public static function store(array $file, string $kind, ?array $actor = null): array
     {
-        $v = self::validate($file, $kind);
+        $v = self::validate($file, $kind, $actor);
         if (!$v['ok']) {
             return $v;
         }

@@ -202,3 +202,65 @@
 }
 .lvcvoice-btn-ghost:hover { background: #35373c; }
 .lvcvoice-btn-danger { border-color: rgba(239,68,68,.4); color: #f87171; }
+
+/* Pane header actions (settings gear + leave). */
+.pane-head-actions { display: flex; align-items: center; gap: 6px; }
+
+/* ── Voice & video settings modal ─────────────────────────────────────── */
+.lvcvoice-settings-card {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  color: #dbdee1;
+  font-size: 13px;
+  overflow: hidden;
+}
+.lvcvoice-settings-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(80vh - 60px);
+  overflow-y: auto;
+}
+.st-section { display: flex; flex-direction: column; gap: 8px; }
+.st-label { color: #9ba1a6; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.st-field { display: flex; flex-direction: column; gap: 4px; color: #dbdee1; font-size: 12px; }
+.st-select {
+  background: #2b2d31;
+  border: 1px solid rgba(255,255,255,.1);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  width: 100%;
+}
+.st-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.st-actions { justify-content: flex-end; margin-top: 2px; }
+.st-camvideo {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,.08);
+}
+.st-meter-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
+.st-meter-wrap meter { width: 120px; height: 14px; }
+.st-meter-val { color: #fbbf24; font-size: 11px; min-width: 32px; }
+.st-bg { flex: 1; }
+.st-bg.on { background: #5865f2; border-color: #5865f2; color: #fff; }
+.st-imgprev {
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  margin-top: 4px;
+}
+.st-hint { color: #9ba1a6; font-size: 11px; line-height: 1.5; }
+#lvcvoice-settings input[type="file"] { font-size: 12px; color: #9ba1a6; }
+#lvcvoice-settings input[type="range"] { width: 100%; }

@@ -89,8 +89,8 @@ $s = $settings;
       </div>
       <div>
         <label class="label">Ring timeout (seconds)</label>
-        <input class="input" type="number" min="10" max="120" name="call_ring_seconds" value="<?= h($s['call_ring_seconds'] ?? '25') ?>">
-        <p class="text-xs text-discord-400 mt-1">Unanswered calls auto-fail after this long (default 25s ≈ 5 rings).</p>
+        <input class="input" type="number" min="10" max="120" name="call_ring_seconds" value="<?= h($s['call_ring_seconds'] ?? '20') ?>">
+        <p class="text-xs text-discord-400 mt-1">Unanswered calls auto-fail as "no answer" after this long (default 20s ≈ 4 rings).</p>
       </div>
     </div>
 

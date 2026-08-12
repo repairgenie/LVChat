@@ -32,6 +32,15 @@ final class OpenClawBotService
         if ($avatar !== '' && !preg_match('#^https://#', $avatar)) {
             return ['ok' => false, 'error' => 'Avatar must be an https:// URL.'];
         }
+        if (class_exists('SaaSService')) {
+            if (!SaaSService::feature($actor, 'openclaw_bots')) {
+                return ['ok' => false, 'error' => 'OpenClaw bots are not available on your plan.'];
+            }
+            $cap = SaaSService::limit($actor, 'openclaw_bot_count');
+            if ($cap !== null && SaaSService::botCount((int) $actor['id']) >= $cap) {
+                return ['ok' => false, 'error' => "You have reached the bot limit ($cap)."];
+            }
+        }
 
         $slug = strtolower(preg_replace('/[^A-Za-z0-9]/', '', $name));
         $username = $slug !== '' ? mb_substr($slug, 0, 24) : 'openclaw';

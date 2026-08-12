@@ -71,6 +71,14 @@ final class ChannelService
         if (self::find($name)) {
             return 'That channel already exists.';
         }
+        // Owned-channel cap: the SaaS plan limit overrides the global config
+        // (guarded so the optional module changes nothing when it is absent).
+        if (class_exists('SaaSService')) {
+            $cap = SaaSService::limit($user, 'owned_channels');
+            if ($cap !== null && SaaSService::ownedChannelCount((int) $user['id']) >= $cap) {
+                return "You have reached the channel limit ($cap).";
+            }
+        }
         $max = (int) (config_get('max_channels_per_user', '100') ?? 100);
         $owned = (int) Database::scalar('SELECT COUNT(*) FROM channels WHERE owner_id = ?', [$user['id']]);
         if ($owned >= $max) {
@@ -118,6 +126,12 @@ final class ChannelService
         $member = AccessService::member($channel['id'], $user);
         if ($member) {
             return ['ok' => true, 'reason' => 'already_member', 'needsKey' => false];
+        }
+        if (class_exists('SaaSService')) {
+            $cap = SaaSService::limit($user, 'memberships');
+            if ($cap !== null && SaaSService::membershipCount($user) >= $cap) {
+                return ['ok' => false, 'reason' => "You have reached the membership limit ($cap).", 'needsKey' => false];
+            }
         }
         if ((int) $channel['forbidden'] === 1) {
             return ['ok' => false, 'reason' => 'Channel is forbidden.', 'needsKey' => false];

@@ -710,6 +710,7 @@ desktop/         LVChat Desktop — the web app as a native Electron client (see
 lvchat-messenger/   LVChat Messenger — IM-first Electron client (see above)
 update-server/   the update feed web app (versions + download links + electron feeds)
 modules/         installed modules (each `<id>/` + optional `<id>.disabled/`) — see docs/modules.md
+docs/saas.md     SaaS module: plan metering, feature gating, Stripe/PayPal/BTCPay billing, platform fee
 docs/protocol/   wire-level specs, incl. the license key algorithm + validation protocol (licensing.md)
 ```
 

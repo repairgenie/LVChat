@@ -82,6 +82,16 @@ final class MtgController
         if (Auth::isGuest($actor)) {
             json_out(['error' => 'Registered users only.'], 403);
         }
+        // SaaS module: meetings are a per-plan feature with a concurrent cap.
+        if (class_exists('SaaSService')) {
+            if (!SaaSService::feature($actor, 'meetings')) {
+                json_out(['error' => 'Meetings are not available on your plan.'], 403);
+            }
+            $cap = SaaSService::limit($actor, 'meetings_concurrent');
+            if ($cap !== null && SaaSService::meetingCount((int) $actor['id']) >= $cap) {
+                json_out(['error' => "You have reached the concurrent-meeting limit ($cap)."], 409);
+            }
+        }
 
         // #mtg-<6 random digits>; regenerate on the (rare) collision.
         $name = '';

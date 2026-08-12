@@ -42,6 +42,15 @@ final class InviteService
         if (Database::scalar('SELECT id FROM users WHERE email = ? COLLATE NOCASE', [$email])) {
             return ['ok' => false, 'error' => 'That email address already belongs to a registered user.'];
         }
+        if (class_exists('SaaSService')) {
+            $cap = SaaSService::limitForUser($invitedBy, 'reg_invites');
+            if ($cap !== null && $cap <= 0) {
+                return ['ok' => false, 'error' => 'Registration invites are not available on your plan.'];
+            }
+            if ($cap !== null && SaaSService::regInviteCount($invitedBy) >= $cap) {
+                return ['ok' => false, 'error' => "You have reached the invite limit ($cap)."];
+            }
+        }
         $token = bin2hex(random_bytes(24));
         $msg = $message !== null && trim($message) !== '' ? mb_substr(trim($message), 0, 1000) : null;
         Database::query(

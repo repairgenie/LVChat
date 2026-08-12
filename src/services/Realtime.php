@@ -54,6 +54,34 @@ final class Realtime
     }
 
     /**
+     * Resolve a ticket to its actor WITHOUT invalidating it. Used by the
+     * gateway's connection-metering gate, which must check limits before
+     * burning the single-use ticket (see bin/ws-server.php onWebSocketConnect).
+     */
+    public static function peekTicket(string $token): ?array
+    {
+        if ($token === '') {
+            return null;
+        }
+        $t = Database::row(
+            'SELECT * FROM ws_tickets WHERE token = ? AND expires_at > datetime("now")',
+            [$token]
+        );
+        if (!$t) {
+            return null;
+        }
+        if (!empty($t['user_id'])) {
+            $u = Database::row('SELECT * FROM users WHERE id = ?', [(int) $t['user_id']]);
+            return $u ?: null;
+        }
+        if (!empty($t['guest_id'])) {
+            $g = Database::row('SELECT * FROM guests WHERE id = ?', [(int) $t['guest_id']]);
+            return $g ? Auth::guestActor($g) : null;
+        }
+        return null;
+    }
+
+    /**
      * Redeem a handshake ticket. Returns the actor array (user or guest shape)
      * and invalidates the ticket. Used by the realtime gateway.
      */

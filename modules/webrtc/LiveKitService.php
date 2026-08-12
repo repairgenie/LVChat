@@ -73,20 +73,34 @@ final class LiveKitService
         return max(1, min(200, (int) (config_get('voice_max_users', '50') ?? 50)));
     }
 
-    /** How long an unanswered call rings before it fails as 'missed' (~5 rings). */
+    /** How long an unanswered call rings before it fails as 'missed' (~4 rings). */
     public static function ringSeconds(): int
     {
-        return max(10, min(120, (int) (config_get('call_ring_seconds', '25') ?? 25)));
+        return max(10, min(120, (int) (config_get('call_ring_seconds', '20') ?? 20)));
     }
 
-    public static function talkerCap(): int
+    public static function talkerCap(?array $actor = null): int
     {
-        return max(1, min(50, (int) (config_get('voice_talker_cap', '8') ?? 8)));
+        $cap = (int) (config_get('voice_talker_cap', '8') ?? 8);
+        if ($actor !== null && class_exists('SaaSService')) {
+            $qos = SaaSService::voiceQos($actor);
+            if ($qos['talker_cap'] !== null && $qos['talker_cap'] > 0) {
+                $cap = $qos['talker_cap'];
+            }
+        }
+        return max(1, min(50, $cap));
     }
 
-    public static function bitrate(): int
+    public static function bitrate(?array $actor = null): int
     {
-        return max(16000, min(64000, (int) (config_get('voice_bitrate', '40000') ?? 40000)));
+        $bitrate = (int) (config_get('voice_bitrate', '40000') ?? 40000);
+        if ($actor !== null && class_exists('SaaSService')) {
+            $qos = SaaSService::voiceQos($actor);
+            if ($qos['bitrate'] !== null && $qos['bitrate'] > 0) {
+                $bitrate = $qos['bitrate'];
+            }
+        }
+        return max(16000, min(64000, $bitrate));
     }
 
     /** A stable LiveKit identity for an actor (used as JWT `sub`). */

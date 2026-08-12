@@ -24,10 +24,12 @@
  * the server says voice is enabled (module disabled/absent → 404 → hidden).
  *
  * Features:
- *   - one-on-one DM calls (ring / accept / decline / end)
+ *   - one-on-one DM calls (ring / accept / decline / end, 20 s ring timeout)
  *   - per-channel voice (join / leave / mute, active-speaker talker cap)
  *   - video: camera + screen sharing (LiveKit setCameraEnabled /
  *     setScreenShareEnabled), remote/local tracks attached to a video grid
+ *   - audio & video device settings + camera/mic test (getUserMedia, no server)
+ *   - background blur / custom image during video (lazy MediaPipe segmentation)
  *   - meetings: #mtg-XXXXXX private keyed rooms (create / invite online users)
  *
  * Requires the vendored livekit-client UMD (window.LivekitClient) — loaded
@@ -38,6 +40,9 @@
   if (window.LVCVoice) return;
 
   var POLL_MS = 2000;
+  var PREFS_KEY = 'lvchat.voice.prefs';
+  // Self-hosted MediaPipe selfie-segmentation, lazy-loaded (see vendor/).
+  var BG_BASE = '/modules/webrtc/assets/vendor/selfie-segmentation/';
 
   var state = {
     enabled: false,
@@ -47,16 +52,28 @@
     talkerCap: 8,
     channels: {},        // slug -> { voice_enabled }
     session: null,       // { room, kind }
-    calls: { incoming: [], outgoing: [], active: null },
+    calls: { incoming: [], outgoing: [], active: null, recent: [] },
     room: null,          // livekit Room
     inVoice: false,
     connecting: false,
     pendingJoin: null,
     pendingCall: null,
+    pendingCallAt: 0,    // ms when the outgoing call was initiated (race guard)
     mtg: null,           // { slug, name, key, url } for the current meeting
+    ringSeconds: 20,     // server ring timeout (call_ring_seconds)
+    ringStarted: {},     // call_id -> ms when its ring was first seen
+    ringShown: null,     // { call_id, peer } of the current incoming ring
+    ringDismissed: null, // call_id the user accepted/declined (not "missed")
+    prefs: null,         // { mic, cam, speaker, bg, blur, image }
+    devices: { audioinput: [], videoinput: [], audiooutput: [] },
+    camTest: null,       // active camera-test stream
+    micTest: null,       // active mic-test analyser state
+    settingsOpen: false,
+    bgProc: null,        // active LiveKit video processor for bg effects
+    bgProcKey: '',       // JSON key of the effect the processor was built for
   };
 
-  var els = {};          // { btn, mtgBtn, pane, ring, pill, videos, toast }
+  var els = {};          // { btn, settingsBtn, mtgBtn, pane, ring, pill, videos, toast, st* }
   var tiles = {};        // trackSid -> { el, kind, label }
 
   function $ (id) { return document.getElementById(id) }
@@ -98,7 +115,9 @@
       state.channels = {};
       (j.channels || []).forEach(function (c) { state.channels[c.slug] = c.voice_enabled; });
       state.session = j.session || null;
-      state.calls = j.calls || { incoming: [], outgoing: [], active: null };
+      state.calls = j.calls || { incoming: [], outgoing: [], active: null, recent: [] };
+      state.recent = state.calls.recent || [];
+      state.ringSeconds = j.ring_seconds || state.ringSeconds || 20;
       state.inVoice = !!(state.session && state.room && state.room.state === 'connected');
       render();
       handleCallTransitions();
@@ -156,7 +175,7 @@
     room.on(Event.Connected, function () {
       state.connecting = false;
       state.inVoice = true;
-      room.localParticipant.setMicrophoneEnabled(true);
+      applyDevicePrefs();
       render();
     });
 
@@ -227,12 +246,39 @@
     });
   }
 
+  function setCamera(on) {
+    var room = state.room;
+    if (!room) return Promise.resolve();
+    if (!on) {
+      return room.localParticipant.setCameraEnabled(false, { stop: true }).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
+    }
+    var opts = {};
+    if (state.prefs && state.prefs.cam) opts.deviceId = state.prefs.cam;
+    var proc = currentBgProcessor();
+    if (proc) opts.videoProcessor = proc;
+    return room.localParticipant.setCameraEnabled(true, opts).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
+  }
+
   function toggleCamera() {
     var room = state.room;
     if (!room) return;
-    var on = !room.localParticipant.isCameraEnabled();
-    room.localParticipant.setCameraEnabled(on).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
-    setTimeout(attachLocalVideos, 400);
+    setCamera(!room.localParticipant.isCameraEnabled());
+  }
+
+  /* Restart the camera (stop → start) so a changed device or background effect
+   * actually takes effect mid-call. Only restarts when the camera is on. */
+  function restartCamera() {
+    var room = state.room;
+    if (!room) return Promise.resolve();
+    var wasOn = room.localParticipant.isCameraEnabled();
+    return room.localParticipant.setCameraEnabled(false, { stop: true }).then(function () {
+      if (!wasOn) return;
+      var opts = {};
+      if (state.prefs && state.prefs.cam) opts.deviceId = state.prefs.cam;
+      var proc = currentBgProcessor();
+      if (proc) opts.videoProcessor = proc;
+      return room.localParticipant.setCameraEnabled(true, opts);
+    }).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
   }
 
   function toggleScreenShare() {
@@ -241,6 +287,548 @@
     var on = !room.localParticipant.isScreenShareEnabled();
     room.localParticipant.setScreenShareEnabled(on).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
     setTimeout(attachLocalVideos, 400);
+  }
+
+  /* ── Device settings, camera/mic test & background effects ──────────── */
+
+  function defaultPrefs() {
+    return { mic: '', cam: '', speaker: '', bg: 'none', blur: 8, image: '' };
+  }
+
+  function loadPrefs() {
+    try {
+      var p = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
+      state.prefs = Object.assign(defaultPrefs(), p || {});
+    } catch (e) {
+      state.prefs = defaultPrefs();
+    }
+  }
+
+  function savePrefs() {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(state.prefs)); } catch (e) {}
+  }
+
+  /* Apply saved devices to the connected LiveKit room: enable the mic with the
+   * chosen input, and route audio output to the chosen speaker. */
+  function applyDevicePrefs() {
+    var room = state.room;
+    if (!room) return;
+    var micOpts = {};
+    if (state.prefs && state.prefs.mic) micOpts.deviceId = state.prefs.mic;
+    room.localParticipant.setMicrophoneEnabled(true, micOpts).catch(function (e) { toast(String(e && e.message || e)); });
+    if (state.prefs && state.prefs.speaker && typeof room.setSinkId === 'function') {
+      room.setSinkId(state.prefs.speaker).catch(function () { /* unsupported device */ });
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /* Enumerate devices (asking for mic+camera permission first so the OS labels
+   * are exposed), then repopulate the settings dropdowns. */
+  function refreshDevices() {
+    var mm = navigator.mediaDevices;
+    if (!mm || !mm.enumerateDevices) return Promise.resolve();
+    var perm = Promise.resolve();
+    if (mm.getUserMedia) {
+      perm = mm.getUserMedia({ audio: true, video: true })
+        .then(function (s) { s.getTracks().forEach(function (t) { t.stop(); }); })
+        .catch(function () { /* permission denied → labels will be generic */ });
+    }
+    return perm.then(function () {
+      return mm.enumerateDevices().then(function (list) {
+        var devs = { audioinput: [], videoinput: [], audiooutput: [] };
+        (list || []).forEach(function (d) { if (devs[d.kind]) devs[d.kind].push(d); });
+        state.devices = devs;
+      }).catch(function () {});
+    });
+  }
+
+  function deviceOptions(list, placeholder) {
+    var out = '<option value="">' + escapeHtml(placeholder) + '</option>';
+    (list || []).forEach(function (d) {
+      var label = (d.label || d.kind || 'Device').trim();
+      var id = d.deviceId || '';
+      out += '<option value="' + escapeHtml(id) + '">' + escapeHtml(label + (id ? ' (' + id.slice(0, 8) + ')' : '')) + '</option>';
+    });
+    return out;
+  }
+
+  function populateSettings() {
+    if (!els.stMic) return;
+    els.stMic.innerHTML = deviceOptions(state.devices.audioinput, 'Default microphone');
+    els.stCam.innerHTML = deviceOptions(state.devices.videoinput, 'Default camera');
+    els.stSpeaker.innerHTML = deviceOptions(state.devices.audiooutput, 'Default speaker');
+    if (state.prefs.mic) els.stMic.value = state.prefs.mic;
+    if (state.prefs.cam) els.stCam.value = state.prefs.cam;
+    if (state.prefs.speaker) els.stSpeaker.value = state.prefs.speaker;
+  }
+
+  function renderSettings() {
+    if (!els.settings) return;
+    var bg = state.prefs.bg || 'none';
+    els.settings.querySelectorAll('.st-bg').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.bg === bg);
+    });
+    if (els.stBlurRow) els.stBlurRow.classList.toggle('hidden', bg !== 'blur');
+    if (els.stImageRow) els.stImageRow.classList.toggle('hidden', bg !== 'image');
+    if (els.stBlur) els.stBlur.value = state.prefs.blur || 8;
+    if (els.stImgPrev) {
+      if (state.prefs.image) {
+        els.stImgPrev.src = state.prefs.image;
+        els.stImgPrev.classList.remove('hidden');
+      } else {
+        els.stImgPrev.src = '';
+        els.stImgPrev.classList.add('hidden');
+      }
+    }
+  }
+
+  function openSettings() {
+    ensureEls();
+    if (!els.settings) return;
+    els.settings.classList.remove('hidden');
+    state.settingsOpen = true;
+    refreshDevices().then(function () {
+      populateSettings();
+      renderSettings();
+    });
+  }
+
+  function closeSettings() {
+    if (els.settings) els.settings.classList.add('hidden');
+    state.settingsOpen = false;
+    stopCamTest();
+    stopMicTest();
+  }
+
+  function saveSettings() {
+    var mic = els.stMic.value;
+    var cam = els.stCam.value;
+    var speaker = els.stSpeaker.value;
+    state.prefs.mic = mic;
+    state.prefs.cam = cam;
+    state.prefs.speaker = speaker;
+    savePrefs();
+    var room = state.room;
+    if (room) {
+      if (mic) {
+        try { room.localParticipant.setMicrophoneEnabled(true, { deviceId: mic }); } catch (e) {}
+      }
+      if (room.localParticipant.isCameraEnabled()) restartCamera();
+    }
+    closeSettings();
+    toast('Voice settings saved.');
+  }
+
+  /* Camera test — plain getUserMedia preview, no LiveKit involved. */
+  function startCamTest() {
+    if (state.camTest) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('Camera access is not supported here.');
+      return;
+    }
+    var constraints = { video: true, audio: false };
+    if (state.prefs && state.prefs.cam) constraints.video = { deviceId: { exact: state.prefs.cam } };
+    navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+      state.camTest = stream;
+      if (els.stCamTest) els.stCamTest.classList.remove('hidden');
+      if (els.stCamVideo) {
+        els.stCamVideo.srcObject = stream;
+        els.stCamVideo.play().catch(function () {});
+      }
+    }).catch(function (e) {
+      toast('Could not start camera: ' + (e && e.message || e));
+    });
+  }
+
+  function stopCamTest() {
+    if (state.camTest) {
+      try { state.camTest.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    }
+    state.camTest = null;
+    if (els.stCamVideo) els.stCamVideo.srcObject = null;
+    if (els.stCamTest) els.stCamTest.classList.add('hidden');
+  }
+
+  /* Mic test — live input level meter via WebAudio. */
+  function startMicTest() {
+    if (state.micTest) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('Microphone access is not supported here.');
+      return;
+    }
+    var constraints = { audio: true, video: false };
+    if (state.prefs && state.prefs.mic) constraints.audio = { deviceId: { exact: state.prefs.mic } };
+    navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        toast('Audio analysis is not supported here.');
+        return;
+      }
+      var actx = new AC();
+      var analyser = actx.createAnalyser();
+      analyser.fftSize = 512;
+      actx.createMediaStreamSource(stream).connect(analyser);
+      var buf = new Uint8Array(analyser.frequencyBinCount);
+      state.micTest = { actx: actx, stream: stream };
+      if (els.stMeter) els.stMeter.value = 0;
+      var loop = function () {
+        if (!state.micTest) return;
+        analyser.getByteTimeDomainData(buf);
+        var sum = 0;
+        for (var i = 0; i < buf.length; i++) {
+          var v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        var pct = Math.min(100, Math.round(Math.sqrt(sum / buf.length) * 220));
+        if (els.stMeter) els.stMeter.value = pct;
+        if (els.stMeterVal) els.stMeterVal.textContent = pct + '%';
+        state.micTest.raf = requestAnimationFrame(loop);
+      };
+      loop();
+      toast('Mic test running — speak to see the level.');
+    }).catch(function (e) {
+      toast('Could not start mic test: ' + (e && e.message || e));
+    });
+  }
+
+  function stopMicTest() {
+    if (!state.micTest) return;
+    cancelAnimationFrame(state.micTest.raf);
+    try { state.micTest.actx.close(); } catch (e) {}
+    try { state.micTest.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    state.micTest = null;
+    if (els.stMeter) els.stMeter.value = 0;
+    if (els.stMeterVal) els.stMeterVal.textContent = '';
+  }
+
+  /* Background effects: a LiveKit TrackProcessor that composites the person
+   * (MediaPipe selfie segmentation) over a blurred or custom-image background.
+   * MediaPipe is lazy-loaded and only runs while an effect is active. */
+  function currentBgEffect() {
+    if (!state.prefs || !state.prefs.bg || state.prefs.bg === 'none') return null;
+    return { mode: state.prefs.bg, blur: Number(state.prefs.blur) || 8, image: state.prefs.image || '' };
+  }
+
+  function currentBgProcessor() {
+    var eff = currentBgEffect();
+    if (!eff) {
+      if (state.bgProc) { try { state.bgProc.destroy(); } catch (e) {} }
+      state.bgProc = null;
+      state.bgProcKey = '';
+      return null;
+    }
+    var key = JSON.stringify(eff);
+    if (state.bgProc && state.bgProcKey === key) return state.bgProc;
+    if (state.bgProc) { try { state.bgProc.destroy(); } catch (e) {} }
+    state.bgProcKey = key;
+    try { state.bgProc = makeBgProcessor(eff); } catch (e) { state.bgProc = null; }
+    return state.bgProc;
+  }
+
+  function makeBgProcessor(effect) {
+    var canvas = document.createElement('canvas');
+    var ctx = canvas.getContext('2d');
+    var video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    var maskCanvas = document.createElement('canvas');
+    var maskCtx = maskCanvas.getContext('2d');
+    var bgCanvas = document.createElement('canvas');
+    var bgCtx = bgCanvas.getContext('2d');
+    var personCanvas = document.createElement('canvas');
+    var personCtx = personCanvas.getContext('2d');
+    var segFrame = document.createElement('canvas');
+    var seg = null;
+    var stream = null;
+    var outTrack = null;
+    var raf = 0;
+    var running = false;
+    var outW = 640, outH = 360, segW = 320, segH = 180;
+    var bgImg = new Image();
+    var bgImageOk = false;
+
+    function locateFile(file) {
+      // Ship only the SIMD wasm variant; map the non-SIMD name onto it.
+      if (file.indexOf('simd') === -1 && file.indexOf('_solution_wasm_bin') !== -1) {
+        file = file.replace('selfie_segmentation_solution_wasm_bin', 'selfie_segmentation_solution_simd_wasm_bin');
+      }
+      return BG_BASE + file;
+    }
+
+    function loadLib() {
+      if (window.SelfieSegmentation) return Promise.resolve(window.SelfieSegmentation);
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = BG_BASE + 'selfie_segmentation.js';
+        s.onload = function () {
+          if (window.SelfieSegmentation) resolve(window.SelfieSegmentation);
+          else reject(new Error('background library failed to load'));
+        };
+        s.onerror = function () { reject(new Error('could not load the background library')); };
+        document.head.appendChild(s);
+      });
+    }
+
+    function init() {
+      if (effect.mode === 'image' && effect.image) {
+        bgImg.onload = function () { bgImageOk = true; };
+        bgImg.onerror = function () { bgImageOk = false; };
+        bgImg.src = effect.image;
+      }
+      return loadLib().then(function (SS) {
+        seg = new SS({ locateFile: locateFile });
+        seg.setOptions({ modelSelection: 0, selfieMode: false });
+        return seg.initialize();
+      });
+    }
+
+    function drawBackground() {
+      var w = bgCanvas.width, h = bgCanvas.height;
+      if (effect.mode === 'image' && bgImageOk) {
+        var iw = bgImg.naturalWidth || 1, ih = bgImg.naturalHeight || 1;
+        var scale = Math.max(w / iw, h / ih);
+        bgCtx.drawImage(bgImg, (w - iw * scale) / 2, (h - ih * scale) / 2, iw * scale, ih * scale);
+      } else if (effect.mode === 'blur') {
+        bgCtx.filter = 'blur(' + (Number(effect.blur) || 8) + 'px)';
+        bgCtx.drawImage(video, 0, 0, w, h);
+        bgCtx.filter = 'none';
+      } else {
+        bgCtx.drawImage(video, 0, 0, w, h);
+      }
+    }
+
+    /* Turn the segmentation mask into an alpha cutout on maskCanvas. */
+    function maskToAlpha(res) {
+      var mask = res.segmentationMask || res.mask || null;
+      if (!mask) return false;
+      var mw = 0, mh = 0;
+      if (mask.data) { // ImageData
+        mw = mask.width; mh = mask.height;
+        var d = mask.data;
+        for (var i = 0; i < d.length; i += 4) {
+          d[i + 3] = d[i]; d[i] = d[i + 1] = d[i + 2] = 0;
+        }
+        maskCanvas.width = mw; maskCanvas.height = mh;
+        maskCtx.putImageData(mask, 0, 0);
+      } else { // ImageBitmap
+        mw = mask.width || mask.videoWidth || 0;
+        mh = mask.height || mask.videoHeight || 0;
+        if (!mw) return false;
+        maskCanvas.width = mw; maskCanvas.height = mh;
+        maskCtx.drawImage(mask, 0, 0);
+        var id = maskCtx.getImageData(0, 0, mw, mh);
+        for (var j = 0; j < id.data.length; j += 4) {
+          id.data[j + 3] = id.data[j]; id.data[j] = id.data[j + 1] = id.data[j + 2] = 0;
+        }
+        maskCtx.putImageData(id, 0, 0);
+      }
+      return mw > 0;
+    }
+
+    function composite(res) {
+      if (!maskToAlpha(res)) return;
+      personCtx.clearRect(0, 0, outW, outH);
+      personCtx.drawImage(video, 0, 0, outW, outH);
+      personCtx.save();
+      personCtx.globalCompositeOperation = 'destination-in';
+      personCtx.imageSmoothingEnabled = true;
+      personCtx.drawImage(maskCanvas, 0, 0, outW, outH);
+      personCtx.restore();
+      drawBackground();
+      ctx.clearRect(0, 0, outW, outH);
+      ctx.drawImage(bgCanvas, 0, 0);
+      ctx.drawImage(personCanvas, 0, 0);
+    }
+
+    function drawLoop() {
+      raf = requestAnimationFrame(drawLoop);
+      if (!running || !seg) return;
+      segFrame.width = segW;
+      segFrame.height = segH;
+      segFrame.getContext('2d').drawImage(video, 0, 0, segW, segH);
+      seg.send({ image: segFrame }).then(function (res) {
+        if (running) composite(res);
+      }).catch(function () { /* skip a frame */ });
+    }
+
+    function sizeFor(track) {
+      var s = {};
+      try { s = track && track.getSettings ? track.getSettings() : {}; } catch (e) {}
+      outW = Math.min(1280, Math.max(320, Number(s.width) || 640));
+      outH = Math.min(720, Math.max(180, Math.round(outW * (Number(s.height) || 360) / (Number(s.width) || 640))));
+      if (outH % 2) outH++;
+      segW = Math.max(320, Math.round(outW / 2));
+      if (segW % 2) segW++;
+      segH = Math.max(180, Math.round(outH / 2));
+      if (segH % 2) segH++;
+      canvas.width = outW; canvas.height = outH;
+      bgCanvas.width = outW; bgCanvas.height = outH;
+      personCanvas.width = outW; personCanvas.height = outH;
+    }
+
+    return {
+      name: 'bg-effect',
+      processSource: function (track) {
+        sizeFor(track);
+        video.srcObject = new MediaStream([track]);
+        stream = canvas.captureStream(15);
+        outTrack = stream.getVideoTracks()[0];
+        init().then(function () {
+          running = true;
+          drawLoop();
+        }).catch(function (err) {
+          toast('Background effect unavailable: ' + (err && err.message || err));
+        });
+        return Promise.resolve(outTrack);
+      },
+      updateSource: function (track) {
+        if (track) {
+          video.srcObject = new MediaStream([track]);
+          sizeFor(track);
+        }
+      },
+      destroy: function () {
+        running = false;
+        cancelAnimationFrame(raf);
+        if (seg) { try { seg.close(); } catch (e) {} seg = null; }
+        if (stream) { try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} }
+        if (outTrack) { try { outTrack.stop(); } catch (e) {} }
+        if (video.srcObject) {
+          try { video.srcObject.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+        }
+        video.srcObject = null;
+      }
+    };
+  }
+
+  /* Settings modal DOM. */
+  function buildSettings() {
+    var el = document.createElement('div');
+    el.id = 'lvcvoice-settings';
+    el.className = 'hidden lvcvoice-mtg-overlay';
+    el.innerHTML =
+      '<div class="lvcvoice-settings-card">' +
+      '<div class="lvcvoice-mtg-head"><span>Voice &amp; video settings</span>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-close">✕</button></div>' +
+      '<div class="lvcvoice-settings-body">' +
+
+      '<div class="st-section"><div class="st-label">Audio &amp; video devices</div>' +
+      '<label class="st-field">Microphone<select id="lvcvoice-st-mic" class="st-select"></select></label>' +
+      '<label class="st-field">Camera<select id="lvcvoice-st-cam" class="st-select"></select></label>' +
+      '<label class="st-field">Speaker<select id="lvcvoice-st-speaker" class="st-select"></select></label>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-testcam" style="width:100%">Test camera</button>' +
+      '</div>' +
+
+      '<div class="st-section st-camtest hidden" id="lvcvoice-st-camtest">' +
+      '<div class="st-label">Camera preview</div>' +
+      '<video id="lvcvoice-st-camvideo" class="st-camvideo" autoplay playsinline muted></video>' +
+      '<div class="st-row"><button type="button" class="lvcvoice-btn-ghost st-camstart">Start</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-camstop">Stop</button></div>' +
+      '</div>' +
+
+      '<div class="st-section"><div class="st-label">Microphone test ' +
+      '<span class="st-meter-wrap"><meter id="lvcvoice-st-meter" min="0" max="100" low="10" high="70"></meter>' +
+      '<span class="st-meter-val"></span></span></div>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-mictest" style="width:100%">Test microphone</button>' +
+      '</div>' +
+
+      '<div class="st-section"><div class="st-label">Video background</div>' +
+      '<div class="st-row">' +
+      '<button type="button" class="lvcvoice-btn-ghost st-bg" data-bg="none">None</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-bg" data-bg="blur">Blur</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-bg" data-bg="image">Image</button>' +
+      '</div>' +
+      '<div class="st-blur hidden"><label class="st-field">Blur strength ' +
+      '<input id="lvcvoice-st-blur" type="range" min="2" max="20" step="1"></label></div>' +
+      '<div class="st-image hidden">' +
+      '<input id="lvcvoice-st-imgfile" type="file" accept="image/png,image/jpeg,image/webp">' +
+      '<div class="st-row"><button type="button" class="lvcvoice-btn-ghost st-imgremove">Remove image</button></div>' +
+      '<img id="lvcvoice-st-imgprev" class="st-imgprev hidden" alt="Background preview">' +
+      '</div>' +
+      '<p class="st-hint">Background effects only apply while your camera is on, and are processed locally in your browser.</p>' +
+      '</div>' +
+
+      '<div class="st-row st-actions">' +
+      '<button type="button" class="btn-primary st-save">Save settings</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost st-cancel">Cancel</button>' +
+      '</div>' +
+      '</div></div>';
+
+    el.querySelector('.st-close').addEventListener('click', closeSettings);
+    el.querySelector('.st-cancel').addEventListener('click', closeSettings);
+    el.addEventListener('click', function (e) { if (e.target === el) closeSettings(); });
+    el.querySelector('.st-testcam').addEventListener('click', function () { if (state.camTest) stopCamTest(); else startCamTest(); });
+    el.querySelector('.st-camstart').addEventListener('click', startCamTest);
+    el.querySelector('.st-camstop').addEventListener('click', stopCamTest);
+    el.querySelector('.st-mictest').addEventListener('click', function () { if (state.micTest) stopMicTest(); else startMicTest(); });
+    el.querySelector('.st-save').addEventListener('click', saveSettings);
+    el.querySelectorAll('.st-bg').forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.prefs.bg = b.dataset.bg;
+        renderSettings();
+      });
+    });
+    el.querySelector('#lvcvoice-st-blur').addEventListener('input', function (e) {
+      state.prefs.blur = Number(e.target.value);
+    });
+    el.querySelector('#lvcvoice-st-imgfile').addEventListener('change', onBgImageFile);
+    el.querySelector('.st-imgremove').addEventListener('click', removeBgImage);
+
+    document.body.appendChild(el);
+    els.settings = el;
+    els.stMic = el.querySelector('#lvcvoice-st-mic');
+    els.stCam = el.querySelector('#lvcvoice-st-cam');
+    els.stSpeaker = el.querySelector('#lvcvoice-st-speaker');
+    els.stCamTest = el.querySelector('#lvcvoice-st-camtest');
+    els.stCamVideo = el.querySelector('#lvcvoice-st-camvideo');
+    els.stMeter = el.querySelector('#lvcvoice-st-meter');
+    els.stMeterVal = el.querySelector('.st-meter-val');
+    els.stBlur = el.querySelector('#lvcvoice-st-blur');
+    els.stBlurRow = el.querySelector('.st-blur');
+    els.stImageRow = el.querySelector('.st-image');
+    els.stImgPrev = el.querySelector('#lvcvoice-st-imgprev');
+    els.stImgFile = el.querySelector('#lvcvoice-st-imgfile');
+  }
+
+  function onBgImageFile(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)/i.test(file.type || '')) {
+      toast('Please choose a PNG, JPEG or WebP image.');
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.width, h = img.height;
+        var scale = Math.min(1, Math.min(1280 / w, 720 / h));
+        if (scale < 1) { w = Math.round(w * scale); h = Math.round(h * scale); }
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        var url = c.toDataURL('image/jpeg', 0.85);
+        if (url.length > 400000) { toast('Image too large — please pick a smaller one.'); return; }
+        state.prefs.image = url;
+        state.prefs.bg = 'image';
+        renderSettings();
+      };
+      img.onerror = function () { toast('Could not read that image.'); };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removeBgImage() {
+    state.prefs.image = '';
+    if (els.stImgPrev) { els.stImgPrev.src = ''; els.stImgPrev.classList.add('hidden'); }
+    if (els.stImgFile) els.stImgFile.value = '';
+    renderSettings();
   }
 
   /* ── Actions ────────────────────────────────────────────────────────── */
@@ -286,6 +874,9 @@
     api('/api/webrtc/call/initiate', { user: dm }).then(function (j) {
       if (!j.ok) { toast(j.error || 'Could not start the call.'); return; }
       state.pendingCall = j.call_id;
+      state.pendingCallAt = Date.now();
+      state.ringStarted[j.call_id] = Date.now();
+      state.ringSeconds = j.ring_seconds || state.ringSeconds || 20;
       render();
     });
   }
@@ -321,6 +912,23 @@
     render();
   }
 
+  function findRecentCall(callId) {
+    for (var i = 0; i < state.recent.length; i++) {
+      if (state.recent[i].call_id === callId) return state.recent[i];
+    }
+    return null;
+  }
+
+  function recentMessage(done) {
+    if (done) {
+      if (done.status === 'declined') return done.peer + ' declined the call.';
+      if (done.status === 'missed') return done.peer + " didn't answer — call missed.";
+      if (done.status === 'cancelled') return 'You cancelled the call.';
+      if (done.status === 'ended') return 'Call ended.';
+    }
+    return 'Call ended — no answer.';
+  }
+
   function handleCallTransitions() {
     var active = state.calls.active;
     if (active) state.pendingCall = null;
@@ -330,10 +938,22 @@
         if (j.ok) { state.inVoice = true; connectLivekit(j.url, j.token, j.room); }
       });
     }
+    // Prune ring timers that are no longer relevant (accepted / ended / expired).
+    var liveIds = [];
+    if (active) liveIds.push(active.call_id);
+    state.calls.outgoing.forEach(function (c) { liveIds.push(c.call_id); });
+    state.calls.incoming.forEach(function (c) { liveIds.push(c.call_id); });
+    Object.keys(state.ringStarted).forEach(function (cid) {
+      if (liveIds.indexOf(Number(cid)) === -1) delete state.ringStarted[cid];
+    });
     // An outgoing ring vanished without connecting → declined / missed / cancelled.
-    if (state.pendingCall && !active && !state.calls.outgoing[0]) {
+    // The pendingCallAt grace window absorbs a stale poll snapshot that predates
+    // the call row appearing, so we don't toast "no answer" by accident.
+    if (state.pendingCall && !active && !state.calls.outgoing[0] && Date.now() - state.pendingCallAt > POLL_MS * 1.5) {
+      var cid = state.pendingCall;
       state.pendingCall = null;
-      toast('Call ended — no answer.');
+      delete state.ringStarted[cid];
+      toast(recentMessage(findRecentCall(cid)));
     }
   }
 
@@ -436,6 +1056,11 @@
     els.btn = makeButton('lvcvoice-btn', 'btn-ghost text-xs hidden md:flex', onMainClick);
     header.appendChild(els.btn);
 
+    els.settingsBtn = makeButton('lvcvoice-settings-btn', 'btn-ghost text-xs hidden md:flex', openSettings);
+    els.settingsBtn.textContent = '⚙ Settings';
+    els.settingsBtn.title = 'Voice & video settings';
+    header.appendChild(els.settingsBtn);
+
     els.mtgBtn = makeButton('lvcvoice-mtg-btn', 'btn-ghost text-xs hidden md:flex', function () {
       openMeetingModal();
     });
@@ -453,6 +1078,7 @@
     document.body.appendChild(buildPane());
     document.body.appendChild(buildRing());
     document.body.appendChild(buildMtgModal());
+    buildSettings();
   }
 
   function makeButton(id, cls, handler) {
@@ -470,7 +1096,10 @@
     el.className = 'hidden';
     el.innerHTML =
       '<div class="pane-head"><span class="pane-title">Voice</span>' +
-      '<button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger pane-leave">Leave</button></div>' +
+      '<span class="pane-head-actions">' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-settings" title="Voice &amp; video settings">⚙</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger pane-leave">Leave</button>' +
+      '</span></div>' +
       '<div class="pane-body">' +
       '<div id="lvcvoice-videos" class="lvcvoice-videos"></div>' +
       '<div class="pane-row"><span class="pane-meta pane-status">Connected to the voice room.</span></div>' +
@@ -480,6 +1109,7 @@
       '<button type="button" class="lvcvoice-btn-ghost pane-share" data-act="share">Share</button>' +
       '</div></div>';
     el.querySelector('.pane-leave').addEventListener('click', leaveVoice);
+    el.querySelector('.pane-settings').addEventListener('click', openSettings);
     el.querySelector('.pane-mute').addEventListener('click', toggleMute);
     el.querySelector('.pane-cam').addEventListener('click', toggleCamera);
     el.querySelector('.pane-share').addEventListener('click', toggleScreenShare);
@@ -500,11 +1130,11 @@
       '</div>';
     var currentRingId = null;
     el.querySelector('.ring-accept').addEventListener('click', function () {
-      if (currentRingId != null) acceptCall(currentRingId);
+      if (currentRingId != null) { state.ringDismissed = currentRingId; acceptCall(currentRingId); }
       el.classList.add('hidden');
     });
     el.querySelector('.ring-decline').addEventListener('click', function () {
-      if (currentRingId != null) declineCall(currentRingId);
+      if (currentRingId != null) { state.ringDismissed = currentRingId; declineCall(currentRingId); }
       el.classList.add('hidden');
     });
     el._currentRingId = function (v) { if (arguments.length) currentRingId = v; return currentRingId; };
@@ -609,6 +1239,11 @@
       }
     }
 
+    // Header: Voice settings gear (always reachable while voice is on).
+    if (els.settingsBtn) {
+      els.settingsBtn.classList.toggle('hidden', !state.enabled);
+    }
+
     // Call pill.
     var call = state.calls.active;
     var outgoing = state.calls.outgoing[0] || null;
@@ -621,7 +1256,7 @@
         els.pill.classList.remove('hidden');
         els.pill.classList.remove('active');
         els.pill.classList.add('ringing');
-        els.pill.querySelector('.pill-text').textContent = 'Ringing ' + outgoing.peer + '…';
+        els.pill.querySelector('.pill-text').textContent = ringText(outgoing, 'Ringing');
       } else {
         els.pill.classList.add('hidden');
       }
@@ -646,16 +1281,25 @@
       }
     }
 
-    // Incoming ring overlay.
+    // Incoming ring overlay (with ring-timeout countdown + missed-call toast).
     var incoming = state.calls.incoming[0] || null;
     if (els.ring) {
-      if (incoming && state.enabled) {
+      if (incoming && state.enabled && state.ringDismissed !== incoming.call_id) {
         els.ring.classList.remove('hidden');
-        els.ring.querySelector('.ring-sub').textContent = incoming.peer + ' is calling…';
+        els.ring.querySelector('.ring-sub').textContent = incoming.peer + ' is calling… (' + ringRemaining(incoming) + 's)';
         els.ring._currentRingId(incoming.call_id);
+        if (!state.ringShown || state.ringShown.call_id !== incoming.call_id) {
+          state.ringShown = { call_id: incoming.call_id, peer: incoming.peer };
+        }
       } else {
         els.ring.classList.add('hidden');
         els.ring._currentRingId(null);
+        // A ring that vanished without accept/decline was missed (server-side
+        // timeout); the caller side gets its own "no answer" toast.
+        if (state.ringShown && state.ringDismissed !== state.ringShown.call_id) {
+          toast('Missed call from ' + state.ringShown.peer + '.');
+        }
+        state.ringShown = null;
       }
     }
 
@@ -682,9 +1326,25 @@
     return 'Call';
   }
 
+  /* Seconds left before the server fails an unanswered call (cosmetic — the
+   * server is authoritative via call_ring_seconds). */
+  function ringRemaining(call) {
+    if (!call) return 0;
+    var base = state.ringStarted[call.call_id] || (call.started ? call.started : Date.now());
+    if (!state.ringStarted[call.call_id]) state.ringStarted[call.call_id] = base;
+    var left = (state.ringSeconds || 20) - Math.floor((Date.now() - base) / 1000);
+    return Math.max(0, left);
+  }
+
+  function ringText(call, prefix) {
+    var t = ringRemaining(call);
+    return prefix + ' ' + call.peer + '…' + (t > 0 ? ' (' + t + 's)' : '');
+  }
+
   /* ── Boot ───────────────────────────────────────────────────────────── */
   function boot() {
     if (!document.body || !document.body.classList.contains('chat-app')) return;
+    loadPrefs();
     ensureEls();
     pollStatus();
     setInterval(pollStatus, POLL_MS);

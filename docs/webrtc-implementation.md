@@ -16,7 +16,7 @@
   - Admin sets a per-client audio bitrate (`voice_bitrate`) — the Opus equivalent of the old Mumble bandwidth control.
 - **Auth is per-user, not a shared password:** the PHP server mints short-TTL **LiveKit access tokens (JWT)** at join time, mirroring the existing `ws_tickets` one-time handshake pattern. No credential ever reaches the browser except the in-memory, single-use join payload.
 - **One voice engine, four surfaces:** every client calls the same `/api/voice/*` and `/api/call/*` endpoints and drives the official **`livekit-client`** JS SDK. The web app and messenger-web run it in a bundled build; desktop and messenger (Chromium/Electron) run it natively. The cap is enforced in exactly one place — the PHP join gate — so every client obeys it and none can bypass it.
-- **Features:** one-on-one DM **calls** (ring / accept / decline / end) and **voice-enabled channels** (a `voice_enabled` flag per channel, settable by ops+ in the Channel Settings modal; a voice button appears in the channel header when enabled and the user has access).
+- **Features:** one-on-one DM **calls** (ring / accept / decline / end, 20 s ring timeout → "no answer"), **voice-enabled channels** (a `voice_enabled` flag per channel, settable by ops+ in the Channel Settings modal; a voice button appears in the channel header when enabled and the user has access), **video** (camera + screen sharing with per-user device selection, camera/mic test tools, and background blur / custom-image replacement via lazily-loaded MediaPipe selfie-segmentation).
 - Target: up to **200 concurrent voice users**, worst case with the active-speaker cap — see §3. Recommended host: 100 Mbit/s unmetered, 2–4 vCPU, 2 GB RAM.
 
 ---
@@ -252,7 +252,7 @@ One-on-one calls:
 - `POST /api/call/accept` — body: `{call_id}`. Caller sets `active`, mints JWTs for **both** participants (§6.4 — one token per side), returns each side's `{url, token, room}`. The callee's client then joins.
 - `POST /api/call/decline` — sets `declined`, notifies the caller ("declined the call"), frees the room.
 - `POST /api/call/end` — sets `ended`, removes `voice_sessions` for both, tells LiveKit to end the room (idempotent).
-- `POST /api/call/timeout` / cron-opportunistic — a `ringing` call older than ~30 s becomes `missed` and notifies the caller.
+- `POST /api/call/timeout` / cron-opportunistic — a `ringing` call older than `call_ring_seconds` (default 20 s) becomes `missed` and the caller sees "no answer".
 
 ### 6.3 LiveKit-side room lifecycle (admin/control)
 

@@ -128,6 +128,7 @@ final class VoiceController
         $incoming = [];
         $outgoing = [];
         $active = null;
+        $recent = [];
         foreach (Database::all(
             'SELECT * FROM call_sessions
              WHERE status IN ("ringing", "active")
@@ -146,6 +147,7 @@ final class VoiceController
                 'status' => $call['status'],
                 'peer' => $peer,
                 'incoming' => !$isCaller && $call['status'] === 'ringing',
+                'started' => (int) (strtotime((string) $call['created_at'] . ' UTC') * 1000),
             ];
             if ($call['status'] === 'active') {
                 $active = $row;
@@ -162,6 +164,28 @@ final class VoiceController
             }
         }
 
+        // Recent (non-live) call outcomes for this actor, so the caller's client
+        // can say "declined" vs "no answer" vs "you cancelled". Ring timeout is
+        // enforced by LiveKitService::expireCalls() using call_ring_seconds.
+        foreach (Database::all(
+            'SELECT * FROM call_sessions
+             WHERE status IN ("declined", "missed", "cancelled", "ended")
+               AND (callee_user_id = ? OR callee_guest_id = ? OR caller_user_id = ? OR caller_guest_id = ?)
+               AND created_at >= datetime("now", "-90 seconds")
+             ORDER BY id DESC LIMIT 5',
+            [$meId, $meId, $meId, $meId]
+        ) as $call) {
+            $isCaller = ($call['caller_user_id'] && (int) $call['caller_user_id'] === $meId)
+                || ($call['caller_guest_id'] && (int) $call['caller_guest_id'] === $meId);
+            $recent[] = [
+                'call_id' => (int) $call['id'],
+                'status' => $call['status'],
+                'peer' => $isCaller
+                    ? self::callPeer($call['callee_user_id'], $call['callee_guest_id'])
+                    : self::callPeer($call['caller_user_id'], $call['caller_guest_id']),
+            ];
+        }
+
         json_out([
             'ok' => true,
             'enabled' => $status['enabled'],
@@ -170,9 +194,10 @@ final class VoiceController
             'full' => $status['full'],
             'talker_cap' => LiveKitService::talkerCap(),
             'bitrate' => LiveKitService::bitrate(),
+            'ring_seconds' => LiveKitService::ringSeconds(),
             'channels' => $channels,
             'session' => $sess ? ['room' => $sess['room'], 'kind' => $sess['kind']] : null,
-            'calls' => ['incoming' => $incoming, 'outgoing' => $outgoing, 'active' => $active],
+            'calls' => ['incoming' => $incoming, 'outgoing' => $outgoing, 'active' => $active, 'recent' => $recent],
         ]);
     }
 
@@ -182,6 +207,10 @@ final class VoiceController
         $actor = self::requireActor();
         self::requireCsrf();
         $slug = trim((string) ($_POST['channel'] ?? ''));
+
+        if (class_exists('SaaSService') && !SaaSService::feature($actor, 'voice')) {
+            json_out(['error' => 'Voice is not available on your plan.'], 403);
+        }
 
         $status = LiveKitService::status();
         if (!$status['enabled']) {
@@ -216,8 +245,8 @@ final class VoiceController
             'url' => LiveKitService::url(),
             'token' => $token,
             'room' => $room,
-            'talker_cap' => LiveKitService::talkerCap(),
-            'bitrate' => LiveKitService::bitrate(),
+            'talker_cap' => LiveKitService::talkerCap($actor),
+            'bitrate' => LiveKitService::bitrate($actor),
         ]);
     }
 

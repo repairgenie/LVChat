@@ -21,7 +21,7 @@
     "voice_talker_cap": "8",
     "voice_bitrate": "40000",
     "voice_quality_preset": "moderate",
-    "call_ring_seconds": "25"
+    "call_ring_seconds": "20"
   },
   "assets": {
     "css": ["css/voice.css"],

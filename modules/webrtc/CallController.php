@@ -148,6 +148,9 @@ final class CallController
         if (!LiveKitService::enabled()) {
             json_out(['error' => 'Voice is not configured.'], 403);
         }
+        if (class_exists('SaaSService') && !SaaSService::feature($actor, 'voice')) {
+            json_out(['error' => 'Voice is not available on your plan.'], 403);
+        }
         $nick = trim((string) ($_POST['user'] ?? ''));
         if ($nick === '') {
             json_out(['error' => 'Missing user.'], 400);
@@ -205,6 +208,7 @@ final class CallController
             'call_id' => $callId,
             'room' => $room,
             'peer' => (string) $target['username'],
+            'ring_seconds' => LiveKitService::ringSeconds(),
         ]);
     }
 

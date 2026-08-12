@@ -1,0 +1,36 @@
+{
+  "id": "saas",
+  "name": "SaaS (Plans & Billing)",
+  "version": "1.0.0",
+  "description": "Plan-based metering, feature gating, and billing for LVChat (Stripe / PayPal / BTCPay).",
+  "author": "LVChat",
+  "requires": {
+    "lvchat": ">=1.7.1",
+    "php": ">=8.1"
+  },
+  "order": 90,
+  "admin": [
+    { "id": "saas-plans", "label": "SaaS · Plans", "url": "/admin/saas", "roles": ["admin"] },
+    { "id": "saas-users", "label": "SaaS · Users", "url": "/admin/saas/users", "roles": ["admin"] },
+    { "id": "saas-billing", "label": "SaaS · Billing", "url": "/admin/saas/billing", "roles": ["admin"] }
+  ],
+  "settings": {
+    "saas_enabled": "0",
+    "saas_grace_days": "3",
+    "saas_max_connections_global": "200",
+    "saas_checkout_currency": "usd",
+    "saas_platform_fee_enabled": "1",
+    "stripe_publishable_key": "",
+    "stripe_secret_key": "",
+    "stripe_webhook_secret": "",
+    "paypal_client_id": "",
+    "paypal_client_secret": "",
+    "paypal_webhook_id": "",
+    "paypal_mode": "sandbox",
+    "btcpay_url": "",
+    "btcpay_api_key": "",
+    "btcpay_store_id": "",
+    "btcpay_webhook_secret": ""
+  },
+  "license": false
+}

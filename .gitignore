@@ -5,6 +5,7 @@ public/uploads/
 public/assets/avatars/
 *.log
 .DS_Store
+.env
 desktop/dist/
 lvchat-messenger/dist/
 messenger-web/.env
