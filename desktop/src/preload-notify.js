@@ -23,5 +23,6 @@ const { contextBridge, ipcRenderer } = require('electron')
 // dispatches `lvchat:notify` events which the injected bridge script forwards
 // here; the main process shows the real notification.
 contextBridge.exposeInMainWorld('lvchatNative', {
-  notify: (payload) => ipcRenderer.send('desktop:notify', payload)
+  notify: (payload) => ipcRenderer.send('desktop:notify', payload),
+  onNotificationOpen: (callback) => ipcRenderer.on('notification:open', (_event, conv) => callback(conv))
 })

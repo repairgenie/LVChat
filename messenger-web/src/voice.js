@@ -69,8 +69,49 @@
 
   var els = {}
   var tiles = {}   // trackSid -> { el, kind }
+  var ringAudio = null  // HTMLAudioElement for the outgoing/incoming ring tone
 
   function $ (id) { return document.getElementById(id) }
+
+  /* Synthesize a warbling ring tone (two alternating PCM frequencies) as a
+   * data-URI WAV.  Loops via the Audio element's `loop` property. */
+  function ringToneDataUrl () {
+    var rate = 22050, dur = 2.0, n = Math.round(dur * rate)
+    var buf = new ArrayBuffer(44 + n * 2)
+    var dv = new DataView(buf)
+    var str = function (o, s) { for (var i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)) }
+    str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE')
+    str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true)
+    dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true)
+    str(36, 'data'); dv.setUint32(40, n * 2, true)
+    for (var i = 0; i < n; i++) {
+      var t = i / rate
+      var freq = (Math.floor(t * 2) % 2 === 0) ? 440 : 480  // warble between 440/480 Hz
+      var env = (t < 0.05) ? t / 0.05 : ((dur - t) < 0.15) ? (dur - t) / 0.15 : 1.0
+      var v = Math.sin(2 * Math.PI * freq * t) * env * 0.4
+      var val = Math.round(Math.max(-1, Math.min(1, v)) * 32767) & 0xFFFF
+      dv.setInt16(44 + i * 2, val, true)
+    }
+    var bytes = new Uint8Array(buf)
+    var bin = ''
+    for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j])
+    return 'data:audio/wav;base64,' + btoa(bin)
+  }
+
+  function playRing () {
+    try {
+      if (!ringAudio) {
+        ringAudio = new Audio(ringToneDataUrl())
+        ringAudio.loop = true
+      }
+      ringAudio.currentTime = 0
+      ringAudio.play().catch(function () {})
+    } catch (e) { /* audio unavailable */ }
+  }
+
+  function stopRing () {
+    try { if (ringAudio) { ringAudio.pause(); ringAudio.currentTime = 0 } } catch (e) {}
+  }
 
   /* ── API (LvApi: getJson / postForm, bearer + CSRF) ─────────────────── */
   function api (path, data) {
@@ -878,11 +919,13 @@
       state.pendingCallAt = Date.now()
       state.ringStarted[j.call_id] = Date.now()
       state.ringSeconds = j.ring_seconds || state.ringSeconds || 20
+      playRing()
       render()
     })
   }
 
   function acceptCall (callId) {
+    stopRing()
     api('/api/webrtc/call/accept', { call_id: String(callId) }).then(function (r) {
       var j = r && r.body
       if (r.ok && j && j.ok) {
@@ -896,6 +939,7 @@
   }
 
   function declineCall (callId) {
+    stopRing()
     api('/api/webrtc/call/decline', { call_id: String(callId) }).then(render)
     render()
   }
@@ -903,6 +947,7 @@
   function endCall () {
     // Also cancel a still-ringing outgoing call — the pill's End button must
     // end the ring server-side, not just disconnect locally.
+    stopRing()
     var call = state.calls.active || state.calls.outgoing[0] || null
     if (call) api('/api/webrtc/call/end', { call_id: String(call.call_id) })
     state.pendingCall = null
@@ -1127,10 +1172,12 @@
     var outgoing = state.calls.outgoing[0] || null
     if (els.pill) {
       if (call) {
+        stopRing()
         showPill('active', 'In call with ' + call.peer)
       } else if (outgoing) {
         showPill('ringing', ringText(outgoing, 'Ringing'))
       } else {
+        stopRing()
         hidePill()
       }
     }
@@ -1161,6 +1208,7 @@
         els.ring._ringId(incoming.call_id)
         if (!state.ringShown || state.ringShown.call_id !== incoming.call_id) {
           state.ringShown = { call_id: incoming.call_id, peer: incoming.peer }
+          playRing()
         }
       } else {
         els.ring.hidden = true

@@ -121,9 +121,9 @@ const NOTIFY_BRIDGE = `
     function strip (s) {
       return String(s || '').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\\s+/g, ' ').trim();
     }
-    function push (title, body) {
+    function push (title, body, conv) {
       if (window.lvchatNative && window.lvchatNative.notify) {
-        window.lvchatNative.notify({ title: title, body: body });
+        window.lvchatNative.notify({ title: title, body: body, conv: conv || null });
         return;
       }
       if ('Notification' in window && Notification.permission === 'granted') {
@@ -134,11 +134,21 @@ const NOTIFY_BRIDGE = `
         } catch (err) {}
       }
     }
+    // Listen for notification clicks from the main process: open the specific DM/channel.
+    if (window.lvchatNative && window.lvchatNative.onNotificationOpen) {
+      window.lvchatNative.onNotificationOpen(function (conv) {
+        if (!conv || !conv.type || !conv.id) return;
+        try {
+          if (conv.type === 'dm') window.location.href = '/app?dm=' + encodeURIComponent(conv.id);
+          else if (conv.type === 'room') window.location.href = '/app?channel=' + encodeURIComponent(conv.id);
+        } catch (err) {}
+      });
+    }
 
     // 1. Events from the updated web app (background channel messages).
     window.addEventListener('lvchat:notify', function (e) {
       var d = e.detail || {};
-      push(String(d.title || 'LVChat'), String(d.body || ''));
+      push(String(d.title || 'LVChat'), String(d.body || ''), d.conv || null);
     });
 
     // 2. Feed notifications — poll the source directly so alerts are real time.
@@ -161,26 +171,30 @@ const NOTIFY_BRIDGE = `
           if (prefs.dms !== 1) continue;
           title = 'DM from ' + (n.sender || 'someone');
           body = n.content ? strip(n.content) : 'New direct message';
+          push(title, body, { type: 'dm', id: n.sender || '' });
         } else if (kind === 'mention') {
           if (prefs.channels !== 1) continue;
           title = 'Mentioned you';
           body = (n.sender ? '@' + n.sender : 'Someone') + (n.channel_name ? ' in ' + n.channel_name : '');
+          push(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });
         } else if (kind === 'invite') {
           if (prefs.invites !== 1) continue;
           title = 'Channel invite';
           body = 'You were invited to ' + (n.channel_name || 'a channel') + (n.sender ? ' by ' + n.sender : '');
+          push(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });
         } else if (kind === 'friend_request') {
           title = 'Friend request';
           body = (n.sender || 'Someone') + ' sent you a friend request';
+          push(title, body, { type: 'dm', id: n.sender || '' });
         } else if (kind === 'friend_accepted') {
           title = 'Friend request accepted';
           body = (n.sender || 'Someone') + ' is now your friend';
+          push(title, body, { type: 'dm', id: n.sender || '' });
         } else {
           title = kind.charAt(0).toUpperCase() + kind.slice(1);
           body = (n.sender ? n.sender + ': ' : '') + (n.channel_name ? n.channel_name : '');
+          push(title, body);
         }
-        if (!body) body = 'You have a new notification';
-        push(title, body);
       }
     }
     function loadFeed () {
@@ -215,7 +229,7 @@ const NOTIFY_BRIDGE = `
                     bgSeen[m.id] = 1;
                     if (!bgSeeded) continue;
                     if (prefs.channels !== 1) continue;
-                    push(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + strip(m.content || ''));
+                    push(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + strip(m.content || ''), { type: 'room', id: m.channel_slug || '' });
                   }
                   bgSeeded = true;
                 }
@@ -358,7 +372,7 @@ async function runAutoLogin (win, record, profile, creds) {
         done(appUrl)
         return
       }
-      const nextParam = new URL(pageUrl).searchParams.get('next') || '/app?channel=general'
+      const nextParam = new URL(pageUrl).searchParams.get('next') || '/app'
       const result = await helper.webContents.executeJavaScript(autoLoginScript(creds.username, creds.password, nextParam), true)
       // TOTP gate: hand the visible window to the real MFA page so the user can
       // enter their code (the session is parked in a pre-auth MFA state).
@@ -679,6 +693,7 @@ function registerIpc () {
   // page's Notification permission. Clicking focuses the originating window.
   ipcMain.on('desktop:notify', (event, payload) => {
     const record = chatWindows.get(event.sender.id)
+    const conv = payload && payload.conv ? payload.conv : null
     desktopNotifications++
     const notification = new Notification({
       title: String((payload && payload.title) || 'LVChat'),
@@ -690,6 +705,9 @@ function registerIpc () {
         if (record.win.isMinimized()) record.win.restore()
         record.win.show()
         record.win.focus()
+        if (conv && conv.type && conv.id && !record.win.isDestroyed()) {
+          record.win.webContents.send('notification:open', conv)
+        }
       }
     })
     notification.show()

@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS users (
   status_reason TEXT,
   age_verified_at TEXT,
   totp_secret TEXT,
-  totp_enabled_at TEXT
+  totp_enabled_at TEXT,
+  searchable INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

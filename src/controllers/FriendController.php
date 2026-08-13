@@ -162,16 +162,17 @@ final class FriendController
             json_out(['ok' => true, 'results' => []]);
         }
         $rows = Database::all(
-            "SELECT id, username, avatar, role, away, last_seen, status_mode, custom_status
+            "SELECT id, username, avatar, role, away, last_seen, status_mode, custom_status, searchable
              FROM users
              WHERE guest = 0 AND status = 'active' AND bot = 0 AND id != ?
                AND username LIKE ? COLLATE NOCASE
+               AND (searchable = 1 OR id = ?)
                AND NOT EXISTS (SELECT 1 FROM friendships fb WHERE fb.status = 'blocked'
                                AND ((fb.user_id = ? AND fb.friend_id = users.id)
                                  OR (fb.user_id = users.id AND fb.friend_id = ?)))
              ORDER BY (last_seen >= datetime('now', '-30 seconds')) DESC, username COLLATE NOCASE
              LIMIT ?",
-            [(int) $user['id'], '%' . $q . '%', (int) $user['id'], (int) $user['id'], $limit]
+            [(int) $user['id'], '%' . $q . '%', (int) $user['id'], (int) $user['id'], (int) $user['id'], $limit]
         );
         $results = [];
         foreach ($rows as $r) {

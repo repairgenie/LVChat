@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '35';
+    private const SCHEMA_VERSION = '36';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -385,6 +385,15 @@ final class Database
             } catch (Exception $e) {
                 // Duplicates were pruned above; treat a leftover index failure
                 // as non-fatal (older SQLite without expression indexes).
+            }
+        }
+
+        // Privacy: searchable flag on users (schema v36).
+        if (in_array('users', $tables, true)) {
+            $colRows = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
+            $colNames = array_column($colRows, 'name');
+            if (!in_array('searchable', $colNames, true)) {
+                $pdo->exec("ALTER TABLE users ADD COLUMN searchable INTEGER NOT NULL DEFAULT 1");
             }
         }
 

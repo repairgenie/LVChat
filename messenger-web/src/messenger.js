@@ -500,13 +500,19 @@ async function pollTick () {
     }
     // status 0 = the fetch failed (offline / server unreachable).
     if (j.status === 0) {
-      setOffline(true)
+      state._pollFails = (state._pollFails || 0) + 1
+      // Only mark offline after 3 consecutive failures to avoid false-offline
+      // reports during transient network blips.
+      if (state._pollFails >= 3) setOffline(true)
       return
     }
     if (!j.ok || !j.body) {
-      setOffline(false)
+      state._pollFails = (state._pollFails || 0) + 1
+      if (state._pollFails >= 3) setOffline(true)
       return
     }
+    // Successful poll resets the failure counter and marks us online.
+    state._pollFails = 0
     setOffline(false)
     handlePoll(j.body)
     // A dedicated room window keeps the server-side unread watermark advanced
@@ -516,7 +522,8 @@ async function pollTick () {
     }
   } catch (err) {
     /* transient network error — keep polling */
-    setOffline(true)
+    state._pollFails = (state._pollFails || 0) + 1
+    if (state._pollFails >= 3) setOffline(true)
   } finally {
     state.pollBusy = false
   }
@@ -620,6 +627,11 @@ function handlePoll (body) {
   // conversation).
   if (sidebarSignature() !== sigBefore) renderSidebar()
   renderChat()
+  // Ensure the user's own status display (header dot + label) stays in sync
+  // after every poll — the poll never updates state.me, so any status_mode
+  // change the user made persists correctly, but the UI must still be
+  // refreshed if other data that affects the display changed.
+  updateMeStatus()
 }
 
 /* ── OS notifications (rendered by the main process) ───────── */
@@ -998,14 +1010,11 @@ function wsOpen () {
     wsrt.ws = null
     if (wsrt.gone) return
     wsrt.fails++
-    if (wsrt.fails >= 3) {
-      // Daemon unreachable: back way off but keep re-probing so a later daemon
-      // start re-enables realtime. The 2s poll keeps everything working.
-      wsrt.fails = 0
-      wsrt.retryTimer = setTimeout(() => wsRefreshTicket(wsOpen), 5 * 60 * 1000)
-      return
-    }
-    wsRefreshTicket(() => { wsrt.retryTimer = setTimeout(wsOpen, 2000 * wsrt.fails) })
+    // Exponential backoff: 2s, 4s, 8s, 16s, 30s cap. After reaching the
+    // cap, keep retrying at the cap interval so we reconnect promptly when
+    // the daemon comes back (the 2s poll keeps everything working).
+    const delay = Math.min(30000, 2000 * Math.pow(2, wsrt.fails - 1))
+    wsRefreshTicket(() => { wsrt.retryTimer = setTimeout(wsOpen, delay) })
   }
 }
 
@@ -2939,11 +2948,13 @@ async function setMyStatus (mode, custom) {
     const s = r.body.status
     if (state.me) {
       state.me.status_mode = s.status_mode
-      state.me.custom_status = s.custom_status
-      state.me.away = s.away
-      state.me.dnd = s.dnd
-      state.me.invisible = s.invisible
-      state.me.is_online = s.is_online
+      state.me.custom_status = s.custom_status != null ? s.custom_status : state.me.custom_status
+      state.me.away = s.away != null ? s.away : state.me.away
+      state.me.dnd = s.dnd != null ? s.dnd : state.me.dnd
+      state.me.invisible = s.invisible != null ? s.invisible : state.me.invisible
+      // Preserve is_online unless the server explicitly returns a value —
+      // custom status must not make the user appear offline to themselves.
+      state.me.is_online = s.is_online != null ? s.is_online : 1
     }
     updateMeStatus()
   } else {

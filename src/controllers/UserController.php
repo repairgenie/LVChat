@@ -159,6 +159,9 @@ final class UserController
             $fields['away'] = $_POST['away'] !== '' ? mb_substr((string) $_POST['away'], 0, 200) : null;
             $fields['away_at'] = $_POST['away'] !== '' ? now() : null;
         }
+        if (isset($_POST['searchable'])) {
+            $fields['searchable'] = (int) ($_POST['searchable'] ? 1 : 0);
+        }
         if (isset($_POST['theme'])) {
             $mode = $_POST['theme'] === 'light' ? 'light' : 'dark';
             $fields['theme'] = $mode;

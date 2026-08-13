@@ -199,7 +199,8 @@
 .lvcvoice-mtg-hint { color: #9ba1a6; font-size: 12px; line-height: 1.5; }
 .lvcvoice-mtg-name { font-weight: 700; color: #fff; }
 .lvcvoice-mtg-urlrow { display: flex; gap: 6px; align-items: center; }
-.lvcvoice-mtg-urlrow .input { flex: 1; min-width: 0; }
+.lvcvoice-mtg-urlrow .input { flex: 1; min-width: 0; color: #dbdee1; background: #1e1f22; border-color: rgba(255,255,255,.15); }
+.lvcvoice-mtg-urlrow .input:focus { border-color: #5865f2; outline: none; }
 .lvcvoice-mtg-result { color: #fbbf24; font-size: 12px; line-height: 1.5; }
 
 /* Toast. */

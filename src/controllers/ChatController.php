@@ -691,7 +691,46 @@ final class ChatController
     {
         $user = self::requireUser();
         $since = max(0, (int) ($_GET['since'] ?? 0));
+        // Periodic presence sweep: mark stale users offline so they don't
+        // appear ghost-online. Runs at most once every 60 seconds per process.
+        self::presenceSweep();
         json_out(self::pollPayload($user, $since));
+    }
+
+    private static ?float $_lastSweep = null;
+
+    /**
+     * Mark users and guests as offline if they haven't been seen in the
+     * configured grace window (default 90s). This catches users whose
+     * connection dropped without a clean disconnect.
+     */
+    private static function presenceSweep(): void
+    {
+        $now = microtime(true);
+        if (self::$_lastSweep !== null && ($now - self::$_lastSweep) < 60) {
+            return; // throttle: at most once per 60s per PHP process
+        }
+        self::$_lastSweep = $now;
+        $grace = max(30, (int) (config_get('presence_sweep_grace', '90') ?? 90));
+        // Users: set away=null (online indicator) to NULL and status_mode to
+        // 'online' if they haven't been seen recently and aren't in an
+        // explicit away/dnd/invisible state. This is a soft sweep — we don't
+        // forcibly change explicit status modes.
+        Database::query(
+            "UPDATE users SET away = NULL, away_at = NULL
+             WHERE away IS NOT NULL
+               AND status_mode = 'online'
+               AND last_seen < datetime('now', '-' || ? || ' seconds')",
+            [$grace]
+        );
+        // Guests: simply mark them as not recently seen so they don't show
+        // in the online list. (Guests have no status_mode.)
+        Database::query(
+            "UPDATE guests SET last_seen = NULL
+             WHERE last_seen IS NOT NULL
+               AND last_seen < datetime('now', '-' || ? || ' seconds')",
+            [$grace]
+        );
     }
 
     /** GET /api/ws/ticket — mint a fresh one-time WS handshake ticket (reconnects). */

@@ -986,6 +986,11 @@
       if (!j.ok) { toast(j.error || 'Could not create a meeting.'); return; }
       state.mtg = { slug: j.slug, name: j.name, key: j.key, url: j.url };
       renderMeeting(state.mtg.slug);
+      // Drop the creator into the meeting channel immediately.
+      try {
+        if (typeof openChannel === 'function') openChannel(j.slug);
+        else window.location.href = '/app?channel=' + encodeURIComponent(j.slug);
+      } catch (e) {}
     });
   }
 

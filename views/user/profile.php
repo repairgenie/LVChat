@@ -327,6 +327,21 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
     </div>
 
     <div class="card p-6">
+      <h2 class="font-semibold text-white mb-1">Privacy</h2>
+      <p class="text-xs text-discord-400 mb-4">Control whether other users can find you in search results.</p>
+      <form id="privacy-form" class="space-y-3">
+        <?= Csrf::field() ?>
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" name="searchable" value="1" class="w-4 h-4 accent-blurple" <?= (int) ($user['searchable'] ?? 1) ? 'checked' : '' ?>>
+          <div>
+            <span class="text-sm text-discord-200">Allow others to find me in search</span>
+            <p class="text-xs text-discord-400">When disabled, your profile won't appear in the user directory or search results.</p>
+          </div>
+        </label>
+      </form>
+    </div>
+
+    <div class="card p-6">
       <h2 class="font-semibold text-white mb-4">Account settings</h2>
       <form id="pw-form" class="space-y-4">
         <?= Csrf::field() ?>
@@ -449,6 +464,15 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
   if (vh) vh.addEventListener('submit', e => {
     e.preventDefault();
     post('/api/profile', new FormData(vh), () => {
+      msg.classList.remove('hidden');
+      setTimeout(() => msg.classList.add('hidden'), 2000);
+    });
+  });
+  const pf = document.getElementById('privacy-form');
+  if (pf) pf.addEventListener('change', e => {
+    const fd = new FormData(pf);
+    if (!fd.has('searchable')) fd.set('searchable', '0');
+    post('/api/profile', fd, () => {
       msg.classList.remove('hidden');
       setTimeout(() => msg.classList.add('hidden'), 2000);
     });
