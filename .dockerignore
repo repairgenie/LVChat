@@ -1,0 +1,12 @@
+node_modules/
+vendor/
+data/
+desktop/dist/
+lvchat-messenger/dist/
+messenger-web/dist/
+messenger-web/node_modules/
+.git/
+.gitignore
+*.log
+.DS_Store
+.env

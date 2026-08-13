@@ -1,0 +1,41 @@
+# LVChat — Docker Compose (single all-in-one container)
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f
+
+services:
+  lvchat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lvchat
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - lvchat_data:/var/www/html/data
+      - lvchat_uploads:/var/www/html/public/uploads
+      - lvchat_avatars:/var/www/html/public/assets/avatars
+    environment:
+      # Override the SQLite path if you mount a different volume.
+      - CHAT_DB=/var/www/html/data/chat.db
+      # WebSocket gateway port (must match the EXPOSE / ports mapping).
+      - WS_PORT=8080
+      # Internal push endpoint for php-fpm -> daemon fan-out.
+      - WS_PUSH_URL=http://127.0.0.1:9001/push
+      # Allow CORS from these origins (comma-separated) for the messenger.
+      # - CHAT_CORS_ORIGINS=https://msg.example.com
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  lvchat_data:
+  lvchat_uploads:
+  lvchat_avatars:

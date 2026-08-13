@@ -518,6 +518,26 @@ function sidebarSignature () {
   return parts.join('\n')
 }
 
+/* Copy fresh presence fields from the polled friends list onto group members so
+ * grouped contacts update live instead of only after a reload. */
+function mergeGroupPresence () {
+  if (!state.groups.length || !state.friends.length) return
+  const byId = new Map()
+  for (const f of state.friends) byId.set(String(f.id), f)
+  for (const g of state.groups) {
+    for (const m of (g.members || [])) {
+      const f = byId.get(String(m.id))
+      if (!f) continue
+      m.is_online = f.is_online
+      m.status_mode = f.status_mode
+      m.custom_status = f.custom_status
+      m.away = f.away
+      m.dnd = f.dnd
+      m.invisible = f.invisible
+    }
+  }
+}
+
 function handlePoll (body) {
   if (body.reconnect) {
     location.reload()
