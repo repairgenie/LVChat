@@ -44,6 +44,13 @@ else
     echo "[lvchat] WARNING: deploy checks reported problems — starting anyway." >&2
 fi
 
+# deploy.sh may have created/modified files as root (e.g. chat.db on first run).
+# Re-apply ownership so www-data (php-fpm workers, WS gateway) can read/write.
+chown -R www-data:www-data \
+    "$APP_DIR/data" \
+    "$APP_DIR/public/uploads" \
+    "$APP_DIR/public/assets/avatars"
+
 # ── Supervisor ─────────────────────────────────────────────────────────────
 echo "[lvchat] starting supervisord (nginx + php-fpm + ws-server) ..."
 exec /usr/bin/supervisord -n "$@"

@@ -232,6 +232,54 @@ The client falls back **ws → SSE → poll** automatically if the gateway is do
 so the chat never goes quiet. `bash bin/deploy.sh` health-checks the daemon
 when realtime mode is set to WebSocket.
 
+## Docker
+
+A single all-in-one container runs **nginx + PHP-FPM + the WebSocket realtime
+gateway** behind supervisord, sharing the SQLite database on one data volume.
+No Node.js, no build step — the compiled assets ship with the repo.
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+- Web app: `http://localhost:80` (document root is `public/`)
+- WebSocket gateway: `ws://localhost:8080`
+- Data persists in three named volumes: `lvchat_data` (the SQLite DB at
+  `data/chat.db`), `lvchat_uploads` (`public/uploads/`), `lvchat_avatars`
+  (`public/assets/avatars/`).
+
+The first account you register becomes the server admin. Realtime mode defaults
+to polling; switch it to WebSocket under **Admin → Settings** — the gateway is
+already running inside the container.
+
+TLS is left to a reverse proxy in front of the container (Caddy, nginx,
+Cloudflare, ...); the container itself speaks plain HTTP on :80 and ws on :8080.
+For WSS, terminate TLS at the proxy and rewrite `wss://` → `ws://` upstream, or
+mount certs and set `WS_SSL_CERT`/`WS_SSL_KEY` in the container environment.
+
+Configuration:
+- `docker-compose.yml` — ports, volumes, and env passthrough (`CHAT_DB`,
+  `WS_PORT`, `WS_PUSH_URL`, `CHAT_CORS_ORIGINS`, ...). Everything also lives in
+  the `.env` file mechanism the app already reads.
+- `docker/nginx.conf` — vhost (fastcgi to php-fpm on 127.0.0.1:9000).
+- `docker/supervisord.conf` — process supervision.
+- `docker/entrypoint.sh` — runs `bin/deploy.sh`, fixes volume ownership.
+- `docker/php.ini` — OPcache, upload limits.
+
+Build manually with `docker build -t lvchat .` and run:
+
+```bash
+docker run -d --name lvchat -p 80:80 -p 8080:8080 \
+  -v lvchat_data:/var/www/html/data \
+  -v lvchat_uploads:/var/www/html/public/uploads \
+  -v lvchat_avatars:/var/www/html/public/assets/avatars \
+  lvchat
+```
+
+Backups: stop the container (or use a SQLite-safe method) and copy the data
+volume, e.g. `docker run --rm -v lvchat_data:/d -v "$PWD":/b alpine cp -a /d /b/chat-data-backup`.
+
 ## Upgrading / reinstalling (important)
 
 The entire install is **PHP + a committed stylesheet** — the server needs no Node, no npm,
