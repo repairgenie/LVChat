@@ -452,7 +452,7 @@ function presence_label(array $u): string {
 
       <nav class="px-2 pt-3 pb-2">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400">Online</div>
-        <div class="mt-1 space-y-0.5">
+        <div id="online-section" class="mt-1 space-y-0.5">
           <?php foreach ($onlineUsers as $ou): ?>
           <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" data-user-id="<?= (int) ($ou['id'] ?? 0) ?>" data-guest="<?= !empty($ou['guest']) ? '1' : '0' ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
             <span class="w-2 h-2 rounded-full <?= presence_dot_class($ou) ?>"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
@@ -550,7 +550,7 @@ function presence_label(array $u): string {
       </div>
       <?php elseif ($dm): ?>
       <span class="font-bold text-white text-sm"><?= h($dm['username']) ?></span>
-      <span class="flex items-center gap-1.5 text-xs text-discord-400">
+      <span id="dm-header-status" class="flex items-center gap-1.5 text-xs text-discord-400">
         <span class="w-2 h-2 rounded-full <?= presence_dot_class($dm) ?>"></span>
         <?= h(presence_label($dm)) ?><?php $dmSt = presence_status_text($dm); if ($dmSt !== ''): ?> — <span class="truncate max-w-[24ch]"><?= h($dmSt) ?></span><?php endif; ?>
       </span>

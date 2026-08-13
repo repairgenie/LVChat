@@ -914,10 +914,12 @@
     if (j.bg_messages) handleBgMessages(j.bg_messages);
     if (j.mentions) handleMentions(j.mentions);
     if (j.presence && CHANNEL) applyPresence(j.presence);
+    if (j.presence && !CHANNEL && DM) applyDmHeaderPresence(j.presence);
     if (typeof j.notify_count === 'number') setBell(j.notify_count);
     if (j.dm_list) handleDmList(j.dm_list);
     if (j.channel_unread) updateChannelUnread(j.channel_unread);
     if (j.channel_presence) updateChannelPresence(j.channel_presence);
+    if (j.online_users) updateOnlineSidebar(j.online_users);
     if (typeof j.channel_url !== 'undefined' && CHANNEL) applyChannelUrl(j.channel_url);
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
@@ -978,7 +980,7 @@
 
   function renderDmSidebar(list) {
     if (!dmSection) return;
-    const sig = JSON.stringify(list.map((d) => [d.user_id, d.username, d.unread, d.last_id]));
+    const sig = JSON.stringify(list.map((d) => [d.user_id, d.username, d.unread, d.last_id, d.is_online ? 1 : 0, d.status_mode || '', d.custom_status || '', d.away || '']));
     if (sig === dmSig) return;
     dmSig = sig;
     dmSection.innerHTML = list.length
@@ -1129,6 +1131,21 @@
     if (count) count.textContent = String(shown);
   }
 
+  // ── Live DM header: the partner's presence dot/label/status text ───────────
+  let dmHdrSig = '';
+  function applyDmHeaderPresence(list) {
+    const el = document.getElementById('dm-header-status');
+    if (!el || !Array.isArray(list) || !list.length) return;
+    const p = list[0];
+    const mode = p.status_mode || (p.away ? 'away' : 'online');
+    const label = STATUS_LABELS[mode] || 'Online';
+    const st = presenceStatus(p);
+    const sig = [p.status_mode || '', p.custom_status || '', p.away || '', p.is_online ? 1 : 0].join('|');
+    if (sig === dmHdrSig) return;
+    dmHdrSig = sig;
+    el.innerHTML = `<span class="w-2 h-2 rounded-full ${presenceDot(p)}"></span>${esc(label)}${st ? ' — <span class="truncate max-w-[24ch]">' + esc(st) + '</span>' : ''}`;
+  }
+
   // ── Friends sidebar ───────────────────────────────────────────────────────
   const friendsSection = document.getElementById('friends-section');
   const friendCount = document.getElementById('friend-count');
@@ -1145,7 +1162,7 @@
     if (!friendsSection) return;
     const online = friends.filter(f => f.is_online);
     const offline = friends.filter(f => !f.is_online);
-    const sig = JSON.stringify([friends.map(f => [f.id, f.is_online]), requests.map(r => r.id)]);
+    const sig = JSON.stringify([friends.map(f => [f.id, f.is_online, f.status_mode || '', f.custom_status || '', f.away || '']), requests.map(r => r.id)]);
     if (sig === friendsSig) return;
     friendsSig = sig;
     if (friendCount) friendCount.textContent = String(friends.length);
@@ -1198,6 +1215,34 @@
     if (!html) html = '<div class="p-4 text-xs text-discord-500">No friends yet.</div>';
     friendsSection.innerHTML = html;
     bindFriendActions();
+  }
+
+  // ── Live "Online" sidebar list (all users, not just friends) ───────────────
+  const onlineSection = document.getElementById('online-section');
+  let onlineSig = '';
+
+  function onlineItemHtml(u) {
+    const guestTag = u.guest ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '';
+    const nameCls = u.role === 'admin' ? 'text-red-400' : '';
+    const st = presenceStatus(u);
+    return `<a href="/app?dm=${encodeURIComponent(u.username)}" data-ctx-user="${esc(u.username)}" data-user-id="${(u.id || '')}" data-guest="${u.guest ? '1' : '0'}" title="${esc(contactTitle(u))}" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
+      <span class="w-2 h-2 rounded-full shrink-0 ${presenceDot(u)}"></span>
+      <span class="min-w-0"><span class="block truncate ${nameCls}">${esc(u.username)}${guestTag}</span>${st ? `<span class="block truncate text-[11px] text-discord-500">${esc(st)}</span>` : ''}</span>
+      <button type="button" class="ctx-btn ml-auto text-discord-400 hover:text-white text-xs px-1.5 py-0.5 shrink-0" title="More">⋮</button>
+    </a>`;
+  }
+
+  function updateOnlineSidebar(list) {
+    if (!onlineSection) return;
+    // These rows are online by construction (the query filters to active users),
+    // so mark them so presenceDot falls through to the mode-based colours.
+    const rows = list.map((u) => Object.assign({}, u, { is_online: 1 }));
+    const sig = JSON.stringify(rows.map((u) => [u.id, u.username, u.status_mode || '', u.custom_status || '', u.away || '']));
+    if (sig === onlineSig) return;
+    onlineSig = sig;
+    onlineSection.innerHTML = rows.length
+      ? rows.map(onlineItemHtml).join('')
+      : '<div class="px-2 py-1 text-xs text-discord-500">Nobody online</div>';
   }
 
   function bindFriendActions() {
@@ -2230,7 +2275,7 @@
   if (awayBtn) awayBtn.addEventListener('click', async () => {
     const msg = await uiPrompt('Away message (leave empty to come back):', '');
     if (msg === null) return;
-    post('/api/profile', { away: msg.trim() }, () => { window.location.reload(); });
+    post('/api/profile', { away: msg.trim() }, () => { refreshMyStatus(); });
   });
   // Rich status picker (Online / Away / DND / Appear Offline / Custom).
   document.querySelectorAll('[data-status]').forEach((btn) => {
@@ -2241,9 +2286,35 @@
         if (text === null) return;
         body.custom_status = text.trim();
       }
-      post('/api/status', body, () => { window.location.reload(); });
+      if (menu) menu.classList.add('hidden');
+      post('/api/status', body, (j) => { if (j && j.status) applyMyStatus(j.status); });
     });
   });
+
+  // Update the header status line/dot in place after a status change, instead
+  // of reloading the whole page (the next poll re-renders the sidebar lists).
+  function applyMyStatus(status) {
+    if (!status) return;
+    const line = document.getElementById('me-status-line');
+    const dot = document.querySelector('#me-header-avatar .avatar-status');
+    const mode = status.status_mode || 'online';
+    const text = String(status.custom_status || '').trim();
+    const label = STATUS_LABELS[mode] || 'Online';
+    if (line) line.textContent = text ? label + ' — ' + (text.length > 60 ? text.slice(0, 60) : text) : label;
+    if (dot) {
+      const cls = mode === 'dnd' ? 'bg-red-500' : (mode === 'away' || mode === 'custom') ? 'bg-amber-400' : mode === 'invisible' ? 'bg-discord-500' : 'bg-green-500';
+      dot.className = dot.className.replace(/bg-(green|amber|red|discord)-\d+/g, cls);
+    }
+  }
+
+  // Re-fetch the authoritative presence (used after legacy /api/profile away).
+  async function refreshMyStatus() {
+    try {
+      const r = await fetch('/api/me');
+      const j = await r.json();
+      if (j && j.ok && j.user) applyMyStatus(j.user);
+    } catch (err) { /* ignore */ }
+  }
 
   // ── Right-click context menus ──────────────────────────────────────────────
   const ctxMenu = document.getElementById('ctx-menu');

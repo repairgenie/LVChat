@@ -577,6 +577,17 @@ final class ChatController
         if (Realtime::reconnectRequested()) {
             $out['reconnect'] = 1;
         }
+        // Live "Online" sidebar list (registered + guest users seen recently).
+        // Mirrors the app view's list (including the current user) so the first
+        // poll doesn't drop the caller's own row from the sidebar.
+        $out['online_users'] = Database::all(
+            "SELECT id, username, role, guest, away, status_mode, custom_status
+             FROM users
+             WHERE last_seen >= datetime('now', '-30 seconds') AND status_mode != 'invisible'
+             UNION ALL
+             SELECT id, nick, 'user', 1, NULL, 'online', '' FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
+             ORDER BY username COLLATE NOCASE"
+        );
 
         $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0', [$user['id'], $user['id']]);
         $out['notify_count'] = $notifyCount;

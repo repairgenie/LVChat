@@ -541,6 +541,26 @@ function sidebarSignature () {
   return parts.join('\n')
 }
 
+/* Copy fresh presence fields from the polled friends list onto group members so
+ * grouped contacts update live instead of only after a reload. */
+function mergeGroupPresence () {
+  if (!state.groups.length || !state.friends.length) return
+  const byId = new Map()
+  for (const f of state.friends) byId.set(String(f.id), f)
+  for (const g of state.groups) {
+    for (const m of (g.members || [])) {
+      const f = byId.get(String(m.id))
+      if (!f) continue
+      m.is_online = f.is_online
+      m.status_mode = f.status_mode
+      m.custom_status = f.custom_status
+      m.away = f.away
+      m.dnd = f.dnd
+      m.invisible = f.invisible
+    }
+  }
+}
+
 function handlePoll (body) {
   if (body.reconnect) {
     location.reload()
@@ -552,7 +572,13 @@ function handlePoll (body) {
   }
   const sigBefore = sidebarSignature()
   if (Array.isArray(body.dm_list)) state.dmList = body.dm_list
-  if (Array.isArray(body.friends)) state.friends = body.friends
+  if (Array.isArray(body.friends)) {
+    state.friends = body.friends
+    // Group memberships are only fetched at boot; keep their presence fresh by
+    // merging the per-friend presence this poll already returns, so grouped
+    // contacts update live instead of only after a reload.
+    mergeGroupPresence()
+  }
   if (Array.isArray(body.friend_requests)) state.incoming = body.friend_requests
   if (Array.isArray(body.blocked)) state.blocked = body.blocked
   if (Array.isArray(body.channel_invites)) state.channelInvites = body.channel_invites
