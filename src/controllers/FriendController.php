@@ -66,10 +66,10 @@ final class FriendController
     {
         $user = self::requireUser();
         self::requireCsrf();
-        // Rate-limit friend requests: max 5 per 60 seconds.
+        // Rate-limit friend requests: max 5 per 60 seconds (outgoing only).
         $recent = (int) Database::scalar(
-            'SELECT COUNT(*) FROM friendships WHERE (requester_id = ? OR addressee_id = ?) AND created_at > datetime("now", "-60 seconds")',
-            [(int) $user['id'], (int) $user['id']]
+            'SELECT COUNT(*) FROM friendships WHERE requester_id = ? AND created_at > datetime("now", "-60 seconds")',
+            [(int) $user['id']]
         );
         if ($recent >= 5) {
             json_out(['error' => 'You are sending friend requests too quickly. Slow down.'], 429);

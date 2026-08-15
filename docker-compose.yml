@@ -25,6 +25,8 @@ services:
       - WS_PORT=8080
       # Internal push endpoint for php-fpm -> daemon fan-out.
       - WS_PUSH_URL=http://127.0.0.1:9001/push
+      # Set to 1 when behind a TLS-terminating reverse proxy.
+      - TRUSTED_PROXY=1
       # Allow CORS from these origins (comma-separated) for the messenger.
       # - CHAT_CORS_ORIGINS=https://msg.example.com
     restart: unless-stopped

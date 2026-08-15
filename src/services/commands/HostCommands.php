@@ -36,7 +36,7 @@ CommandRegistry::register('vhost', [
                     return ['replies' => ['Usage: /vhost set <host> (3-60 chars, letters/numbers/dot/dash)']];
                 }
                 // Block reserved or deceptive vhost values.
-                $reserved = ['admin', 'staff', 'official', 'support', 'help', 'ircop', 'operator', 'system', 'server', 'root', 'webmaster'];
+                $reserved = ['admin', 'staff', 'official', 'support', 'help', 'ircop', 'operator', 'system', 'server', 'root', 'webmaster', 'moderator', 'mod', 'network', 'services', 'noc', 'founder', 'owner', 'security', 'global'];
                 $bare = strtolower(rtrim($host, '.'));
                 foreach ($reserved as $r) {
                     if ($bare === $r || str_starts_with($bare, $r . '.') || str_ends_with($bare, '.' . $r)) {

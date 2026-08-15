@@ -49,11 +49,17 @@ if (PHP_SAPI === 'cli' || getenv('LVC_DEBUG') === '1') {
 // so use SameSite=None over HTTPS. Plain-HTTP/local installs fall back to Lax.
 // Check proxy headers (X-Forwarded-Proto, CF-Visitor) for TLS-terminating
 // reverse proxies (nginx, Cloudflare, Caddy) where PHP sees plain HTTP.
+// Only trust proxy headers when a trusted proxy is configured, to prevent
+// HSTS injection or Secure cookie forcing on plain HTTP via header spoofing.
+$trustedProxy = getenv('TRUSTED_PROXY');
+$hasTrustedProxy = $trustedProxy !== false && $trustedProxy !== '' && $trustedProxy !== '0';
 $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || ($_SERVER['SERVER_PORT'] ?? '') === '443'
-    || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
-    || !empty($_SERVER['HTTP_X_FORWARDED_SSL'])
-    || str_contains((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), '"https"');
+    || ($hasTrustedProxy && (
+        strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+        || !empty($_SERVER['HTTP_X_FORWARDED_SSL'])
+        || str_contains((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), '"https"')
+    ));
 session_set_cookie_params([
     'httponly' => true,
     'secure' => $secure,

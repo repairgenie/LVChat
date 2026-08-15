@@ -1057,8 +1057,11 @@ final class ChatController
         $user = self::requireUser();
         self::requireCsrf();
         // Rate-limit reports: max 10 per 5 minutes.
+        $isGuest = MessageService::isGuest($user);
         $recentReports = (int) Database::scalar(
-            'SELECT COUNT(*) FROM reports WHERE reporter_user_id = ? AND created_at > datetime("now", "-5 minutes")',
+            $isGuest
+                ? 'SELECT COUNT(*) FROM reports WHERE reporter_guest_id = ? AND created_at > datetime("now", "-5 minutes")'
+                : 'SELECT COUNT(*) FROM reports WHERE reporter_user_id = ? AND created_at > datetime("now", "-5 minutes")',
             [(int) $user['id']]
         );
         if ($recentReports >= 10) {
@@ -1071,7 +1074,6 @@ final class ChatController
         if ($id < 1) {
             json_out(['error' => 'Missing message.'], 400);
         }
-        $isGuest = MessageService::isGuest($user);
         // One report per message per reporter (checked before reason validation so
         // a repeat submission is reported as a duplicate, not a bad request).
         $dup = Database::row(

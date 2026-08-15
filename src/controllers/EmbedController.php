@@ -82,6 +82,7 @@ final class EmbedController
         }
 
         header('Content-Type: ' . $result['content_type']);
+        header('X-Content-Type-Options: nosniff');
         header('Access-Control-Allow-Origin: *');
         header('Cache-Control: public, max-age=300');
         header('Referrer-Policy: no-referrer');

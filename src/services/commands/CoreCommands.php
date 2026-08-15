@@ -61,11 +61,11 @@ CommandRegistry::register('join', [
             return ['replies' => ['Usage: /join <#channel> [key]']];
         }
         // Rate-limit joins to prevent channel flooding.
-        $lastJoin = (int) ($_SESSION['last_cmd_join_ts'] ?? 0);
+        $lastJoin = (int) ($_SESSION['last_join_ts'] ?? 0);
         if (time() - $lastJoin < 2) {
             return ['replies' => ['You are joining channels too quickly. Slow down.']];
         }
-        $_SESSION['last_cmd_join_ts'] = time();
+        $_SESSION['last_join_ts'] = time();
         $ch = ChannelService::find($name);
         if (!$ch) {
             $created = ChannelService::create($user, $name);
@@ -326,6 +326,12 @@ CommandRegistry::register('topic', [
         if ((int) $channel['topic_locked'] === 1 && level_weight($level) < level_weight('op') && $user['role'] !== 'admin') {
             return ['replies' => ['You must be a channel operator (+o) to change the topic.']];
         }
+        // Rate-limit topic changes to prevent flooding.
+        $lastTopic = (int) ($_SESSION['last_topic_ts_' . $channel['id']] ?? 0);
+        if (time() - $lastTopic < 10) {
+            return ['replies' => ['Topic changes are rate-limited. Please wait.']];
+        }
+        $_SESSION['last_topic_ts_' . $channel['id']] = time();
         $topic = implode(' ', $args);
         $old = $channel['topic'];
         ChannelService::update($channel['id'], ['topic' => mb_substr($topic, 0, 500)]);
@@ -488,6 +494,12 @@ CommandRegistry::register('search', [
         if ($term === '') {
             return ['replies' => ['Usage: /search <term>']];
         }
+        // Rate-limit search to prevent database exhaustion.
+        $lastSearch = (int) ($_SESSION['last_search_ts'] ?? 0);
+        if (time() - $lastSearch < 3) {
+            return ['replies' => ['Search is rate-limited. Please wait.']];
+        }
+        $_SESSION['last_search_ts'] = time();
         $channels = MessageService::searchChannels($user, $term, 20);
         $dms = MessageService::searchDm($user, $term, 20);
         if (!$channels && !$dms) {

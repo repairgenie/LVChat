@@ -55,6 +55,7 @@ CommandRegistry::register('deoper', [
     'desc' => 'Drop your operator status.',
     'usage' => '/deoper',
     'run' => function (array $args, array $user, ?array $channel) {
+        log_audit('deoper', $user['username']);
         Auth::deoper();
         return ['replies' => ['You are no longer operating.']];
     },
@@ -98,7 +99,11 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
                 }
             }
             // Block overly broad masks that would affect everyone.
-            if ($target === '*@*' || $target === '*!*@*' || $target === '*') {
+            // Normalize wildcards first: collapse consecutive * chars, replace
+            // ? with * (functionally equivalent in maskMatch), then check.
+            $normalized = preg_replace('/\?/', '*', $target);
+            $normalized = preg_replace('/\*+/', '*', $normalized);
+            if ($normalized === '*' || $normalized === '*@*' || $normalized === '*!*@*') {
                 return ['replies' => ['This mask is too broad and would affect all users.']];
             }
             // Enforce a maximum ban duration of 30 days to prevent accidental

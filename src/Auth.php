@@ -394,6 +394,7 @@ final class Auth
         Database::query('DELETE FROM sessions WHERE expires_at < datetime("now")');
         Database::query('DELETE FROM guest_sessions WHERE expires_at < datetime("now")');
         Database::query('DELETE FROM guests WHERE last_seen < datetime("now", "-1 day")');
+        Database::query('DELETE FROM totp_used_counters WHERE expires_at < datetime("now")');
     }
 
     public static function isGuest(array $user): bool
