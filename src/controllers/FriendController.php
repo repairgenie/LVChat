@@ -86,6 +86,14 @@ final class FriendController
     {
         $user = self::requireUser();
         self::requireCsrf();
+        // Rate-limit friend actions: max 20 per minute (shared across accept/decline).
+        $recent = (int) Database::scalar(
+            'SELECT COUNT(*) FROM friendships WHERE (user_id = ? OR friend_id = ?) AND updated_at > datetime("now", "-60 seconds")',
+            [(int) $user['id'], (int) $user['id']]
+        );
+        if ($recent >= 20) {
+            json_out(['error' => 'You are processing friend requests too quickly. Slow down.'], 429);
+        }
         $t = self::resolveTarget();
         $r = FriendService::acceptRequest((int) $user['id'], (int) $t['id']);
         if (isset($r['error'])) {
@@ -98,6 +106,14 @@ final class FriendController
     {
         $user = self::requireUser();
         self::requireCsrf();
+        // Rate-limit friend actions: max 20 per minute (shared across accept/decline).
+        $recent = (int) Database::scalar(
+            'SELECT COUNT(*) FROM friendships WHERE (user_id = ? OR friend_id = ?) AND updated_at > datetime("now", "-60 seconds")',
+            [(int) $user['id'], (int) $user['id']]
+        );
+        if ($recent >= 20) {
+            json_out(['error' => 'You are processing friend requests too quickly. Slow down.'], 429);
+        }
         $t = self::resolveTarget();
         $r = FriendService::declineRequest((int) $user['id'], (int) $t['id']);
         json_out($r);

@@ -88,24 +88,31 @@ function now(): string
 }
 
 /** Best-effort real client IP, respecting reverse proxies while filtering spoofed values.
- *  Priority: Cloudflare header -> X-Real-IP (nginx) -> first entry of X-Forwarded-For -> REMOTE_ADDR. */
+ *  Priority: Cloudflare header -> X-Real-IP (nginx) -> first entry of X-Forwarded-For -> REMOTE_ADDR.
+ *  Proxy headers are only trusted when TRUSTED_PROXY is enabled (set in .env
+ *  when behind a TLS-terminating reverse proxy). Without it, REMOTE_ADDR is
+ *  always used, preventing IP spoofing via forged headers. */
 function client_ip(): ?string
 {
-    $candidates = [];
-    if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
-        $candidates[] = $_SERVER['HTTP_CF_CONNECTING_IP'];
-    }
-    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
-        $candidates[] = $_SERVER['HTTP_X_REAL_IP'];
-    }
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        // Left-most entry is the original client; the rest are added by each proxy.
-        $candidates[] = trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
-    }
-    foreach ($candidates as $ip) {
-        $ip = trim((string) $ip);
-        if (filter_var($ip, FILTER_VALIDATE_IP)) {
-            return $ip;
+    $trustedProxy = getenv('TRUSTED_PROXY');
+    $hasTrustedProxy = $trustedProxy !== false && $trustedProxy !== '' && $trustedProxy !== '0';
+    if ($hasTrustedProxy) {
+        $candidates = [];
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $candidates[] = $_SERVER['HTTP_CF_CONNECTING_IP'];
+        }
+        if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            $candidates[] = $_SERVER['HTTP_X_REAL_IP'];
+        }
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            // Left-most entry is the original client; the rest are added by each proxy.
+            $candidates[] = trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
+        }
+        foreach ($candidates as $ip) {
+            $ip = trim((string) $ip);
+            if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                return $ip;
+            }
         }
     }
     return isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : null;
