@@ -103,7 +103,16 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
             // ? with * (functionally equivalent in maskMatch), then check.
             $normalized = preg_replace('/\?/', '*', $target);
             $normalized = preg_replace('/\*+/', '*', $normalized);
-            if ($normalized === '*' || $normalized === '*@*' || $normalized === '*!*@*') {
+            // Match any mask that is functionally equivalent to "all users".
+            // After normalization, $normalized has at most single * chars.
+            // It is overly broad if it has no host component (no @) or if
+            // the host component is just * (matches everything).
+            $isOverlyBroad = ($normalized === '*')
+                || ($normalized === '*@*' || $normalized === '*!*@*')
+                || ($normalized === '*!@*' || $normalized === '*@*.*')
+                || ($normalized === '*!*@*.*' || $normalized === '*!@*.*')
+                || (!str_contains($normalized, '@'));
+            if ($isOverlyBroad) {
                 return ['replies' => ['This mask is too broad and would affect all users.']];
             }
             // Enforce a maximum ban duration of 30 days to prevent accidental
@@ -310,9 +319,10 @@ CommandRegistry::register('samode', [
         if (!$ch) {
             return ['replies' => ['Usage: /samode <#channel> <+/-modes> [args]']];
         }
-        log_audit('samode', $ch['name'], implode(' ', $args));
         $reg = CommandRegistry::get('mode');
-        return call_user_func($reg['run'], array_merge([$args[0] ?? ''], array_slice($args, 1)), $user, $ch);
+        $result = call_user_func($reg['run'], array_merge([$args[0] ?? ''], array_slice($args, 1)), $user, $ch);
+        log_audit('samode', $ch['name'], implode(' ', $args));
+        return $result;
     },
 ]);
 

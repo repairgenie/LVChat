@@ -86,6 +86,11 @@ final class CensorService
     {
         // Strip zero-width and invisible Unicode characters.
         $text = preg_replace('/[\x{200B}\x{200C}\x{200D}\x{FEFF}\x{00AD}\x{2060}\x{180E}]/u', '', $text);
+        // Fullwidth Latin (U+FF01-U+FF5E) → ASCII (U+0021-U+007E).
+        // e.g. ｆｕｃｋ → fuck
+        $text = preg_replace_callback('/[\x{FF01}-\x{FF5E}]/u', function ($m) {
+            return mb_chr(mb_ord($m[0]) - 0xFEE0, 'UTF-8');
+        }, $text);
         // Cyrillic → Latin homoglyphs (common evasion characters).
         $homoglyphs = [
             'а' => 'a', 'А' => 'a', // Cyrillic а

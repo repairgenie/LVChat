@@ -68,7 +68,7 @@ final class FriendController
         self::requireCsrf();
         // Rate-limit friend requests: max 5 per 60 seconds (outgoing only).
         $recent = (int) Database::scalar(
-            'SELECT COUNT(*) FROM friendships WHERE requester_id = ? AND created_at > datetime("now", "-60 seconds")',
+            'SELECT COUNT(*) FROM friendships WHERE user_id = ? AND created_at > datetime("now", "-60 seconds")',
             [(int) $user['id']]
         );
         if ($recent >= 5) {

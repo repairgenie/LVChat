@@ -124,10 +124,18 @@ final class TotpService
             }
             if (hash_equals(self::code($secretB32, $now + $i * self::PERIOD), $code)) {
                 // Record this counter as used (expires after 2 windows).
-                Database::query(
-                    'INSERT OR IGNORE INTO totp_used_counters (counter, expires_at) VALUES (?, datetime("now", "+120 seconds"))',
-                    [$counter]
-                );
+                // Use INSERT (not OR IGNORE) so a concurrent duplicate throws,
+                // which we catch below to detect a race.
+                try {
+                    Database::query(
+                        'INSERT INTO totp_used_counters (counter, expires_at) VALUES (?, datetime("now", "+120 seconds"))',
+                        [$counter]
+                    );
+                } catch (\PDOException $e) {
+                    // Duplicate key = concurrent replay of the same counter.
+                    // Treat as already used — reject this attempt.
+                    continue;
+                }
                 return true;
             }
         }

@@ -55,8 +55,9 @@ final class EmbedController
         header('Cache-Control: no-cache');
         header('Referrer-Policy: no-referrer');
         // Sanitize the Host header — it's client-controlled and must not be
-        // interpolated into CSP without validation.
-        $host = preg_replace('/[^a-zA-Z0-9.\-]/', '', $_SERVER['HTTP_HOST'] ?? '');
+        // interpolated into CSP without validation. Allow IPv6 [...], ports,
+        // and standard hostname characters.
+        $host = preg_replace('/[^\w.\-:\[\]]/', '', $_SERVER['HTTP_HOST'] ?? '');
         header('Content-Security-Policy: frame-ancestors ' . $host . '; sandbox allow-scripts allow-forms allow-popups');
         echo $result['body'];
         exit;
