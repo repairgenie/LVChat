@@ -154,14 +154,21 @@ final class Realtime
         if (($_SERVER['SERVER_PORT'] ?? '') === '443') {
             return true;
         }
-        if (stripos((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''), 'https') !== false) {
-            return true;
-        }
-        if (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '')) === 'on') {
-            return true;
-        }
-        if (stripos((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), 'https') !== false) {
-            return true;
+        // Only trust proxy headers when a trusted reverse proxy is configured.
+        // Without this gate, an attacker on plain HTTP can spoof these headers
+        // to force a ws:// URL (mixed content) or wss:// (protocol downgrade).
+        $trustedProxy = getenv('TRUSTED_PROXY');
+        $hasTrustedProxy = $trustedProxy !== false && $trustedProxy !== '' && $trustedProxy !== '0';
+        if ($hasTrustedProxy) {
+            if (stripos((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''), 'https') !== false) {
+                return true;
+            }
+            if (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '')) === 'on') {
+                return true;
+            }
+            if (stripos((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), 'https') !== false) {
+                return true;
+            }
         }
         return false;
     }
