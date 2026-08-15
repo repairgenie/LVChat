@@ -132,9 +132,13 @@ final class TotpService
                         [$counter]
                     );
                 } catch (\PDOException $e) {
-                    // Duplicate key = concurrent replay of the same counter.
-                    // Treat as already used — reject this attempt.
-                    continue;
+                    // SQLSTATE 23000 = integrity constraint violation (unique
+                    // key duplicate).  This is the concurrent-replay race.
+                    // Any other PDOException (disk full, corruption) propagates.
+                    if ($e->getCode() === '23000') {
+                        continue;
+                    }
+                    throw $e;
                 }
                 return true;
             }

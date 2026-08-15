@@ -55,7 +55,8 @@ CommandRegistry::register('deoper', [
     'desc' => 'Drop your operator status.',
     'usage' => '/deoper',
     'run' => function (array $args, array $user, ?array $channel) {
-        log_audit('deoper', $user['username']);
+        $class = Auth::operSessionClass();
+        log_audit('deoper', $user['username'], $class ? 'operclass: ' . $class : '');
         Auth::deoper();
         return ['replies' => ['You are no longer operating.']];
     },
@@ -103,15 +104,23 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
             // ? with * (functionally equivalent in maskMatch), then check.
             $normalized = preg_replace('/\?/', '*', $target);
             $normalized = preg_replace('/\*+/', '*', $normalized);
-            // Match any mask that is functionally equivalent to "all users".
-            // After normalization, $normalized has at most single * chars.
-            // It is overly broad if it has no host component (no @) or if
-            // the host component is just * (matches everything).
-            $isOverlyBroad = ($normalized === '*')
-                || ($normalized === '*@*' || $normalized === '*!*@*')
-                || ($normalized === '*!@*' || $normalized === '*@*.*')
-                || ($normalized === '*!*@*.*' || $normalized === '*!@*.*')
-                || (!str_contains($normalized, '@'));
+            // A mask is overly broad if:
+            // - It is just "*" (matches everything)
+            // - The host component (after @) is entirely wildcards/dots
+            //   (e.g. *@*, *@*.*, *!*@*.*)
+            // IP-based masks (no @) are NOT blocked — they target specific ranges.
+            $isOverlyBroad = false;
+            if ($normalized === '*') {
+                $isOverlyBroad = true;
+            } elseif (str_contains($normalized, '@')) {
+                $hostPart = substr($normalized, strrpos($normalized, '@') + 1);
+                // Strip all wildcards and dots — if nothing remains, the host
+                // is purely wildcards and matches every hostname.
+                $stripped = preg_replace('/[*.\s]/', '', $hostPart);
+                if ($stripped === '') {
+                    $isOverlyBroad = true;
+                }
+            }
             if ($isOverlyBroad) {
                 return ['replies' => ['This mask is too broad and would affect all users.']];
             }
