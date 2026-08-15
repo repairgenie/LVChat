@@ -38,10 +38,13 @@ return static function (Router $router): void {
     $router->post('/api/webrtc/call/join', [CallController::class, 'join']);
     $router->post('/api/webrtc/call/end', [CallController::class, 'end']);
 
-    // Meeting rooms (#mtg-XXXXXX).
-    $router->post('/api/webrtc/mtg/create', [MtgController::class, 'create']);
-    $router->post('/api/webrtc/mtg/invite', [MtgController::class, 'invite']);
-    $router->get('/mtg/{slug}', [MtgController::class, 'landing']);
+    // Events (replaces legacy #mtg meeting rooms).
+    $router->post('/api/events/create', [EventController::class, 'create']);
+    $router->post('/api/events/invite', [EventController::class, 'inviteEmails']);
+    $router->post('/api/events/cancel', [EventController::class, 'cancel']);
+    $router->get('/api/events/list', [EventController::class, 'listEvents']);
+    $router->get('/e/{token}', [EventController::class, 'inviteLanding']);
+    $router->get('/event/{slug}', [EventController::class, 'landing']);
 
     // Admin.
     $router->get('/admin/voice', [AdminVoiceController::class, 'admin']);

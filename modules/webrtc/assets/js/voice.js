@@ -30,7 +30,7 @@
  *     setScreenShareEnabled), remote/local tracks attached to a video grid
  *   - audio & video device settings + camera/mic test (getUserMedia, no server)
  *   - background blur / custom image during video (lazy MediaPipe segmentation)
- *   - meetings: #mtg-XXXXXX private keyed rooms (create / invite online users)
+ *   - events: public/private event rooms with WebRTC or link-based streams (create / email invites)
  *
  * Requires the vendored livekit-client UMD (window.LivekitClient) — loaded
  * before this file by the module's assets.js ordering.
@@ -62,7 +62,7 @@
     pendingJoin: null,
     pendingCall: null,
     pendingCallAt: 0,    // ms when the outgoing call was initiated (race guard)
-    mtg: null,           // { slug, name, key, url } for the current meeting
+    evt: null,            // { id, slug, title, invite_code, invite_url, status } for the current event
     ringSeconds: 20,     // server ring timeout (call_ring_seconds)
     ringStarted: {},     // call_id -> ms when its ring was first seen
     ringShown: null,     // { call_id, peer } of the current incoming ring
@@ -960,87 +960,80 @@
     }
   }
 
-  /* ── Meetings (#mtg-XXXXXX) ─────────────────────────────────────────── */
-  function isMeetingChannel(slug) {
-    return /^#?mtg-\d{6}$/i.test(slug || '');
+  /* ── Events ──────────────────────────────────────────────────────────── */
+  function isEventChannel(slug) {
+    return /^#?evt-[0-9a-f]{6}$/i.test(slug || '');
   }
 
-  function meetingModalOpen() {
-    return els.mtgModal && !els.mtgModal.classList.contains('hidden');
+  function eventModalOpen() {
+    return els.evtModal && !els.evtModal.classList.contains('hidden');
   }
 
-  function openMeetingModal() {
+  function openEventModal() {
     ensureEls();
-    if (!els.mtgModal) return;
-    els.mtgModal.classList.remove('hidden');
+    if (!els.evtModal) return;
+    els.evtModal.classList.remove('hidden');
     var slug = currentChannel();
-    renderMeeting(slug && isMeetingChannel(slug) ? slug : '');
+    renderEvent(slug && isEventChannel(slug) ? slug : '');
   }
 
-  function closeMeetingModal() {
-    if (els.mtgModal) els.mtgModal.classList.add('hidden');
+  function closeEventModal() {
+    if (els.evtModal) els.evtModal.classList.add('hidden');
   }
 
-  function createMeeting() {
-    api('/api/webrtc/mtg/create', {}).then(function (j) {
-      if (!j.ok) { toast(j.error || 'Could not create a meeting.'); return; }
-      state.mtg = { slug: j.slug, name: j.name, key: j.key, url: j.url };
-      renderMeeting(state.mtg.slug);
-      // Drop the creator into the meeting channel immediately.
-      try {
-        if (typeof openChannel === 'function') openChannel(j.slug);
-        else window.location.href = '/app?channel=' + encodeURIComponent(j.slug);
-      } catch (e) {}
-    });
-  }
+  function createEvent() {
+    var title = (els.evtTitle && els.evtTitle.value || '').trim();
+    if (!title) { toast('Please enter a title.'); return; }
+    var desc = (els.evtDesc && els.evtDesc.value || '').trim();
+    var isPublic = els.evtPublic && els.evtPublic.checked;
+    var eventType = (els.evtType && els.evtType.value) || 'webrtc';
+    var streamUrl = (els.evtStreamUrl && els.evtStreamUrl.value || '').trim();
+    var scheduledAt = (els.evtSchedule && els.evtSchedule.value || '').trim();
+    var duration = parseInt((els.evtDuration && els.evtDuration.value) || '0', 10) || 0;
 
-  function inviteToMeeting() {
-    var slug = state.mtg && state.mtg.slug;
-    if (!slug) return;
-    var input = els.mtgInvite;
-    var names = (input && input.value || '').trim();
-    if (!names) return;
-    api('/api/webrtc/mtg/invite', { channel: slug, users: names }).then(function (j) {
-      if (!j.ok) { toast(j.error || 'Could not invite.'); return; }
-      input.value = '';
-      renderInviteResult(j);
-    });
-  }
+    var params = {
+      title: title,
+      description: desc,
+      is_public: isPublic ? 1 : 0,
+      event_type: eventType,
+      stream_url: streamUrl,
+      scheduled_at: scheduledAt,
+      duration_minutes: duration
+    };
 
-  function renderInviteResult(j) {
-    var el = els.mtgResult;
-    if (!el) return;
-    var parts = [];
-    if (j.added && j.added.length) parts.push('Added: ' + j.added.join(', '));
-    if (j.offline && j.offline.length) parts.push('Offline (not added): ' + j.offline.join(', '));
-    if (j.unknown && j.unknown.length) parts.push('Unknown: ' + j.unknown.join(', '));
-    el.textContent = parts.length ? parts.join(' · ') : (j.ok ? 'Invited.' : 'Could not invite.');
-    el.classList.remove('hidden');
-    setTimeout(function () { el.classList.add('hidden'); }, 6000);
-  }
-
-  function renderMeeting(slug) {
-    if (!els.mtgForm || !els.mtgView) return;
-    if (slug && isMeetingChannel(slug)) {
-      // Viewing an existing meeting channel.
-      els.mtgForm.classList.add('hidden');
-      els.mtgView.classList.remove('hidden');
-      var name = '#' + slug.replace(/^#?/, '');
-      els.mtgViewName.textContent = name;
-      if (state.mtg && state.mtg.slug === slug) {
-        els.mtgUrl.value = state.mtg.url;
-      } else {
-        els.mtgUrl.value = '';
-        els.mtgUrl.placeholder = 'Invite URL — created by the meeting host';
+    api('/api/events/create', params).then(function (j) {
+      if (!j.ok) { toast(j.error || 'Could not create event.'); return; }
+      state.evt = { id: j.id, slug: j.slug, title: title, invite_code: j.invite_code, invite_url: j.invite_url, status: j.status };
+      renderEventView();
+      if (j.slug) {
+        try {
+          if (typeof openChannel === 'function') openChannel(j.slug);
+          else window.location.href = '/app?channel=' + encodeURIComponent(j.slug);
+        } catch (e) {}
       }
-    } else {
-      els.mtgForm.classList.remove('hidden');
-      els.mtgView.classList.add('hidden');
-    }
+    });
   }
 
-  function copyMeetingUrl() {
-    var input = els.mtgUrl;
+  function sendEventInvites() {
+    var evt = state.evt;
+    if (!evt || !evt.id) return;
+    var input = els.evtInviteEmails;
+    var emails = (input && input.value || '').trim();
+    if (!emails) return;
+    api('/api/events/invite', { event_id: evt.id, emails: emails }).then(function (j) {
+      if (!j.ok) { toast(j.error || 'Could not send invites.'); return; }
+      input.value = '';
+      var parts = [];
+      if (j.sent && j.sent.length) parts.push('Sent: ' + j.sent.length);
+      if (j.failed && j.failed.length) parts.push('Failed: ' + j.failed.length);
+      els.evtInviteResult.textContent = parts.length ? parts.join(' · ') : 'Invites sent.';
+      els.evtInviteResult.classList.remove('hidden');
+      setTimeout(function () { els.evtInviteResult.classList.add('hidden'); }, 6000);
+    });
+  }
+
+  function copyEventInviteUrl() {
+    var input = els.evtInviteUrl;
     if (!input || !input.value) return;
     var done = function () { toast('Invite link copied.'); };
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1053,6 +1046,39 @@
   function fallbackCopy(input, done) {
     input.select();
     try { document.execCommand('copy'); done(); } catch (e) {}
+  }
+
+  function renderEvent(slug) {
+    if (!els.evtForm || !els.evtView) return;
+    if (slug && isEventChannel(slug)) {
+      els.evtForm.classList.add('hidden');
+      els.evtView.classList.remove('hidden');
+      var name = '#' + slug.replace(/^#?/, '');
+      els.evtViewName.textContent = name;
+      if (state.evt && state.evt.slug === slug) {
+        els.evtInviteUrl.value = state.evt.invite_url || '';
+      } else {
+        els.evtInviteUrl.value = '';
+        els.evtInviteUrl.placeholder = 'Invite URL — created by the event host';
+      }
+    } else {
+      els.evtForm.classList.remove('hidden');
+      els.evtView.classList.add('hidden');
+    }
+  }
+
+  function renderEventView() {
+    if (!els.evtForm || !els.evtView) return;
+    var evt = state.evt;
+    if (evt && evt.slug) {
+      els.evtForm.classList.add('hidden');
+      els.evtView.classList.remove('hidden');
+      els.evtViewName.textContent = '#' + evt.slug.replace(/^#?/, '');
+      els.evtInviteUrl.value = evt.invite_url || '';
+    } else {
+      els.evtForm.classList.remove('hidden');
+      els.evtView.classList.add('hidden');
+    }
   }
 
   /* ── DOM ────────────────────────────────────────────────────────────── */
@@ -1089,12 +1115,12 @@
     });
     menu.appendChild(els.ddCallItem);
 
-    els.ddMtgItem = document.createElement('button');
-    els.ddMtgItem.type = 'button';
-    els.ddMtgItem.className = 'lvcvoice-dd-item';
-    els.ddMtgItem.innerHTML = '<span class="lvcvoice-dd-item-icon">📹</span><span class="lvcvoice-dd-item-label">Meeting</span>';
-    els.ddMtgItem.addEventListener('click', function () { closeDropdown(); openMeetingModal(); });
-    menu.appendChild(els.ddMtgItem);
+    els.ddEvtItem = document.createElement('button');
+    els.ddEvtItem.type = 'button';
+    els.ddEvtItem.className = 'lvcvoice-dd-item';
+    els.ddEvtItem.innerHTML = '<span class="lvcvoice-dd-item-icon">📅</span><span class="lvcvoice-dd-item-label">Event</span>';
+    els.ddEvtItem.addEventListener('click', function () { closeDropdown(); openEventModal(); });
+    menu.appendChild(els.ddEvtItem);
 
     els.ddSettingsItem = document.createElement('button');
     els.ddSettingsItem.type = 'button';
@@ -1121,8 +1147,8 @@
 
     document.body.appendChild(buildPane());
     document.body.appendChild(buildRing());
-    els.mtgModal = buildMtgModal();
-    document.body.appendChild(els.mtgModal);
+    els.evtModal = buildEvtModal();
+    document.body.appendChild(els.evtModal);
     buildSettings();
 
     document.addEventListener('click', function (e) {
@@ -1191,45 +1217,94 @@
     return el;
   }
 
-  function buildMtgModal() {
+  function buildEvtModal() {
     var el = document.createElement('div');
-    el.id = 'lvcvoice-mtg-modal';
+    el.id = 'lvcvoice-evt-modal';
     el.className = 'hidden lvcvoice-mtg-overlay';
     el.innerHTML =
-      '<div class="lvcvoice-mtg-card">' +
-      '<div class="lvcvoice-mtg-head"><span>Meeting rooms</span>' +
-      '<button type="button" class="lvcvoice-btn-ghost mtg-close">✕</button></div>' +
+      '<div class="lvcvoice-mtg-card" style="max-width:560px">' +
+      '<div class="lvcvoice-mtg-head"><span>Events</span>' +
+      '<button type="button" class="lvcvoice-btn-ghost evt-close">✕</button></div>' +
       '<div class="lvcvoice-mtg-body">' +
-      '<div id="lvcvoice-mtg-form">' +
-      '<p class="lvcvoice-mtg-hint">Create a private <code>#mtg-XXXXXX</code> room. Only users you invite (who are online) get in; the invite link carries the room key.</p>' +
-      '<button type="button" class="btn-primary mtg-create" style="width:100%">Create meeting</button>' +
+
+      // ── Create form ──
+      '<div id="lvcvoice-evt-form">' +
+      '<div style="margin-bottom:12px">' +
+      '<label class="label">Title</label>' +
+      '<input id="lvcvoice-evt-title" class="input text-xs" placeholder="My Event" maxlength="120">' +
       '</div>' +
-      '<div id="lvcvoice-mtg-view" class="hidden">' +
-      '<div class="lvcvoice-mtg-name" id="lvcvoice-mtg-name"></div>' +
-      '<div class="lvcvoice-mtg-urlrow"><input id="lvcvoice-mtg-url" class="input font-mono text-xs" readonly>' +
-      '<button type="button" class="lvcvoice-btn-ghost mtg-copy">Copy</button></div>' +
-      '<div class="lvcvoice-mtg-invite">' +
-      '<label class="label" for="lvcvoice-mtg-invite-input">Invite by username (online users join immediately)</label>' +
-      '<div class="lvcvoice-mtg-urlrow"><input id="lvcvoice-mtg-invite-input" class="input text-xs" placeholder="bob, alice">' +
-      '<button type="button" class="btn-primary mtg-invite">Invite</button></div>' +
+      '<div style="margin-bottom:12px">' +
+      '<label class="label">Description (optional)</label>' +
+      '<textarea id="lvcvoice-evt-desc" class="input text-xs" rows="2" placeholder="What\'s this event about?"></textarea>' +
       '</div>' +
-      '<div id="lvcvoice-mtg-result" class="lvcvoice-mtg-result hidden"></div>' +
+      '<div style="margin-bottom:12px;display:flex;gap:16px">' +
+      '<div><label class="label">Type</label>' +
+      '<select id="lvcvoice-evt-type" class="input text-xs">' +
+      '<option value="webrtc">WebRTC (interactive)</option>' +
+      '<option value="link">Link (YouTube/Twitch)</option>' +
+      '</select></div>' +
+      '<div><label class="label">Visibility</label>' +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer">' +
+      '<input type="checkbox" id="lvcvoice-evt-public"> <span class="text-xs text-discord-300">Public</span>' +
+      '</label></div>' +
       '</div>' +
+      '<div id="lvcvoice-evt-stream-row" style="margin-bottom:12px;display:none">' +
+      '<label class="label">Stream URL</label>' +
+      '<input id="lvcvoice-evt-stream-url" class="input text-xs" placeholder="https://youtube.com/watch?v=...">' +
+      '</div>' +
+      '<div style="margin-bottom:12px;display:flex;gap:16px">' +
+      '<div><label class="label">Schedule (optional)</label>' +
+      '<input id="lvcvoice-evt-schedule" type="datetime-local" class="input text-xs"></div>' +
+      '<div><label class="label">Duration (min)</label>' +
+      '<input id="lvcvoice-evt-duration" type="number" class="input text-xs" min="0" max="1440" placeholder="0">' +
+      '</div></div>' +
+      '<button type="button" class="btn-primary evt-create" style="width:100%">Create event</button>' +
+      '</div>' +
+
+      // ── View / invite form ──
+      '<div id="lvcvoice-evt-view" class="hidden">' +
+      '<div class="lvcvoice-mtg-name" id="lvcvoice-evt-view-name"></div>' +
+      '<div class="lvcvoice-mtg-urlrow"><input id="lvcvoice-evt-invite-url" class="input font-mono text-xs" readonly>' +
+      '<button type="button" class="lvcvoice-btn-ghost evt-copy">Copy</button></div>' +
+      '<div style="margin-top:12px">' +
+      '<label class="label">Invite by email</label>' +
+      '<div class="lvcvoice-mtg-urlrow"><input id="lvcvoice-evt-invite-emails" class="input text-xs" placeholder="alice@example.com, bob@example.com">' +
+      '<button type="button" class="btn-primary evt-invite">Send</button></div>' +
+      '<div id="lvcvoice-evt-invite-result" class="lvcvoice-mtg-result hidden"></div>' +
+      '</div>' +
+      '</div>' +
+
       '</div></div>';
-    el.querySelector('.mtg-close').addEventListener('click', closeMeetingModal);
-    el.addEventListener('click', function (e) { if (e.target === el) closeMeetingModal(); });
-    el.querySelector('.mtg-create').addEventListener('click', createMeeting);
-    el.querySelector('.mtg-copy').addEventListener('click', copyMeetingUrl);
-    el.querySelector('.mtg-invite').addEventListener('click', inviteToMeeting);
-    el.querySelector('#lvcvoice-mtg-invite-input').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') inviteToMeeting();
+
+    el.addEventListener('click', function (e) { if (e.target === el) closeEventModal(); });
+    el.querySelector('.evt-close').addEventListener('click', closeEventModal);
+    el.querySelector('.evt-create').addEventListener('click', createEvent);
+    el.querySelector('.evt-copy').addEventListener('click', copyEventInviteUrl);
+    el.querySelector('.evt-invite').addEventListener('click', sendEventInvites);
+    el.querySelector('#lvcvoice-evt-invite-emails').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendEventInvites();
     });
-    els.mtgForm = el.querySelector('#lvcvoice-mtg-form');
-    els.mtgView = el.querySelector('#lvcvoice-mtg-view');
-    els.mtgViewName = el.querySelector('#lvcvoice-mtg-name');
-    els.mtgUrl = el.querySelector('#lvcvoice-mtg-url');
-    els.mtgInvite = el.querySelector('#lvcvoice-mtg-invite-input');
-    els.mtgResult = el.querySelector('#lvcvoice-mtg-result');
+
+    // Show/hide stream URL row based on event type.
+    var typeSelect = el.querySelector('#lvcvoice-evt-type');
+    var streamRow = el.querySelector('#lvcvoice-evt-stream-row');
+    typeSelect.addEventListener('change', function () {
+      streamRow.style.display = typeSelect.value === 'link' ? '' : 'none';
+    });
+
+    els.evtForm = el.querySelector('#lvcvoice-evt-form');
+    els.evtView = el.querySelector('#lvcvoice-evt-view');
+    els.evtViewName = el.querySelector('#lvcvoice-evt-view-name');
+    els.evtTitle = el.querySelector('#lvcvoice-evt-title');
+    els.evtDesc = el.querySelector('#lvcvoice-evt-desc');
+    els.evtType = el.querySelector('#lvcvoice-evt-type');
+    els.evtPublic = el.querySelector('#lvcvoice-evt-public');
+    els.evtStreamUrl = el.querySelector('#lvcvoice-evt-stream-url');
+    els.evtSchedule = el.querySelector('#lvcvoice-evt-schedule');
+    els.evtDuration = el.querySelector('#lvcvoice-evt-duration');
+    els.evtInviteUrl = el.querySelector('#lvcvoice-evt-invite-url');
+    els.evtInviteEmails = el.querySelector('#lvcvoice-evt-invite-emails');
+    els.evtInviteResult = el.querySelector('#lvcvoice-evt-invite-result');
     return el;
   }
 
@@ -1305,7 +1380,7 @@
       if (els.ddIcon) { els.ddIcon.style.color = '#80848e'; els.ddIcon.innerHTML = ICON_CALL; }
     }
 
-    if (els.ddMtgItem) els.ddMtgItem.classList.toggle('hidden', !!dm);
+    if (els.ddEvtItem) els.ddEvtItem.classList.toggle('hidden', !!dm);
 
     // Call pill.
     var call = state.calls.active;
@@ -1366,13 +1441,13 @@
       }
     }
 
-    // Meeting modal state (refresh if viewing a meeting channel).
-    if (meetingModalOpen()) {
-      var cur = isMeetingChannel(slug) ? slug : (state.mtg ? state.mtg.slug : '');
-      if (isMeetingChannel(slug) && !(state.mtg && state.mtg.slug === slug)) {
-        state.mtg = { slug: slug, name: '#' + slug.replace(/^#?/, ''), key: '', url: '' };
+    // Event modal state (refresh if viewing an event channel).
+    if (eventModalOpen()) {
+      var cur = isEventChannel(slug) ? slug : (state.evt ? state.evt.slug : '');
+      if (isEventChannel(slug) && !(state.evt && state.evt.slug === slug)) {
+        state.evt = { slug: slug, title: '#' + slug.replace(/^#?/, ''), invite_code: '', invite_url: '' };
       }
-      renderMeeting(cur);
+      renderEvent(cur);
     }
   }
 

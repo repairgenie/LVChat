@@ -262,10 +262,15 @@ $ws->onWebSocketConnect = function (TcpConnection $conn) use (&$state, $writePre
     $ticket = (string) ($_GET['ticket'] ?? '');
     $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
     $allowed = (string) (config_get('ws_allowed_origin', '') ?? '');
-    if ($allowed !== '' && $origin !== '' && stripos($origin, $allowed) === false) {
-        rt_log('reject ws connect: bad origin ' . $origin);
-        $conn->close();
-        return;
+    if ($allowed !== '' && $origin !== '') {
+        // Parse the origin's host for an exact match (not substring).
+        $originHost = parse_url($origin, PHP_URL_HOST) ?: '';
+        $allowedHost = parse_url($allowed, PHP_URL_HOST) ?: $allowed;
+        if (strtolower($originHost) !== strtolower($allowedHost)) {
+            rt_log('reject ws connect: bad origin ' . $origin);
+            $conn->close();
+            return;
+        }
     }
 
     // Connection metering (SaaS module): peek the ticket so we can enforce the
@@ -325,6 +330,16 @@ $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $pre
         return;
     }
     $st['touched'] = time();
+    // Per-connection rate limit: max 30 messages/second with a burst tolerance.
+    $now = time();
+    if (($st['msg_window'] ?? 0) !== $now) {
+        $st['msg_window'] = $now;
+        $st['msg_count'] = 0;
+    }
+    $st['msg_count'] = ($st['msg_count'] ?? 0) + 1;
+    if ($st['msg_count'] > 30) {
+        return; // silently drop — too fast
+    }
     $msg = json_decode($data, true);
     if (!is_array($msg)) {
         return;

@@ -50,6 +50,12 @@ final class ChannelService
         if (BanService::channelNameForbidden($name)) {
             return 'That channel name is forbidden.';
         }
+        // Block reserved channel names that could be used for impersonation.
+        $reserved = ['admin', 'staff', 'official', 'support', 'help', 'announcements', 'announce', 'system', 'oper', 'opers', 'global'];
+        $bare = ltrim(strtolower($name), '#&');
+        if (in_array($bare, $reserved, true)) {
+            return 'That channel name is reserved.';
+        }
         return true;
     }
 

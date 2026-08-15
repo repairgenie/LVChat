@@ -277,6 +277,158 @@ final class Mailer
             && trim((string) (config_get('smtp_host', '') ?? '')) !== '';
     }
 
+    /**
+     * Send an email with a file attachment.
+     * Uses MIME multipart/mixed with base64-encoded attachment.
+     */
+    public static function sendWithAttachment(
+        string $to,
+        string $subject,
+        string $textBody,
+        string $htmlBody,
+        string $filePath,
+        string $filename
+    ): array {
+        $host = trim((string) (config_get('smtp_host', '') ?? ''));
+        if (config_get('smtp_enabled', '0') !== '1') {
+            return ['ok' => false, 'error' => 'SMTP is disabled.'];
+        }
+        if ($host === '') {
+            return ['ok' => false, 'error' => 'SMTP is enabled but no host is set.'];
+        }
+        $from = trim((string) (config_get('smtp_from_email', '') ?? ''));
+        if ($from === '') {
+            return ['ok' => false, 'error' => 'A "From" email address is required.'];
+        }
+        if (!is_file($filePath)) {
+            return ['ok' => false, 'error' => 'Attachment file not found.'];
+        }
+
+        $port = max(1, (int) (config_get('smtp_port', '587') ?? 587));
+        $encryption = (string) (config_get('smtp_encryption', 'tls') ?? 'tls');
+        $username = (string) (config_get('smtp_username', '') ?? '');
+        $password = (string) (config_get('smtp_password', '') ?? '');
+        $timeout = 10;
+
+        $errno = 0;
+        $errstr = '';
+        $scheme = $encryption === 'ssl' ? 'ssl://' : 'tcp://';
+        $fp = @stream_socket_client($scheme . $host . ':' . $port, $errno, $errstr, $timeout);
+        if (!$fp) {
+            return ['ok' => false, 'error' => "Could not connect to $host:$port."];
+        }
+        stream_set_timeout($fp, $timeout);
+        try {
+            $greeting = self::read($fp);
+            if (!preg_match('/^220/', $greeting)) {
+                return ['ok' => false, 'error' => 'SMTP greeting failed.'];
+            }
+
+            if ($encryption === 'tls') {
+                $code = self::cmd($fp, 'EHLO ' . self::helo());
+                if (!preg_match('/^250/', $code) && !preg_match('/^250/', self::cmd($fp, 'HELO ' . self::helo()))) {
+                    return ['ok' => false, 'error' => 'Server rejected EHLO/HELO.'];
+                }
+                $code = self::cmd($fp, 'STARTTLS');
+                if (!preg_match('/^220/', $code)) {
+                    return ['ok' => false, 'error' => 'Server refused STARTTLS.'];
+                }
+                if (!@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                    return ['ok' => false, 'error' => 'STARTTLS negotiation failed.'];
+                }
+                $code = self::cmd($fp, 'EHLO ' . self::helo());
+                if (!preg_match('/^250/', $code)) {
+                    return ['ok' => false, 'error' => 'EHLO after STARTTLS failed.'];
+                }
+            } else {
+                $code = self::cmd($fp, 'EHLO ' . self::helo());
+                if (!preg_match('/^250/', $code) && !preg_match('/^250/', self::cmd($fp, 'HELO ' . self::helo()))) {
+                    return ['ok' => false, 'error' => 'Server rejected EHLO/HELO.'];
+                }
+            }
+
+            if ($username !== '') {
+                $authed = false;
+                $code = self::cmd($fp, 'AUTH PLAIN ' . base64_encode("\0" . $username . "\0" . $password));
+                if (preg_match('/^235/', $code)) {
+                    $authed = true;
+                } elseif (preg_match('/^334/', $code)) {
+                    $code = self::cmd($fp, base64_encode(''));
+                    $authed = preg_match('/^235/', $code);
+                }
+                if (!$authed) {
+                    $code = self::cmd($fp, 'AUTH LOGIN');
+                    if (preg_match('/^334/', $code)) {
+                        $code = self::cmd($fp, base64_encode($username));
+                        if (preg_match('/^334/', $code)) {
+                            $authed = preg_match('/^235/', self::cmd($fp, base64_encode($password)));
+                        }
+                    }
+                }
+                if (!$authed) {
+                    return ['ok' => false, 'error' => 'SMTP authentication failed.'];
+                }
+            }
+
+            $code = self::cmd($fp, 'MAIL FROM:<' . $from . '>');
+            if (!preg_match('/^250/', $code)) {
+                return ['ok' => false, 'error' => 'MAIL FROM rejected.'];
+            }
+            $code = self::cmd($fp, 'RCPT TO:<' . $to . '>');
+            if (!preg_match('/^25[025]/', $code)) {
+                return ['ok' => false, 'error' => 'Recipient rejected.'];
+            }
+
+            $code = self::cmd($fp, 'DATA');
+            if (!preg_match('/^354/', $code)) {
+                return ['ok' => false, 'error' => 'DATA refused.'];
+            }
+
+            $fromName = trim((string) (config_get('smtp_from_name', '') ?? ''));
+            $boundary = 'bnd-' . bin2hex(random_bytes(8));
+            $attachBoundary = 'att-' . bin2hex(random_bytes(8));
+            $mimeType = mime_content_type($filePath) ?: 'application/octet-stream';
+            $fileData = chunk_split(base64_encode(file_get_contents($filePath)));
+
+            $headers = 'From: ' . ($fromName !== '' ? self::encodeHeader($fromName) . ' ' : '') . '<' . $from . '>' . "\r\n"
+                . 'To: <' . $to . '>' . "\r\n"
+                . 'Subject: ' . self::encodeHeader($subject) . "\r\n"
+                . 'Date: ' . date('r') . "\r\n"
+                . 'Message-ID: <' . bin2hex(random_bytes(10)) . '@' . self::helo() . '>' . "\r\n"
+                . 'MIME-Version: 1.0' . "\r\n"
+                . 'Content-Type: multipart/mixed; boundary="' . $boundary . '"' . "\r\n";
+
+            // Build body: multipart/alternative (text + html) inside multipart/mixed (attachment).
+            $body = '--' . $boundary . "\r\n"
+                . 'Content-Type: multipart/alternative; boundary="' . $attachBoundary . '"' . "\r\n\r\n"
+                . '--' . $attachBoundary . "\r\n"
+                . 'Content-Type: text/plain; charset=UTF-8' . "\r\n"
+                . 'Content-Transfer-Encoding: base64' . "\r\n\r\n"
+                . chunk_split(base64_encode($textBody)) . "\r\n"
+                . '--' . $attachBoundary . "\r\n"
+                . 'Content-Type: text/html; charset=UTF-8' . "\r\n"
+                . 'Content-Transfer-Encoding: base64' . "\r\n\r\n"
+                . chunk_split(base64_encode($htmlBody)) . "\r\n"
+                . '--' . $attachBoundary . '--' . "\r\n\r\n"
+                . '--' . $boundary . "\r\n"
+                . 'Content-Type: ' . $mimeType . '; name="' . $filename . '"' . "\r\n"
+                . 'Content-Disposition: attachment; filename="' . $filename . '"' . "\r\n"
+                . 'Content-Transfer-Encoding: base64' . "\r\n\r\n"
+                . $fileData . "\r\n"
+                . '--' . $boundary . '--' . "\r\n";
+
+            fwrite($fp, $headers . "\r\n" . $body . "\r\n.\r\n");
+            $code = self::read($fp);
+            if (!preg_match('/^250/', $code)) {
+                return ['ok' => false, 'error' => 'Message not accepted.'];
+            }
+            self::cmd($fp, 'QUIT');
+            return ['ok' => true, 'error' => null];
+        } finally {
+            fclose($fp);
+        }
+    }
+
     private static function cmd($fp, string $line): string
     {
         fwrite($fp, $line . "\r\n");

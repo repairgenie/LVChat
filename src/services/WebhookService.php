@@ -96,9 +96,13 @@ final class WebhookService
         }
 
         $content = mb_substr(trim((string) ($payload['content'] ?? '')), 0, 2000);
-        $name = trim((string) ($payload['username'] ?? $hook['name'] ?? 'Webhook'));
+        // Always use the webhook's configured name — payload username override
+        // was removed to prevent impersonation of other users or trusted roles.
+        $name = trim((string) ($hook['name'] ?? 'Webhook'));
         $name = mb_substr($name, 0, 32);
-        $avatar = trim((string) ($payload['avatar_url'] ?? $hook['avatar'] ?? ''));
+        // Always use the webhook's configured avatar — payload avatar_url
+        // override was removed to prevent visual impersonation.
+        $avatar = trim((string) ($hook['avatar'] ?? ''));
         $embeds = $payload['embeds'] ?? [];
 
         // Build the text body: content + flattened embeds.

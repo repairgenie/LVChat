@@ -41,6 +41,23 @@ CommandRegistry::register('memo', [
                 if (!$t) {
                     return ['replies' => ["No such user: $nick"]];
                 }
+                // Rate-limit memos: max 5 per 60 seconds per sender.
+                $recentMemos = (int) Database::scalar(
+                    'SELECT COUNT(*) FROM memos WHERE sender_id = ? AND created_at > datetime("now", "-60 seconds")',
+                    [$me]
+                );
+                if ($recentMemos >= 5) {
+                    return ['replies' => ['You are sending memos too quickly. Slow down.']];
+                }
+                // Respect block lists — a blocked user cannot send memos.
+                if (FriendService::isBlockedEither($me, (int) $t['id'])) {
+                    return ['replies' => ['You cannot send memos to this user.']];
+                }
+                // Respect spam/shun restrictions.
+                $blocked = BanService::sendBlocked($user, $msg, 'u');
+                if ($blocked) {
+                    return ['replies' => [$blocked]];
+                }
                 Database::query(
                     'INSERT INTO memos (recipient_id, sender_id, content) VALUES (?, ?, ?)',
                     [$t['id'], $me, mb_substr($msg, 0, 1000)]

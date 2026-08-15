@@ -10,8 +10,8 @@ of plan; and a developer **platform fee** on every paid transaction.
 | Key | Kind | Meaning |
 |-----|------|---------|
 | `connections` | limit | Concurrent WebSocket connections per account (free = 3). Reject-new at the cap. |
-| `meetings` | feature | `#mtg-XXXXXX` rooms (WebRTC module). |
-| `meetings_concurrent` | limit | Max live meetings a user may hold. |
+| `events` | feature | Scheduled events with chat rooms (WebRTC module). |
+| `events_concurrent` | limit | Max live events a user may hold. |
 | `voice` | feature | One-on-one calls + channel voice (WebRTC module). |
 | `voice_talker_cap`, `voice_bitrate` | qos | Per-plan voice quality tiers (blank = global admin cap). |
 | `owned_channels` | limit | Channels a user may own (replaces the global `max_channels_per_user`). |

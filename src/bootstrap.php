@@ -29,6 +29,11 @@ define('LVC_VERSION', '1.7.1');
 require ROOT . '/src/Dotenv.php';
 Dotenv::load(ROOT . '/.env');
 
+// Composer autoloader (loads TCPDF and any future Composer dependencies).
+if (is_file(ROOT . '/vendor/autoload.php')) {
+    require ROOT . '/vendor/autoload.php';
+}
+
 error_reporting(E_ALL);
 // Never leak stack traces, file paths, or DB details to browsers in production
 // (verbose error disclosure). Errors are always logged server-side; developers
@@ -42,8 +47,13 @@ if (PHP_SAPI === 'cli' || getenv('LVC_DEBUG') === '1') {
 
 // Sessions must survive cross-site iframe contexts (the public embed widget),
 // so use SameSite=None over HTTPS. Plain-HTTP/local installs fall back to Lax.
+// Check proxy headers (X-Forwarded-Proto, CF-Visitor) for TLS-terminating
+// reverse proxies (nginx, Cloudflare, Caddy) where PHP sees plain HTTP.
 $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-    || ($_SERVER['SERVER_PORT'] ?? '') === '443';
+    || ($_SERVER['SERVER_PORT'] ?? '') === '443'
+    || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+    || !empty($_SERVER['HTTP_X_FORWARDED_SSL'])
+    || str_contains((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''), '"https"');
 session_set_cookie_params([
     'httponly' => true,
     'secure' => $secure,
@@ -85,6 +95,7 @@ require ROOT . '/src/services/UpdaterService.php';
 require ROOT . '/src/services/CommandParser.php';
 require ROOT . '/src/services/CommandRegistry.php';
 require ROOT . '/src/services/EmbedService.php';
+require ROOT . '/src/services/EventLogService.php';
 require ROOT . '/src/services/commands/CoreCommands.php';
 require ROOT . '/src/services/commands/OpCommands.php';
 require ROOT . '/src/services/commands/ChanServCommands.php';
@@ -161,3 +172,27 @@ if ($__corsOrigin !== '') {
     unset($__o, $__corsList);
 }
 unset($__corsOrigin, $__corsAllowed);
+
+// HSTS: tell browsers to only use HTTPS for this domain (1 year, include subdomains).
+if ($secure) {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
+
+// Admin session timeout: force re-authentication for admin accounts after 8 hours
+// of inactivity, regardless of the 30-day cookie lifetime.
+// Check both session-based and bearer-based auth paths.
+$adminTimeout = 8 * 3600; // 8 hours
+$adminToken = $_SESSION['token'] ?? Auth::headerToken();
+if ($secure && $adminToken) {
+    $lastActivity = (int) ($_SESSION['admin_last_activity'] ?? 0);
+    if ($lastActivity > 0 && (time() - $lastActivity) > $adminTimeout) {
+        $u = Auth::user();
+        if ($u && $u['role'] === 'admin') {
+            Auth::killSessions((int) $u['id']);
+            @session_regenerate_id(true);
+            unset($_SESSION['token'], $_SESSION['admin_last_activity']);
+            redirect('/login');
+        }
+    }
+    $_SESSION['admin_last_activity'] = time();
+}

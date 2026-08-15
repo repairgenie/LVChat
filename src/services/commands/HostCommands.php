@@ -35,6 +35,14 @@ CommandRegistry::register('vhost', [
                 if (!$host || !preg_match('/^[A-Za-z0-9.\-]{3,60}$/', $host)) {
                     return ['replies' => ['Usage: /vhost set <host> (3-60 chars, letters/numbers/dot/dash)']];
                 }
+                // Block reserved or deceptive vhost values.
+                $reserved = ['admin', 'staff', 'official', 'support', 'help', 'ircop', 'operator', 'system', 'server', 'root', 'webmaster'];
+                $bare = strtolower(rtrim($host, '.'));
+                foreach ($reserved as $r) {
+                    if ($bare === $r || str_starts_with($bare, $r . '.') || str_ends_with($bare, '.' . $r)) {
+                        return ['replies' => ['That virtual host is reserved.']];
+                    }
+                }
                 Database::query('UPDATE users SET vhost = ? WHERE id = ?', [$host, $user['id']]);
                 return ['replies' => ["Virtual host set to $host. Use /vhost on to activate it."]];
             case 'on':

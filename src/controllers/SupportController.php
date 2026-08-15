@@ -52,6 +52,15 @@ final class SupportController
     {
         $user = self::requireAccount();
         Csrf::verify();
+        // Rate-limit ticket creation: max 3 per hour.
+        $recent = (int) Database::scalar(
+            'SELECT COUNT(*) FROM support_tickets WHERE user_id = ? AND created_at > datetime("now", "-1 hour")',
+            [(int) $user['id']]
+        );
+        if ($recent >= 3) {
+            flash('You are creating tickets too quickly. Please wait before trying again.');
+            redirect('/support');
+        }
         $subject = trim((string) ($_POST['subject'] ?? ''));
         $content = trim((string) ($_POST['content'] ?? ''));
         $attachments = self::processAttachments();

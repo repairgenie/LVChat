@@ -2122,70 +2122,64 @@ check('unanswered call expires to missed', dbq('SELECT status FROM call_sessions
 $recentMissed = array_filter($j['calls']['recent'] ?? [], fn($r) => (int) ($r['call_id'] ?? 0) === $timeoutId && ($r['status'] ?? '') === 'missed');
 check('caller sees the missed call in recent', count($recentMissed) === 1, json_encode($j['calls']['recent'] ?? []));
 
-// Meeting rooms (#mtg-XXXXXX): private, invite-only, keyed, voice-enabled,
-// hidden from the public channel list, and offline invitees are not added.
-[$s, , $b] = req('POST', '/api/webrtc/mtg/create', ['csrf' => $tV], $cjA);
+// Events: private event with invite code, email invites, and channel lifecycle.
+[$s, , $b] = req('POST', '/api/events/create', [
+    'csrf' => $tV,
+    'title' => 'Test Event',
+    'description' => 'A test event',
+    'is_public' => '0',
+    'event_type' => 'webrtc',
+], $cjA);
 $j = jsonDecode($b);
-check('alice creates a meeting room', $s === 200 && $j['ok'] === true && preg_match('/^#mtg-\d{6}$/', $j['name'] ?? '') === 1, "$s $b");
-$mtgSlug = (string) ($j['slug'] ?? '');
-$mtgKey = (string) ($j['key'] ?? '');
-$mtgUrl = (string) ($j['url'] ?? '');
-check('meeting url bakes the key in', str_contains($mtgUrl, '/mtg/' . $mtgSlug . '?key=') && $mtgKey !== '', $mtgUrl);
-check('meeting channel is private + invite-only + voice', dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['visibility'] === 'private'
-    && dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['invite_only'] === 1
-    && dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['voice_enabled'] === 1
-    && !empty(dbq('SELECT visibility, invite_only, voice_enabled, key_hash FROM channels WHERE slug = ?', [$mtgSlug])[0]['key_hash']));
+check('alice creates a private event', $s === 200 && $j['ok'] === true && !empty($j['invite_code']), "$s $b");
+$evtId = (int) ($j['id'] ?? 0);
+$evtSlug = (string) ($j['slug'] ?? '');
+$evtInviteCode = (string) ($j['invite_code'] ?? '');
+$evtInviteUrl = (string) ($j['invite_url'] ?? '');
+check('event has a slug and invite code', $evtSlug !== '' && $evtInviteCode !== '', $evtSlug . ' / ' . $evtInviteCode);
+check('event channel is private + invite-only + voice', dbq('SELECT visibility, invite_only, voice_enabled FROM channels WHERE slug = ?', [$evtSlug])[0]['visibility'] === 'private'
+    && dbq('SELECT visibility, invite_only, voice_enabled FROM channels WHERE slug = ?', [$evtSlug])[0]['invite_only'] === 1
+    && dbq('SELECT visibility, invite_only, voice_enabled FROM channels WHERE slug = ?', [$evtSlug])[0]['voice_enabled'] === 1);
 [$s, , $b] = req('GET', '/api/browse', [], $cjB);
 $j = jsonDecode($b);
 $pubSlugs = array_column($j['channels'] ?? [], 'slug');
-check('meeting channel hidden from the public list (non-member browse)', $s === 200 && !in_array($mtgSlug, $pubSlugs, true), $b);
+check('event channel hidden from the public list', $s === 200 && !in_array($evtSlug, $pubSlugs, true), $b);
 [$s, , $b] = req('GET', '/api/browse', [], $cjA);
 $j = jsonDecode($b);
 $mySlugs = array_column($j['myChannels'] ?? [], 'slug');
-check('creator sees the meeting in their own sidebar', $s === 200 && in_array($mtgSlug, $mySlugs, true), (string) $s);
+check('creator sees the event in their own sidebar', $s === 200 && in_array($evtSlug, $mySlugs, true), (string) $s);
 
-// Register carol (never signs in → offline). Fresh jar so a stale session from
-// an earlier run can never collide with the fresh DB.
-$cjC = '/tmp/opencode/httptest-c.txt';
-@unlink($cjC);
-$tC = csrf(req('GET', '/register', [], $cjC)[2]);
-[$s] = req('POST', '/register', ['csrf' => $tC, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjC);
-check('register carol', $s === 302, (string) $s);
-// Registration auto-logs-in (last_seen set); force carol offline so the invite
-// rule "offline users cannot be added" is actually exercised.
-dbq("UPDATE users SET last_seen = NULL WHERE username = 'carol'");
+// Event invite landing: bob opens the invite URL and is auto-joined.
+[$s, $h] = req('GET', '/event/' . $evtSlug, [], $cjB);
+check('member auto-joins via event channel link', $s === 302 && str_contains($h['location'] ?? '', '/app?channel=' . $evtSlug), "$s " . ($h['location'] ?? ''));
 
-// Invite: bob is online → added immediately; carol is offline → not added; ghost is unknown.
-[$s, , $b] = req('POST', '/api/webrtc/mtg/invite', ['csrf' => $tV, 'channel' => $mtgSlug, 'users' => 'bob, carol, ghost'], $cjA);
+// Logged-out visitor is bounced to login.
+[$s, $h] = req('GET', '/event/' . $evtSlug);
+check('logged-out event link → /login?next=', $s === 302 && str_contains($h['location'] ?? '', '/login?next='), "$s " . ($h['location'] ?? ''));
+
+// Non-member cannot invite (only founder can send email invites).
+[$s, , $b] = req('POST', '/api/events/invite', ['csrf' => $tW, 'event_id' => $evtId, 'emails' => 'test@example.com'], $cjB);
+check('non-founder cannot send event invites', $s === 403, "$s $b");
+
+// Founder cancels the event.
+[$s, , $b] = req('POST', '/api/events/cancel', ['csrf' => $tV, 'event_id' => $evtId], $cjA);
+check('founder cancels event', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('event status is cancelled', dbq('SELECT status FROM events WHERE id = ?', [$evtId])[0]['status'] === 'cancelled');
+
+// Create a public event for comparison.
+[$s, , $b] = req('POST', '/api/events/create', [
+    'csrf' => $tV,
+    'title' => 'Public Event',
+    'is_public' => '1',
+    'event_type' => 'link',
+    'stream_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+], $cjA);
 $j = jsonDecode($b);
-check('meeting invite returns added/offline/unknown', $s === 200 && $j['ok'] === true && in_array('bob', $j['added'] ?? [], true) && in_array('carol', $j['offline'] ?? [], true) && in_array('ghost', $j['unknown'] ?? [], true), "$s $b");
-check('online invitee added immediately (no accept)', (int) dbq('SELECT COUNT(*) AS n FROM channel_members cm JOIN channels c ON c.id = cm.channel_id WHERE c.slug = ? AND cm.user_id = ?', [$mtgSlug, dbq("SELECT id FROM users WHERE username='bob'")[0]['id']])[0]['n'] === 1);
-check('offline invitee not added', (int) dbq('SELECT COUNT(*) AS n FROM channel_members cm JOIN channels c ON c.id = cm.channel_id WHERE c.slug = ? AND cm.user_id = ?', [$mtgSlug, dbq("SELECT id FROM users WHERE username='carol'")[0]['id']])[0]['n'] === 0);
-[$s, , $b] = req('POST', '/api/webrtc/mtg/invite', ['csrf' => $tW, 'channel' => $mtgSlug, 'users' => 'bob'], $cjB);
-check('non-manager cannot invite to a meeting', $s === 403, "$s $b");
-
-// Invited member opens the invite link → straight into the channel.
-[$s, $h] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey, [], $cjB);
-check('invited member auto-joins via link', $s === 302 && str_contains($h['location'] ?? '', '/app?channel=' . $mtgSlug), "$s " . ($h['location'] ?? ''));
-
-// Logged-out visitor is bounced to login preserving the key.
-[$s, $h] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey);
-check('logged-out meeting link → /login?next= (key preserved)', $s === 302 && str_contains($h['location'] ?? '', '/login?next=') && str_contains(rawurldecode($h['location'] ?? ''), 'key=' . $mtgKey), "$s " . ($h['location'] ?? ''));
-
-// Carol signs in, then tries the link: key is valid but she was never invited → denied.
-$tC2 = csrf(req('GET', '/login', [], $cjC)[2]);
-[$s, $h] = req('POST', '/login', ['csrf' => $tC2, 'username' => 'carol', 'password' => 'password123', 'next' => '/app'], $cjC);
-check('carol logs in', $s === 302, (string) $s);
-[$s, , $b] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey, [], $cjC);
-check('uninvited key holder is denied', $s === 200 && str_contains($b, 'invite-only'), "$s " . substr($b, 0, 80));
-[$s, , $b] = req('GET', '/mtg/' . $mtgSlug, [], $cjC);
-check('missing key is denied with key message', $s === 200 && str_contains($b, 'key from the invite link'), (string) $s);
-
-// A meeting the user is invited to joins straight away (alice invites carol now that she's online).
-[$s, , $b] = req('POST', '/api/webrtc/mtg/invite', ['csrf' => $tV, 'channel' => $mtgSlug, 'users' => 'carol'], $cjA);
-check('online carol is now added', in_array('carol', jsonDecode($b)['added'] ?? [], true), $b);
-[$s, $h] = req('GET', '/mtg/' . $mtgSlug . '?key=' . $mtgKey, [], $cjC);
-check('newly invited member joins via link', $s === 302 && str_contains($h['location'] ?? '', '/app?channel=' . $mtgSlug), "$s " . ($h['location'] ?? ''));
+check('alice creates a public link event', $s === 200 && $j['ok'] === true && empty($j['invite_code']), "$s $b");
+$pubEvtSlug = (string) ($j['slug'] ?? '');
+check('public event channel is public', dbq('SELECT visibility FROM channels WHERE slug = ?', [$pubEvtSlug])[0]['visibility'] === 'public');
+check('public event has stream URL set', !empty(dbq('SELECT channel_url FROM channels WHERE slug = ?', [$pubEvtSlug])[0]['channel_url']));
+[$s, , $b] = req('POST', '/api/events/cancel', ['csrf' => $tV, 'event_id' => (int) ($j['id'] ?? 0)], $cjA);
 
 // Restore admin config defaults for the rest of the suite.
 req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '0', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);

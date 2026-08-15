@@ -74,17 +74,70 @@ return static function (PDO $pdo): void {
         $pdo->exec('ALTER TABLE channels ADD COLUMN voice_enabled INTEGER NOT NULL DEFAULT 0');
     }
 
-    // Meeting rooms (#mtg-XXXXXX): module-owned bookkeeping for the plaintext
-    // invite key (the channels.key_hash stays the authority for verification;
-    // this row lets the module rebuild invite URLs and list created meetings).
-    if (!in_array('mtg_channels', $tables, true)) {
+    // ── Events system (replaces legacy #mtg meeting rooms) ──────────────
+
+    if (!in_array('events', $tables, true)) {
         $pdo->exec(
-            "CREATE TABLE mtg_channels (
-              channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
-              key TEXT NOT NULL,
-              created_by INTEGER,
+            "CREATE TABLE events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+              founder_id INTEGER NOT NULL REFERENCES users(id),
+              title TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              is_public INTEGER NOT NULL DEFAULT 0,
+              event_type TEXT NOT NULL DEFAULT 'webrtc',
+              stream_url TEXT,
+              invite_code TEXT,
+              scheduled_at TEXT,
+              duration_minutes INTEGER,
+              started_at TEXT,
+              ended_at TEXT,
+              reminder_sent INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'draft',
               created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )"
         );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_events_scheduled ON events(scheduled_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_events_founder ON events(founder_id)');
+    }
+
+    if (!in_array('event_invites', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE event_invites (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+              email TEXT NOT NULL,
+              token TEXT NOT NULL UNIQUE,
+              invited_by INTEGER REFERENCES users(id),
+              accepted_at TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_event_invites_token ON event_invites(token)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_event_invites_event ON event_invites(event_id)');
+    }
+
+    // Add event_id column to channels (links a channel to its event).
+    if (!in_array('event_id', $channels, true)) {
+        $pdo->exec('ALTER TABLE channels ADD COLUMN event_id INTEGER REFERENCES events(id)');
+    }
+
+    // Migrate legacy mtg_channels data into events table if it exists.
+    if (in_array('mtg_channels', $tables, true)) {
+        $pdo->exec(
+            "INSERT OR IGNORE INTO events (channel_id, founder_id, title, event_type, status, invite_code, started_at, created_at)
+             SELECT m.channel_id, COALESCE(m.created_by, c.owner_id, 0), c.name, 'webrtc', 'active', m.key, m.created_at, m.created_at
+             FROM mtg_channels m
+             LEFT JOIN channels c ON c.id = m.channel_id
+             WHERE c.id IS NOT NULL"
+        );
+        // Link channels back to events.
+        $pdo->exec(
+            "UPDATE channels SET event_id = (
+                SELECT e.id FROM events e WHERE e.channel_id = channels.id
+            ) WHERE id IN (SELECT channel_id FROM mtg_channels)"
+        );
+        $pdo->exec('DROP TABLE IF EXISTS mtg_channels');
     }
 };

@@ -149,8 +149,8 @@ return static function (PDO $pdo): void {
         $pdo->exec(
             "INSERT INTO saas_plans (name, slug, description, is_free, active, sort_order, features, limits, qos, provider_ids)
              VALUES ('Free', 'free', 'The default tier for every new account.', 1, 1, 0,
-               '{\"meetings\":false,\"voice\":false,\"openclaw_bots\":false}',
-               '{\"connections\":3,\"owned_channels\":10,\"memberships\":100,\"upload_max_bytes\":5242880,\"meetings_concurrent\":1,\"openclaw_bot_count\":0,\"open_tickets\":3,\"reg_invites\":2,\"history_messages\":null}',
+                '{\"events\":false,\"voice\":false,\"openclaw_bots\":false}',
+                '{\"connections\":3,\"owned_channels\":10,\"memberships\":100,\"upload_max_bytes\":5242880,\"events_concurrent\":1,\"openclaw_bot_count\":0,\"open_tickets\":3,\"reg_invites\":2,\"history_messages\":null}',
                '{\"voice_talker_cap\":null,\"voice_bitrate\":null}',
                '{}')"
         );

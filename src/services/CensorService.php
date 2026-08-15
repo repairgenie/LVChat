@@ -52,13 +52,17 @@ final class CensorService
         if (!$apply || $content === '') {
             return null;
         }
+        // Normalize the content to defeat common filter-evasion tricks:
+        // strip zero-width characters, collapse repeated chars, and
+        // transliterate Cyrillic homoglyphs to their Latin equivalents.
+        $normalized = self::normalize($content);
         foreach (self::activeBadWords() as $bw) {
             $word = trim((string) $bw['word']);
             $pattern = self::wordPattern($word);
             if ($pattern === null) {
                 continue;
             }
-            if (preg_match($pattern, $content)) {
+            if (preg_match($pattern, $normalized)) {
                 if (($bw['action'] ?? 'censor') === 'block') {
                     return ['word' => $word, 'action' => 'block', 'censored' => $content];
                 }
@@ -70,6 +74,57 @@ final class CensorService
             }
         }
         return null;
+    }
+
+    /**
+     * Normalize content for filter matching.
+     * - Strip zero-width joiners, non-joiners, soft hyphens, etc.
+     * - Transliterate Cyrillic homoglyphs to Latin.
+     * - Collapse repeated characters (e.g. "fuuuuck" -> "fuuck").
+     */
+    private static function normalize(string $text): string
+    {
+        // Strip zero-width and invisible Unicode characters.
+        $text = preg_replace('/[\x{200B}\x{200C}\x{200D}\x{FEFF}\x{00AD}\x{2060}\x{180E}]/u', '', $text);
+        // Cyrillic → Latin homoglyphs (common evasion characters).
+        $homoglyphs = [
+            'а' => 'a', 'А' => 'a', // Cyrillic а
+            'е' => 'e', 'Е' => 'e', // Cyrillic е
+            'о' => 'o', 'О' => 'o', // Cyrillic о
+            'р' => 'p', 'Р' => 'p', // Cyrillic р
+            'с' => 'c', 'С' => 'c', // Cyrillic с
+            'у' => 'y', 'У' => 'y', // Cyrillic у
+            'х' => 'x', 'Х' => 'x', // Cyrillic х
+            'ᴀ' => 'a', // Small capital A
+            'ʙ' => 'b', // Small capital B
+            'ᴄ' => 'c', // Small capital C
+            'ᴅ' => 'd', // Small capital D
+            'ᴇ' => 'e', // Small capital E
+            'ꜰ' => 'f', // Small capital F
+            'ɢ' => 'g', // Small capital G
+            'ʜ' => 'h', // Small capital H
+            'ɪ' => 'i', // Small capital I
+            'ᴊ' => 'j', // Small capital J
+            'ᴋ' => 'k', // Small capital K
+            'ʟ' => 'l', // Small capital L
+            'ᴍ' => 'm', // Small capital M
+            'ɴ' => 'n', // Small capital N
+            'ᴏ' => 'o', // Small capital O
+            'ᴘ' => 'p', // Small capital P
+            'ǫ' => 'q', // Small capital Q
+            'ʀ' => 'r', // Small capital R
+            'ꜱ' => 's', // Small capital S
+            'ᴛ' => 't', // Small capital T
+            'ᴜ' => 'u', // Small capital U
+            'ᴠ' => 'v', // Small capital V
+            'ᴡ' => 'w', // Small capital W
+            'ʏ' => 'y', // Small capital Y
+            'ᴢ' => 'z', // Small capital Z
+        ];
+        $text = strtr($text, $homoglyphs);
+        // Collapse 3+ repeated characters to 2 (e.g. "fuuuuck" → "fuuck").
+        $text = preg_replace('/(.)\1{2,}/u', '$1$1', $text);
+        return $text;
     }
 
     /**

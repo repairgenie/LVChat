@@ -311,6 +311,11 @@ final class ChatController
             if ((int) ($user['guest'] ?? 0) !== 1 && (int) ($t['guest'] ?? 0) !== 1 && FriendService::isBlockedEither((int) $user['id'], (int) $t['id'])) {
                 self::finish(['error' => 'You cannot message this user.'], '/app?dm=' . rawurlencode($t['username']), 400);
             }
+            // Guests cannot DM registered users who have not opted in to
+            // receiving messages from anonymous accounts.
+            if ((int) ($user['guest'] ?? 0) === 1 && (int) ($t['guest'] ?? 0) !== 1) {
+                self::finish(['error' => 'Guests cannot send private messages to registered users.'], '/app?dm=' . rawurlencode($t['username']), 403);
+            }
             $blocked = BanService::sendBlocked($user, $content, 'p');
             if ($blocked) {
                 self::finish(['error' => $blocked], '/app?dm=' . rawurlencode($t['username']), 403);
@@ -877,6 +882,12 @@ final class ChatController
         if (!MessageService::reactionsEnabled()) {
             json_out(['error' => 'Reactions are disabled on this server.'], 403);
         }
+        // Rate-limit reactions: max 30 per minute.
+        $lastReaction = (int) ($_SESSION['last_reaction_ts'] ?? 0);
+        if (time() - $lastReaction < 2) {
+            json_out(['error' => 'You are reacting too quickly. Slow down.'], 429);
+        }
+        $_SESSION['last_reaction_ts'] = time();
         $id = (int) ($_POST['id'] ?? 0);
         $emoji = trim((string) ($_POST['emoji'] ?? ''));
         $r = MessageService::toggleReaction($id, $user, $emoji);
@@ -890,6 +901,12 @@ final class ChatController
     public static function search(): void
     {
         $user = self::requireUser();
+        // Rate-limit search queries: max 20 per minute.
+        $lastSearch = (int) ($_SESSION['last_search_ts'] ?? 0);
+        if (time() - $lastSearch < 3) {
+            self::finish(['error' => 'Search is rate-limited. Please wait.'], null, 429);
+        }
+        $_SESSION['last_search_ts'] = time();
         $term = trim((string) ($_GET['q'] ?? ''));
         if ($term === '') {
             json_out(['ok' => true, 'results' => []]);
@@ -1039,6 +1056,14 @@ final class ChatController
     {
         $user = self::requireUser();
         self::requireCsrf();
+        // Rate-limit reports: max 10 per 5 minutes.
+        $recentReports = (int) Database::scalar(
+            'SELECT COUNT(*) FROM reports WHERE reporter_user_id = ? AND created_at > datetime("now", "-5 minutes")',
+            [(int) $user['id']]
+        );
+        if ($recentReports >= 10) {
+            self::finish(['error' => 'You are submitting reports too quickly. Slow down.'], null, 429);
+        }
         $id = (int) ($_POST['id'] ?? 0);
         $pm = ($_POST['pm'] ?? '0') === '1';
         $reason = trim((string) ($_POST['reason'] ?? ''));

@@ -139,6 +139,9 @@ final class UserController
             json_out(['error' => 'New password must be at least 8 characters.'], 400);
         }
         Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($new, PASSWORD_ARGON2ID), $user['id']]);
+        // Kill all other sessions so a stolen token cannot persist after
+        // the password is changed (mirrors the admin-initiated reset flow).
+        Auth::killSessions((int) $user['id']);
         log_audit('password_change', $user['username']);
         json_out(['ok' => true]);
     }

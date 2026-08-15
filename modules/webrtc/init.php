@@ -37,8 +37,8 @@ if (!class_exists('VoiceController')) {
 if (!class_exists('CallController')) {
     require __DIR__ . '/CallController.php';
 }
-if (!class_exists('MtgController')) {
-    require __DIR__ . '/MtgController.php';
+if (!class_exists('EventController')) {
+    require __DIR__ . '/EventController.php';
 }
 if (!class_exists('AdminVoiceController')) {
     require __DIR__ . '/AdminVoiceController.php';

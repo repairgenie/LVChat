@@ -430,6 +430,16 @@ final class AuthController
         AuthTokenService::claim((int) $row['token_id']);
         AuthTokenService::invalidateAllForUser((int) $row['id'], AuthTokenService::TYPE_MAGIC);
         login_attempt_clear();
+        // MFA gate — magic links must still pass TOTP like a password login.
+        if (TotpService::enabled($row)) {
+            self::beginMfa($row, '/app?channel=general');
+            redirect('/login/mfa');
+        }
+        if (TotpService::requiredFor($row)) {
+            self::beginMfa($row, '/app?channel=general');
+            $_SESSION['mfa_setup_secret'] = TotpService::generateSecret();
+            redirect('/login/mfa/setup');
+        }
         Auth::login($row);
         log_audit('magic_login', 'user#' . (int) $row['id']);
         redirect('/app?channel=general');

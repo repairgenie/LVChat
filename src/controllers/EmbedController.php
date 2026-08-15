@@ -54,7 +54,10 @@ final class EmbedController
         header('X-Content-Type-Options: nosniff');
         header('Cache-Control: no-cache');
         header('Referrer-Policy: no-referrer');
-        header('Content-Security-Policy: frame-ancestors ' . ($_SERVER['HTTP_HOST'] ?? '') . '; sandbox allow-scripts allow-forms allow-popups');
+        // Sanitize the Host header — it's client-controlled and must not be
+        // interpolated into CSP without validation.
+        $host = preg_replace('/[^a-zA-Z0-9.\-]/', '', $_SERVER['HTTP_HOST'] ?? '');
+        header('Content-Security-Policy: frame-ancestors ' . $host . '; sandbox allow-scripts allow-forms allow-popups');
         echo $result['body'];
         exit;
     }
@@ -82,6 +85,16 @@ final class EmbedController
         header('Access-Control-Allow-Origin: *');
         header('Cache-Control: public, max-age=300');
         header('Referrer-Policy: no-referrer');
+        // Validate Content-Type from remote server to prevent MIME confusion.
+        $safeTypes = ['text/css', 'text/javascript', 'application/javascript', 'font/woff', 'font/woff2', 'image/', 'audio/', 'video/'];
+        $ct = strtolower($result['content_type']);
+        $ctSafe = false;
+        foreach ($safeTypes as $prefix) {
+            if (str_starts_with($ct, $prefix)) { $ctSafe = true; break; }
+        }
+        if (!$ctSafe) {
+            header('Content-Type: application/octet-stream');
+        }
         echo $result['body'];
         exit;
     }

@@ -60,6 +60,12 @@ CommandRegistry::register('join', [
         if (!$name || !preg_match('/^[#&]/', $name)) {
             return ['replies' => ['Usage: /join <#channel> [key]']];
         }
+        // Rate-limit joins to prevent channel flooding.
+        $lastJoin = (int) ($_SESSION['last_cmd_join_ts'] ?? 0);
+        if (time() - $lastJoin < 2) {
+            return ['replies' => ['You are joining channels too quickly. Slow down.']];
+        }
+        $_SESSION['last_cmd_join_ts'] = time();
         $ch = ChannelService::find($name);
         if (!$ch) {
             $created = ChannelService::create($user, $name);
@@ -169,6 +175,15 @@ CommandRegistry::register('notice', [
         if (MessageService::sameActor($target, $user)) {
             return ['replies' => ['You cannot send a notice to yourself.']];
         }
+        // Respect block lists — notices must be blockable like regular DMs.
+        if (!Auth::isGuest($user) && !Auth::isGuest($target)
+            && FriendService::isBlockedEither((int) $user['id'], (int) $target['id'])) {
+            return ['replies' => ['You cannot message this user.']];
+        }
+        // Guests cannot send notices to registered users.
+        if (Auth::isGuest($user) && !Auth::isGuest($target)) {
+            return ['replies' => ['Guests cannot send notices to registered users.']];
+        }
         $prefix = $user['role'] === 'admin' ? '[Server] ' : '';
         MessageService::insertPm($user, $target, mb_substr($prefix . $text, 0, 2000));
         MessageService::logPm((int) $user['id'], $user['username'], $target['username'], mb_substr($prefix . $text, 0, 2000), MessageService::isGuest($user) ? 1 : 0);
@@ -188,6 +203,12 @@ CommandRegistry::register('nick', [
         if (strtolower($newnick) === strtolower($user['username'])) {
             return ['replies' => ['You already have that nick.']];
         }
+        // Rate-limit nick changes to prevent channel flooding.
+        $lastNick = (int) ($_SESSION['last_nick_ts'] ?? 0);
+        if (time() - $lastNick < 30) {
+            return ['replies' => ['Please wait before changing your nickname again.']];
+        }
+        $_SESSION['last_nick_ts'] = time();
         $exists = Database::scalar('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [$newnick]);
         if ($exists) {
             return ['replies' => ["Nickname $newnick is already in use."]];
@@ -347,6 +368,10 @@ CommandRegistry::register('invite', [
         if ((int) $target['id'] === (int) $user['id']) {
             return ['replies' => ['You cannot invite yourself.']];
         }
+        // Respect block lists — a blocked user should not receive invite notifications.
+        if (FriendService::isBlockedEither((int) $user['id'], (int) $target['id'])) {
+            return ['replies' => ['You cannot invite this user.']];
+        }
         // A per-user mute silences that person's invites (bell + push) too.
         if (PushService::isMuted((int) $target['id'], (int) $user['id'])) {
             return ['replies' => ["$nick cannot receive your invites."]];
@@ -376,6 +401,13 @@ CommandRegistry::register('knock', [
         if (!$ch) {
             return ['replies' => ["No such channel: $name"]];
         }
+        // Rate-limit knocks to 1 per 60 seconds per channel.
+        $knockKey = 'knock_' . $ch['id'];
+        $lastKnock = (int) ($_SESSION[$knockKey] ?? 0);
+        if (time() - $lastKnock < 60) {
+            return ['replies' => ['You recently knocked on this channel. Please wait before trying again.']];
+        }
+        $_SESSION[$knockKey] = time();
         $ops = Database::all(
             'SELECT u.id FROM channel_members cm JOIN users u ON u.id = cm.user_id
              WHERE cm.channel_id = ? AND cm.level IN ("founder","admin","op")',
@@ -486,6 +518,10 @@ final class UserCommands
         }
         if ((int) ($user['guest'] ?? 0) !== 1 && (int) ($target['guest'] ?? 0) !== 1 && FriendService::isBlockedEither((int) $user['id'], (int) $target['id'])) {
             return ['replies' => ['A block prevents messaging between you.']];
+        }
+        // Guests cannot DM registered users.
+        if ((int) ($user['guest'] ?? 0) === 1 && (int) ($target['guest'] ?? 0) !== 1) {
+            return ['replies' => ['Guests cannot send private messages to registered users.']];
         }
         $blocked = BanService::sendBlocked($user, $text, 'p');
         if ($blocked) {

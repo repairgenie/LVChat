@@ -41,12 +41,12 @@ declare(strict_types=1);
 final class SaaSService
 {
     /** Feature toggles (per-plan on/off switches). */
-    public const FEATURE_KEYS = ['meetings', 'voice', 'openclaw_bots'];
+    public const FEATURE_KEYS = ['events', 'voice', 'openclaw_bots'];
 
     /** Numeric limits ('' / null value = unlimited). */
     public const LIMIT_KEYS = [
         'connections', 'owned_channels', 'memberships', 'upload_max_bytes',
-        'meetings_concurrent', 'openclaw_bot_count', 'open_tickets',
+        'events_concurrent', 'openclaw_bot_count', 'open_tickets',
         'reg_invites', 'history_messages',
     ];
 
@@ -54,14 +54,14 @@ final class SaaSService
     public const QOS_KEYS = ['voice_talker_cap', 'voice_bitrate'];
 
     private const LABELS = [
-        'meetings' => 'Meetings (#mtg rooms)',
+        'events' => 'Events',
         'voice' => 'Voice (calls + channel voice)',
         'openclaw_bots' => 'OpenClaw bots',
         'connections' => 'Concurrent connections',
         'owned_channels' => 'Owned channels',
         'memberships' => 'Channel memberships',
         'upload_max_bytes' => 'Max file size (bytes)',
-        'meetings_concurrent' => 'Concurrent meetings',
+        'events_concurrent' => 'Concurrent events',
         'openclaw_bot_count' => 'OpenClaw bot count',
         'open_tickets' => 'Open support tickets',
         'reg_invites' => 'Registration invites',
@@ -71,7 +71,7 @@ final class SaaSService
     ];
 
     private const DEFAULT_FEATURES = [
-        'meetings' => false,
+        'events' => false,
         'voice' => false,
         'openclaw_bots' => false,
     ];
@@ -81,7 +81,7 @@ final class SaaSService
         'owned_channels' => 10,
         'memberships' => 100,
         'upload_max_bytes' => 5242880,
-        'meetings_concurrent' => 1,
+        'events_concurrent' => 1,
         'openclaw_bot_count' => 0,
         'open_tickets' => 3,
         'reg_invites' => 2,
@@ -94,7 +94,7 @@ final class SaaSService
     ];
 
     private static bool $tablesChecked = false;
-    private static bool $mtgTableExists = true;
+    private static bool $eventsTableExists = true;
 
     public static function enabled(): bool
     {
@@ -343,14 +343,14 @@ final class SaaSService
 
     // ── Live counters (the "metered" reads) ──────────────────────────────────
 
-    public static function meetingCount(int $userId): int
+    public static function eventCount(int $userId): int
     {
         self::checkTables();
-        if (!self::$mtgTableExists) {
+        if (!self::$eventsTableExists) {
             return 0;
         }
         return (int) Database::scalar(
-            'SELECT COUNT(*) FROM mtg_channels m JOIN channels c ON c.id = m.channel_id WHERE c.owner_id = ?',
+            'SELECT COUNT(*) FROM events e WHERE e.founder_id = ? AND e.status IN (\'scheduled\', \'active\')',
             [$userId]
         );
     }
@@ -814,8 +814,8 @@ final class SaaSService
             return;
         }
         self::$tablesChecked = true;
-        self::$mtgTableExists = (bool) Database::scalar(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mtg_channels'"
+        self::$eventsTableExists = (bool) Database::scalar(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
         );
     }
 }

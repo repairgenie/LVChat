@@ -85,22 +85,22 @@ check('free plan seeded', (int) $free['id'] > 0, (string) ($free['id'] ?? 'missi
 check('free plan is undeletable', !SaaSService::deletePlan((int) $free['id'])['ok']);
 
 check('disabled switch → everything unlimited', SaaSService::limit(actor(1), 'connections') === null);
-check('disabled switch → features allowed', SaaSService::feature(actor(1), 'meetings') === true);
+check('disabled switch → features allowed', SaaSService::feature(actor(1), 'events') === true);
 
 config_set('saas_enabled', '1');
 check('enabled switch → free limits apply', SaaSService::limit(actor(1), 'connections') === 3);
-check('enabled switch → meetings off on free', SaaSService::feature(actor(1), 'meetings') === false);
+check('enabled switch → events off on free', SaaSService::feature(actor(1), 'events') === false);
 check('enabled switch → voice off on free', SaaSService::feature(actor(1), 'voice') === false);
 check('enabled switch → bots off on free', SaaSService::feature(actor(1), 'openclaw_bots') === false);
 check('enabled switch → admins exempt', SaaSService::limit(actor(2, 'admin'), 'connections') === null);
-check('enabled switch → admins have features', SaaSService::feature(actor(2, 'admin'), 'meetings') === true);
+check('enabled switch → admins have features', SaaSService::feature(actor(2, 'admin'), 'events') === true);
 
 // ── Plan CRUD ───────────────────────────────────────────────────────────────
 $res = SaaSService::createPlan([
     'name' => 'Pro',
     'price_amount' => '499',
     'billing_cycle' => 'monthly',
-    'feature_meetings' => '1',
+    'feature_events' => '1',
     'feature_voice' => '1',
     'feature_openclaw_bots' => '1',
     'limit_connections' => '50',
@@ -119,13 +119,13 @@ SaaSService::assignPlan(1, $proId, 'admin');
 $lim = SaaSService::limitsFor(actor(1));
 check('assigned plan overrides free limits', $lim['limits']['connections'] === 50, json_encode($lim['limits']));
 check('memberships unlimited (blank)', $lim['limits']['memberships'] === null);
-check('paid plan has meetings', SaaSService::feature(actor(1), 'meetings') === true);
+check('paid plan has events', SaaSService::feature(actor(1), 'events') === true);
 check('paid plan voice QoS applied', SaaSService::voiceQos(actor(1))['bitrate'] === 64000);
 
 // ── Overrides (assign features regardless of plan) ──────────────────────────
 config_set('saas_enabled', '1');
-SaaSService::setOverride(3, 'meetings', '1', 'granted by support');
-check('override grants feature off-plan', SaaSService::feature(actor(3), 'meetings') === true);
+SaaSService::setOverride(3, 'events', '1', 'granted by support');
+check('override grants feature off-plan', SaaSService::feature(actor(3), 'events') === true);
 SaaSService::setOverride(3, 'connections', '5', 'custom cap');
 check('override raises a limit', SaaSService::limit(actor(3), 'connections') === 5);
 SaaSService::setOverride(3, 'connections', '', 'unlimited');

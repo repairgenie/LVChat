@@ -910,6 +910,10 @@ final class AdminController
                 $id = (int) ($_POST['id'] ?? 0);
                 $name = trim((string) ($_POST['name'] ?? ''));
                 $color = trim((string) ($_POST['color'] ?? '#5865f2'));
+                // Validate color as a hex color code to prevent CSS injection.
+                if (!preg_match('/^#[0-9a-fA-F]{3,8}$/', $color)) {
+                    $color = '#5865f2';
+                }
                 $helper = ($_POST['helper'] ?? '0') === '1' ? 1 : 0;
                 $perms = array_map('strval', (array) ($_POST['perms'] ?? []));
                 $allowedPerms = ['oper', 'manage_users', 'manage_channels', 'manage_bans', 'manage_badwords', 'manage_roles'];
@@ -1469,7 +1473,7 @@ final class AdminController
         } else {
             flash($message);
         }
-        redirect((string) ($_POST['back'] ?? '/admin'));
+        redirect(safe_next((string) ($_POST['back'] ?? '/admin')));
     }
 
     /** GET /admin/ws/status — is the realtime gateway up? (Admin → Settings UI.) */

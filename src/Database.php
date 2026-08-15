@@ -343,6 +343,12 @@ final class Database
             $pdo->exec('CREATE TABLE modules (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT "", version TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1, license TEXT NOT NULL DEFAULT "", license_status TEXT NOT NULL DEFAULT "", license_checked_at TEXT, license_expires_at TEXT, config TEXT, installed_at TEXT NOT NULL DEFAULT (datetime("now")), updated_at TEXT)');
         }
 
+        // TOTP replay prevention: track used counters to prevent code reuse
+        // within the ±1 verification window.
+        if (!in_array('totp_used_counters', $tables, true)) {
+            $pdo->exec('CREATE TABLE totp_used_counters (counter INTEGER PRIMARY KEY, expires_at TEXT NOT NULL)');
+        }
+
         // Analytics indexes (schema v16): keep range-aggregation charts off full scans.
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_chat_logs_created ON chat_logs(created_at)');
@@ -622,7 +628,7 @@ final class Database
             'ws_push_url' => 'http://127.0.0.1:9001/push',
             'ws_push_secret' => bin2hex(random_bytes(16)),
             'peak_online' => '0',
-            'mfa_require_admin' => '0',
+            'mfa_require_admin' => '1',
             'mfa_require_staff' => '0',
             'mfa_require_user' => '0',
             'theme_user_customization' => '1',

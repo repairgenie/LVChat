@@ -103,7 +103,8 @@ final class TotpService
         return str_pad((string) ($value % (10 ** self::DIGITS)), self::DIGITS, '0', STR_PAD_LEFT);
     }
 
-    /** Verify a user-supplied code, tolerating ±$window 30-second steps of clock drift. */
+    /** Verify a user-supplied code, tolerating ±$window 30-second steps of clock drift.
+     *  Tracks used counters to prevent replay within the window. */
     public static function verify(string $secretB32, string $code, int $window = 1): bool
     {
         $code = (string) preg_replace('/\s+/', '', $code);
@@ -112,7 +113,21 @@ final class TotpService
         }
         $now = time();
         for ($i = -$window; $i <= $window; $i++) {
+            $counter = intdiv($now + $i * self::PERIOD, self::PERIOD);
+            // Skip already-used counters to prevent replay.
+            $used = Database::scalar(
+                'SELECT 1 FROM totp_used_counters WHERE counter = ? AND expires_at > datetime("now") LIMIT 1',
+                [$counter]
+            );
+            if ($used) {
+                continue;
+            }
             if (hash_equals(self::code($secretB32, $now + $i * self::PERIOD), $code)) {
+                // Record this counter as used (expires after 2 windows).
+                Database::query(
+                    'INSERT OR IGNORE INTO totp_used_counters (counter, expires_at) VALUES (?, datetime("now", "+120 seconds"))',
+                    [$counter]
+                );
                 return true;
             }
         }

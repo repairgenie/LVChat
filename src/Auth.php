@@ -282,7 +282,17 @@ final class Auth
             $id = (int) Database::lastId();
         }
         if (!$hasAdmin) {
-            Database::query('UPDATE users SET role = "admin", status = "active", status_reason = NULL WHERE id = ?', [$id]);
+            // The first account auto-gains admin only when a SETUP_TOKEN is
+            // configured in the environment.  This prevents anyone who reaches
+            // a fresh install before the real admin from gaining full control.
+            // To bootstrap: set SETUP_TOKEN in .env, then register with
+            // setup_token=<value> in the POST body.
+            $setupToken = getenv('SETUP_TOKEN');
+            $provided   = $autoApprove
+                || ($setupToken !== false && $setupToken !== '' && isset($_POST['setup_token']) && hash_equals($setupToken, (string) $_POST['setup_token']));
+            if ($provided) {
+                Database::query('UPDATE users SET role = "admin", status = "active", status_reason = NULL WHERE id = ?', [$id]);
+            }
         }
         return ['ok' => true, 'id' => $id];
     }

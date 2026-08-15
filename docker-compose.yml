@@ -28,6 +28,14 @@ services:
       # Allow CORS from these origins (comma-separated) for the messenger.
       # - CHAT_CORS_ORIGINS=https://msg.example.com
     restart: unless-stopped
+    # Security hardening: drop all capabilities, prevent privilege escalation.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/healthz"]
       interval: 30s

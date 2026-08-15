@@ -253,7 +253,9 @@ CommandRegistry::register('akick', [
                 );
                 if ($userId) {
                     $mem = AccessService::member($channel['id'], $userId);
-                    if ($mem && level_weight($mem['level']) < level_weight($user['id'] === (int) $user['id'] ? 'op' : 'normal')) {
+                    // Only kick the target if their level is below the actor's level.
+                    $actorLevel = AccessService::effectiveLevel($channel['id'], (int) $user['id']);
+                    if ($mem && level_weight($mem['level']) < level_weight($actorLevel)) {
                         Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$channel['id'], $userId]);
                         ChannelService::afterMemberRemoval($channel['id']);
                     }
@@ -330,6 +332,12 @@ CommandRegistry::register('senak', [
         if ($msg === '') {
             return ['replies' => ['Usage: /senak <#channel> <message>']];
         }
+        // Rate-limit senak to prevent operator notification flooding.
+        $lastSenak = (int) ($_SESSION['last_senak_ts'] ?? 0);
+        if (time() - $lastSenak < 30) {
+            return ['replies' => ['Please wait before sending another operator notice.']];
+        }
+        $_SESSION['last_senak_ts'] = time();
         $ops = Database::all(
             'SELECT u.id FROM channel_members cm JOIN users u ON u.id = cm.user_id
              WHERE cm.channel_id = ? AND cm.level IN ("founder","admin","op") AND cm.user_id != ?',

@@ -310,6 +310,7 @@ function presence_label(array $u): string {
   </script>
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
   <?php require ROOT . '/views/partials/theme.php'; ?>
+  <style>.bot-badge{display:inline-block;font-size:10px;font-weight:600;line-height:1;padding:1px 5px;margin-left:5px;border-radius:3px;background:#5865f2;color:#fff;vertical-align:middle;letter-spacing:.02em}</style>
   <?php require ROOT . '/views/partials/pwa.php'; ?>
   <?php
   // Module assets (docs/modules.md): each enabled module's manifest `assets`

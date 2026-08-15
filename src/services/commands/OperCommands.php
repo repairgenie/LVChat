@@ -97,6 +97,15 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
                     }
                 }
             }
+            // Block overly broad masks that would affect everyone.
+            if ($target === '*@*' || $target === '*!*@*' || $target === '*') {
+                return ['replies' => ['This mask is too broad and would affect all users.']];
+            }
+            // Enforce a maximum ban duration of 30 days to prevent accidental
+            // permanent locks.  Operators may re-apply if needed.
+            if ($duration !== null && $duration > 30 * 86400) {
+                $duration = 30 * 86400;
+            }
             $err = BanService::addBan($kind, null, $target, $reason, $duration, (int) $user['id'], $userId);
             if ($err) {
                 return ['replies' => [$err]];
@@ -111,7 +120,7 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
             }
             if ($kind === 'shun' && $userId) {
                 // shun blocks messaging, so don't kick
-            } elseif ($isIp || ($kind === 'zline' && !$userId)) {
+            } elseif ($isIp || ($userId === null && in_array($kind, ['kline', 'gline', 'zline'], true))) {
                 // Kick any online users whose recorded IP matches the ban.
                 foreach (Database::all('SELECT * FROM users WHERE last_ip IS NOT NULL') as $u) {
                     if (Auth::ipMatch($target, (string) $u['last_ip'])) {
@@ -168,6 +177,12 @@ CommandRegistry::register('kill', [
         if ((int) $t['id'] === (int) $user['id']) {
             return ['replies' => ['You cannot kill yourself.']];
         }
+        // Rate-limit kills to prevent kill-flooding.
+        $lastKill = (int) ($_SESSION['last_kill_ts'] ?? 0);
+        if (time() - $lastKill < 10) {
+            return ['replies' => ['Please wait before using /kill again.']];
+        }
+        $_SESSION['last_kill_ts'] = time();
         op_force_kick((int) $t['id'], 'Killed: ' . $reason, $user);
         ModerationService::note((int) $t['id'], $user, 'kline', $reason);
         Database::query('DELETE FROM sessions WHERE user_id = ?', [$t['id']]);
@@ -185,6 +200,20 @@ CommandRegistry::register('global', [
         $msg = implode(' ', $args);
         if ($msg === '') {
             return ['replies' => ['Usage: /global <message>']];
+        }
+        // Rate-limit global announcements to prevent flooding.
+        $lastGlobal = (int) ($_SESSION['last_global_ts'] ?? 0);
+        if (time() - $lastGlobal < 60) {
+            return ['replies' => ['Please wait before sending another global announcement.']];
+        }
+        $_SESSION['last_global_ts'] = time();
+        // Run the message through the badword filter.
+        $censor = CensorService::check($msg, true);
+        if ($censor && $censor['action'] === 'block') {
+            return ['replies' => ['Message blocked by the word filter.']];
+        }
+        if ($censor) {
+            $msg = $censor['censored'];
         }
         foreach (Database::all('SELECT id, name FROM channels') as $c) {
             MessageService::system($c['id'], 'system', '[GLOBAL] ' . $user['username'] . ': ' . $msg);
@@ -239,6 +268,7 @@ CommandRegistry::register('sajoin', [
             return ['replies' => ['Usage: /sajoin <nick> <#channel>']];
         }
         ChannelService::join($ch, $t);
+        log_audit('sajoin', $nick, $ch['name']);
         return ['replies' => ["Forced $nick to join " . $ch['name'] . '.']];
     },
 ]);
@@ -259,6 +289,7 @@ CommandRegistry::register('sapart', [
         Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$ch['id'], $t['id']]);
         ChannelService::afterMemberRemoval($ch['id']);
         MessageService::system($ch['id'], 'kick', $nick . ' was removed by ' . $user['username'] . ' (SAKICK)');
+        log_audit('sapart', $nick, $ch['name']);
         return ['replies' => ["Forced $nick out of " . $ch['name'] . '.']];
     },
 ]);
@@ -274,6 +305,7 @@ CommandRegistry::register('samode', [
         if (!$ch) {
             return ['replies' => ['Usage: /samode <#channel> <+/-modes> [args]']];
         }
+        log_audit('samode', $ch['name'], implode(' ', $args));
         $reg = CommandRegistry::get('mode');
         return call_user_func($reg['run'], array_merge([$args[0] ?? ''], array_slice($args, 1)), $user, $ch);
     },
@@ -356,7 +388,12 @@ CommandRegistry::register('sasethost', [
         if (!$t || !$host) {
             return ['replies' => ['Usage: /sasethost <nick> <host>']];
         }
+        // Validate the host string — same rules as the user-facing /vhost set.
+        if (!preg_match('/^[A-Za-z0-9.\-]{3,60}$/', $host)) {
+            return ['replies' => ['Host must be 3-60 chars using letters, numbers, dots, and hyphens.']];
+        }
         Database::query('UPDATE users SET vhost = ? WHERE id = ?', [$host, $t['id']]);
+        log_audit('sasethost', $nick, $host);
         return ['replies' => ["$nick vhost set to $host."]];
     },
 ]);
@@ -479,10 +516,12 @@ CommandRegistry::register('spamfilter', [
                     'INSERT INTO spamfilters (match_type, targets, action, reason, match) VALUES ("simple", "cpntu", "block", ?, ?)',
                     [$reason, $match]
                 );
+                log_audit('spamfilter_add', $match, $reason ?: 'no reason');
                 return ['replies' => ['Spam filter added.']];
             case 'del':
                 $id = (int) ($args[1] ?? 0);
                 Database::query('DELETE FROM spamfilters WHERE id = ?', [$id]);
+                log_audit('spamfilter_del', '#' . $id);
                 return ['replies' => ['Spam filter removed.']];
             case 'list':
                 $rows = Database::all('SELECT * FROM spamfilters WHERE enabled = 1');
@@ -559,14 +598,17 @@ CommandRegistry::register('badword', [
                     return ['replies' => ['Usage: /badword add <word> [censor|block]']];
                 }
                 Database::query('INSERT INTO badwords (word, action) VALUES (?, ?)', [strtolower($word), $action]);
+                log_audit('badword_add', $word, $action);
                 return ['replies' => ["Bad word '$word' added (action: $action)."]];
             case 'del':
                 $id = (int) ($args[1] ?? 0);
                 Database::query('DELETE FROM badwords WHERE id = ?', [$id]);
+                log_audit('badword_del', '#' . $id);
                 return ['replies' => ['Bad word removed.']];
             case 'toggle':
                 $id = (int) ($args[1] ?? 0);
                 Database::query('UPDATE badwords SET enabled = 1 - enabled WHERE id = ?', [$id]);
+                log_audit('badword_toggle', '#' . $id);
                 return ['replies' => ['Bad word toggled.']];
             case 'list':
                 $rows = Database::all('SELECT * FROM badwords ORDER BY id DESC');

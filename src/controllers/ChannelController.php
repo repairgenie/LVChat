@@ -153,6 +153,12 @@ final class ChannelController
         if ($restriction) {
             json_out(['error' => $restriction], 403);
         }
+        // Rate-limit join/part to prevent channel flooding.
+        $lastJoin = (int) ($_SESSION['last_join_ts'] ?? 0);
+        if (time() - $lastJoin < 2) {
+            json_out(['error' => 'You are joining channels too quickly. Slow down.'], 429);
+        }
+        $_SESSION['last_join_ts'] = time();
         $name = trim((string) ($_POST['name'] ?? ''));
         $key = $_POST['key'] ?? null;
         $channel = ChannelService::find($name);
@@ -176,6 +182,12 @@ final class ChannelController
     {
         $user = Auth::require();
         Csrf::verify();
+        // Rate-limit join/part to prevent channel flooding.
+        $lastPart = (int) ($_SESSION['last_part_ts'] ?? 0);
+        if (time() - $lastPart < 2) {
+            json_out(['error' => 'You are leaving channels too quickly. Slow down.'], 429);
+        }
+        $_SESSION['last_part_ts'] = time();
         $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
         if (!$channel) {
             json_out(['error' => 'Channel not found.'], 404);
@@ -493,6 +505,12 @@ final class ChannelController
                 if ($user['role'] !== 'admin' && (int) $channel['topic_locked'] === 1 && $level < level_weight('op')) {
                     json_out(['error' => 'You must be a channel operator (+o) to change the topic.'], 403);
                 }
+                // Rate-limit topic changes: max 1 per 10 seconds.
+                $lastTopic = (int) ($_SESSION['last_topic_ts_' . $cid] ?? 0);
+                if (time() - $lastTopic < 10) {
+                    json_out(['error' => 'Topic changes are rate-limited. Please wait.'], 429);
+                }
+                $_SESSION['last_topic_ts_' . $cid] = time();
                 $topic = trim((string) ($_POST['topic'] ?? ''));
                 $topic = mb_substr($topic, 0, 500);
                 ChannelService::update((string) $cid, ['topic' => $topic]);
