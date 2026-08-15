@@ -355,6 +355,8 @@ final class Database
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pm_created ON private_messages(created_at)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_moderation_events_created ON moderation_events(created_at)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at)');
+        // TOTP replay-prevention cleanup needs expires_at for efficient DELETE.
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_totp_used_counters_expires ON totp_used_counters(expires_at)');
 
         // Backfill the FTS index from any pre-existing messages (new rows are
         // indexed by the triggers created above). Only rebuild when it lags.

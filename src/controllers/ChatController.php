@@ -289,7 +289,11 @@ final class ChatController
         $content = mb_substr($content, 0, 2000);
 
         // Native (no-JS) submissions of slash commands are routed here too.
+        // Rate-limit before command execution to prevent flooding.
         if (($_POST['ajax'] ?? '') !== '1' && $content[0] === '/') {
+            if (self::rateLimited($user)) {
+                self::finish(['error' => 'You are sending messages too quickly. Slow down.'], '/app', 429);
+            }
             $channel = null;
             if (!empty($_POST['channel'])) {
                 $channel = ChannelService::findBySlug((string) $_POST['channel']);
@@ -482,6 +486,15 @@ final class ChatController
             if (!$t) {
                 json_out(['error' => 'No such user.'], 404);
             }
+            // Respect block lists — same rules as text DMs.
+            if ((int) ($user['guest'] ?? 0) !== 1 && (int) ($t['guest'] ?? 0) !== 1
+                && FriendService::isBlockedEither((int) $user['id'], (int) $t['id'])) {
+                json_out(['error' => 'You cannot message this user.'], 403);
+            }
+            // Guests cannot DM registered users.
+            if ((int) ($user['guest'] ?? 0) === 1 && (int) ($t['guest'] ?? 0) !== 1) {
+                json_out(['error' => 'Guests cannot send private messages to registered users.'], 403);
+            }
             $blocked = BanService::sendBlocked($user, $content, 'p');
             if ($blocked) {
                 json_out(['error' => $blocked], 403);
@@ -556,6 +569,10 @@ final class ChatController
         $restriction = ModerationService::restriction($user);
         if ($restriction) {
             json_out(['error' => $restriction], 403);
+        }
+        // Rate-limit command execution — same threshold as message send.
+        if (self::rateLimited($user)) {
+            json_out(['error' => 'You are sending messages too quickly. Slow down.'], 429);
         }
         $text = trim((string) ($_POST['text'] ?? ''));
         if ($text === '' || $text[0] !== '/') {
