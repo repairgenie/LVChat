@@ -85,8 +85,59 @@ final class UserController
         if (!$user) {
             render_view('errors/notfound', [], null);
         }
-        $isSelf = (int) $viewer['id'] === (int) $user['id'];
-        $channels = ChannelService::joinedChannelNames($user);
+        $isSelf = (int) $viewer['id'] === (int) $user['id']
+        && (int) ($viewer['guest'] ?? 0) === (int) ($user['guest'] ?? 0);
+        // Channel list: only show channels the VIEWER is entitled to know.
+        // Private/secret channels — and private event channels, whose slug IS
+        // the access credential — must never be disclosed to third parties.
+        // Self-viewers see their own channels; anyone else sees only public
+        // channels the target belongs to, plus any channel they share with the
+        // viewer.
+        $channels = [];
+        if ($isSelf) {
+            $channels = ChannelService::joinedChannelNames($user);
+        } else {
+            $viewerIsGuest = (int) ($viewer['guest'] ?? 0) === 1;
+            $targetIsRegistered = (int) ($user['guest'] ?? 0) !== 1;
+            $seen = [];
+            if ($targetIsRegistered) {
+                // Channels the target shares with the viewer.
+                if (!$viewerIsGuest) {
+                    $shared = Database::all(
+                        'SELECT c.name, c.slug FROM channel_members v
+                         JOIN channel_members t ON t.channel_id = v.channel_id
+                         JOIN channels c ON c.id = v.channel_id
+                         WHERE v.user_id = ? AND t.user_id = ? AND c.event_id IS NULL',
+                        [(int) $viewer['id'], (int) $user['id']]
+                    );
+                    foreach ($shared as $c) {
+                        $channels[] = $c;
+                        $seen[(string) $c['name']] = true;
+                    }
+                }
+                // Public channels the target belongs to.
+                $publicCh = Database::all(
+                    "SELECT c.name, c.slug FROM channels c
+                     JOIN channel_members t ON t.channel_id = c.id
+                     WHERE t.user_id = ? AND c.visibility = 'public' AND c.forbidden = 0 AND c.event_id IS NULL",
+                    [(int) $user['id']]
+                );
+                foreach ($publicCh as $c) {
+                    if (!isset($seen[(string) $c['name']])) {
+                        $channels[] = $c;
+                    }
+                }
+            } else {
+                // Target is a guest: only public channels they belong to.
+                $guestPublic = Database::all(
+                    "SELECT c.name, c.slug FROM channels c
+                     JOIN channel_members t ON t.channel_id = c.id
+                     WHERE t.guest_id = ? AND c.visibility = 'public' AND c.forbidden = 0 AND c.event_id IS NULL",
+                    [(int) $user['id']]
+                );
+                $channels = $guestPublic;
+            }
+        }
         $isOnline = Auth::isOnline($user);
         $sounds = SoundService::listEnabled();
         $soundPrefs = SoundService::prefsFor($user);
@@ -279,7 +330,7 @@ final class UserController
             json_out(['error' => 'Start the MFA setup first.'], 400);
         }
         $code = trim((string) ($_POST['code'] ?? ''));
-        if (!TotpService::verify($secret, $code)) {
+        if (!TotpService::verify($secret, $code, 1, (int) $user['id'])) {
             json_out(['error' => 'Invalid code. Check your authenticator app and try again.'], 403);
         }
         TotpService::enable((int) $user['id'], $secret);

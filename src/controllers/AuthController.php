@@ -115,7 +115,7 @@ final class AuthController
         }
         $user = Database::row('SELECT * FROM users WHERE id = ?', [$uid]);
         $code = trim((string) ($_POST['code'] ?? ''));
-        if (!$user || !TotpService::enabled($user) || !TotpService::verify((string) $user['totp_secret'], $code)) {
+        if (!$user || !TotpService::enabled($user) || !TotpService::verify((string) $user['totp_secret'], $code, 1, (int) $uid)) {
             login_attempt_record();
             flash('Invalid authentication code. Try again.');
             redirect('/login/mfa');
@@ -162,7 +162,7 @@ final class AuthController
         }
         $user = Database::row('SELECT * FROM users WHERE id = ?', [$uid]);
         $code = trim((string) ($_POST['code'] ?? ''));
-        if (!$user || !TotpService::verify($secret, $code)) {
+        if (!$user || !TotpService::verify($secret, $code, 1, (int) $uid)) {
             login_attempt_record();
             flash('Invalid code. Check your authenticator app and try again.');
             redirect('/login/mfa/setup');

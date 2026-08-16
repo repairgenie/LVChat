@@ -70,6 +70,11 @@ final class WebhookService
      */
     public static function post(string $token): array
     {
+        // Master switch: enforced on the actual posting path, not just the
+        // management UI, so an admin who turns off webhooks shuts them down.
+        if (config_get('webhooks_enabled', '1') !== '1') {
+            return ['ok' => false, 'error' => 'Webhooks are disabled on this server.', 'status' => 403];
+        }
         $hook = self::findByToken($token);
         if (!$hook || (int) $hook['enabled'] !== 1) {
             return ['ok' => false, 'error' => 'Unknown or disabled webhook.', 'status' => 404];

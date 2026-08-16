@@ -687,7 +687,12 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
     if (unblockBtn) unblockBtn.addEventListener('click', () => friendPost('/api/friend/unblock'));
   }
 
-  // ── My theme editor ───────────────────────────────────────────────────────
+  // ── My theme editor (self-view only: it embeds the owner's personal theme
+  //     incl. their uploaded background image path, which must not be sent to
+  //     other viewers) ───────────────────────────────────────────────────────
+  <?php if ($isSelf && !(int) ($user['guest'] ?? 0)): ?>
+  const pStyleEl = document.getElementById('theme-css');
+  const pPresets = <?= json_encode(array_column($themePresets, null, 'id')) ?>;
   <?php
   $pUt = $userThemeJson;
   $pUo = $pUt['overrides'];
@@ -698,8 +703,6 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
   $pUbgImage = $pUo['chat_bg_image'] ?? '';
   $pUoverlay = isset($pUo['chat_bg_overlay']) ? (int) $pUo['chat_bg_overlay'] : ThemeService::CHAT_BG_OVERLAY_DEFAULT;
   ?>
-  const pStyleEl = document.getElementById('theme-css');
-  const pPresets = <?= json_encode(array_column($themePresets, null, 'id')) ?>;
   const pState = {
     preset: <?= json_encode($pUt['preset']) ?>,
     mode: <?= json_encode($pUmode) ?>,
@@ -827,5 +830,6 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
     });
     pRender();
   }
+  <?php endif; ?>
 })();
 </script>

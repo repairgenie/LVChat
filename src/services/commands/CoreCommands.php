@@ -306,7 +306,7 @@ CommandRegistry::register('whois', [
         if ($si['custom_status'] !== '') {
             $lines[] = 'Status: ' . h($si['custom_status']);
         }
-        $chans = ChannelService::joinedChannelNames($t);
+        $chans = ChannelService::visibleChannelNames($t, $user);
         if ($chans) {
             $lines[] = 'Channels: ' . implode(' ', array_column($chans, 'name'));
         }

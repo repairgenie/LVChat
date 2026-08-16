@@ -135,10 +135,38 @@ final class ChatController
              SELECT id, nick, 'user', 1, NULL, 'online' FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
              ORDER BY username"
         );
-        // Name -> slug for every channel, so #channel references in messages can
-        // be rendered as clickable links by the client-side renderer.
+        // Name -> slug for every channel the SESSION can access, so #channel
+        // references in messages render as clickable links. This must NOT
+        // expose slugs the user isn't entitled to know: the event-channel slug
+        // IS the join credential (128-bit random), so publishing every private
+        // event slug here would defeat its secrecy. Only public channels plus
+        // channels the user is a member of are listed. Guest ids share a
+        // numeric space with user ids (separate AUTOINCREMENT) — a guest must
+        // never run the users-keyed membership query.
         $channelLinks = [];
-        foreach (Database::all('SELECT name, slug FROM channels') as $c) {
+        if (MessageService::isGuest($user)) {
+            $guestCh = Database::all(
+                'SELECT c.name, c.slug FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+                 WHERE cm.guest_id = ?',
+                [(int) $user['id']]
+            );
+            foreach ($guestCh as $c) {
+                $channelLinks[(string) $c['name']] = (string) $c['slug'];
+            }
+        } else {
+            $memberCh = Database::all(
+                'SELECT c.name, c.slug FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+                 WHERE cm.user_id = ? AND cm.guest_id IS NULL',
+                [(int) $user['id']]
+            );
+            foreach ($memberCh as $c) {
+                $channelLinks[(string) $c['name']] = (string) $c['slug'];
+            }
+        }
+        $publicCh = Database::all(
+            "SELECT name, slug FROM channels WHERE visibility = 'public' AND forbidden = 0"
+        );
+        foreach ($publicCh as $c) {
             $channelLinks[(string) $c['name']] = (string) $c['slug'];
         }
         // Registered (non-guest) users for the @mention autocomplete pool,
@@ -676,9 +704,14 @@ final class ChatController
             if (!$member) {
                 // A kicked/banned member gets the recorded reason (one-shot) so
                 // the client can show "why" before dropping them out of the
-                // channel; otherwise a generic removal notice.
+                // channel; otherwise a generic removal notice. Never echo the
+                // name of private/secret/event channels to non-members — for a
+                // private event channel the name IS the access credential.
                 $removalReason = ChannelService::takeRemovalReason($channel['id'], $user);
-                return ['ok' => true, 'redirect' => '/app', 'reason' => $removalReason ?? ('You were removed from ' . $channel['name'] . '.')];
+                $chanLabel = ($channel['visibility'] !== 'public' || !empty($channel['event_id']))
+                    ? 'that channel'
+                    : $channel['name'];
+                return ['ok' => true, 'redirect' => '/app', 'reason' => $removalReason ?? ('You were removed from ' . $chanLabel . '.')];
             }
             $out['messages'] = MessageService::hydrateReactions(MessageService::forChannel((int) $channel['id'], $since), $user);
             $out['channel'] = $channel['slug'];
@@ -774,6 +807,9 @@ final class ChatController
     public static function reportTransport(): void
     {
         $user = self::requireUser();
+        // State-changing POST — same CSRF rule as every other endpoint (the
+        // messenger bearer path short-circuits inside requireCsrf).
+        self::requireCsrf();
         $transport = (string) ($_POST['transport'] ?? '');
         if (!in_array($transport, ['ws', 'sse', 'poll', 'none'], true)) {
             json_out(['error' => 'Bad transport.'], 400);

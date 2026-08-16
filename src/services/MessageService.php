@@ -767,9 +767,14 @@ final class MessageService
      */
     public static function toggleReaction(int $messageId, array $actor, string $emoji): array|string
     {
-        $msg = Database::row('SELECT id, kind, deleted FROM messages WHERE id = ?', [$messageId]);
+        $msg = Database::row('SELECT id, channel_id, kind, deleted FROM messages WHERE id = ?', [$messageId]);
         if (!$msg || (int) $msg['deleted'] === 1 || in_array($msg['kind'], self::SYSTEM_KINDS, true)) {
             return 'Message not found.';
+        }
+        // Access control: the actor must be a member of the message's channel
+        // (reactions target channel messages; DMs live in private_messages).
+        if ($msg['channel_id'] === null || !AccessService::member((int) $msg['channel_id'], $actor)) {
+            return 'You are not a member of this channel.';
         }
         if ($emoji === '' || mb_strlen($emoji) > 16) {
             return 'Invalid emoji.';

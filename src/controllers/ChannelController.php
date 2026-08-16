@@ -34,7 +34,10 @@ final class ChannelController
         if (!$user) {
             redirect('/login?next=' . rawurlencode('/c/' . rawurlencode($channel['slug'])));
         }
-        $member = AccessService::member($channel['id'], (int) $user['id']);
+        // Pass the actor array (not the raw id) so guest members resolve via
+        // the guest_id column — a guest id must never probe user_keyed
+        // memberships (separate AUTOINCREMENT id spaces).
+        $member = AccessService::member($channel['id'], $user);
         if ($member) {
             redirect('/app?channel=' . rawurlencode($channel['slug']));
         }
@@ -68,6 +71,14 @@ final class ChannelController
         if (!$channel) {
             render_view('errors/notfound', [], null);
         }
+        // The landing discloses the channel name and topic to anonymous
+        // visitors — that is fine for public channels but must not reveal
+        // private/secret/staff/event channels (the event slug is the access
+        // credential). Deny the landing for anything that isn't a public,
+        // non-forbidden, non-event channel.
+        if ($channel['visibility'] !== 'public' || (int) ($channel['forbidden'] ?? 0) === 1 || !empty($channel['event_id'])) {
+            render_view('errors/notfound', [], null);
+        }
         $user = Auth::user();
         if ($user) {
             // Signed in: reuse the share-link auto-join flow (the iframe follows the redirect).
@@ -88,7 +99,8 @@ final class ChannelController
         if (!$channel) {
             render_view('errors/notfound', [], null);
         }
-        if (AccessService::member($channel['id'], (int) $user['id'])) {
+        // Actor array (guest_id branch) — see channelLink.
+        if (AccessService::member($channel['id'], $user)) {
             redirect('/app?channel=' . rawurlencode($channel['slug']));
         }
         render_view('chat/join', [

@@ -101,7 +101,7 @@ final class MessengerController
         if (login_attempt_count() >= login_attempt_max()) {
             json_out(['error' => 'Too many failed attempts. Please wait a few minutes and try again.'], 429);
         }
-        if (!TotpService::verify((string) $row['totp_secret'], $code)) {
+        if (!TotpService::verify((string) $row['totp_secret'], $code, 1, (int) $row['id'])) {
             login_attempt_record();
             json_out(['error' => 'Invalid authentication code. Try again.'], 401);
         }

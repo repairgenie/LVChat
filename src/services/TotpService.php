@@ -104,8 +104,10 @@ final class TotpService
     }
 
     /** Verify a user-supplied code, tolerating ±$window 30-second steps of clock drift.
-     *  Tracks used counters to prevent replay within the window. */
-    public static function verify(string $secretB32, string $code, int $window = 1): bool
+     *  Tracks used counters PER USER to prevent replay within the window — a
+     *  global counter store would let one user's successful logins block every
+     *  other MFA login that shares the 30-second bucket. */
+    public static function verify(string $secretB32, string $code, int $window = 1, ?int $userId = null): bool
     {
         $code = (string) preg_replace('/\s+/', '', $code);
         if (!preg_match('/^\d{' . self::DIGITS . '}$/', $code)) {
@@ -115,10 +117,14 @@ final class TotpService
         for ($i = -$window; $i <= $window; $i++) {
             $counter = intdiv($now + $i * self::PERIOD, self::PERIOD);
             // Skip already-used counters to prevent replay.
-            $used = Database::scalar(
-                'SELECT 1 FROM totp_used_counters WHERE counter = ? AND expires_at > datetime("now") LIMIT 1',
-                [$counter]
-            );
+            if ($userId !== null) {
+                $used = Database::scalar(
+                    'SELECT 1 FROM totp_used_counters WHERE user_id = ? AND counter = ? AND expires_at > datetime("now") LIMIT 1',
+                    [$userId, $counter]
+                );
+            } else {
+                $used = false;
+            }
             if ($used) {
                 continue;
             }
@@ -126,19 +132,21 @@ final class TotpService
                 // Record this counter as used (expires after 2 windows).
                 // Use INSERT (not OR IGNORE) so a concurrent duplicate throws,
                 // which we catch below to detect a race.
-                try {
-                    Database::query(
-                        'INSERT INTO totp_used_counters (counter, expires_at) VALUES (?, datetime("now", "+120 seconds"))',
-                        [$counter]
-                    );
-                } catch (\PDOException $e) {
-                    // SQLSTATE 23000 = integrity constraint violation (unique
-                    // key duplicate).  This is the concurrent-replay race.
-                    // Any other PDOException (disk full, corruption) propagates.
-                    if ($e->getCode() === '23000') {
-                        continue;
+                if ($userId !== null) {
+                    try {
+                        Database::query(
+                            'INSERT INTO totp_used_counters (user_id, counter, expires_at) VALUES (?, ?, datetime("now", "+120 seconds"))',
+                            [$userId, $counter]
+                        );
+                    } catch (\PDOException $e) {
+                        // SQLSTATE 23000 = integrity constraint violation (unique
+                        // key duplicate).  This is the concurrent-replay race.
+                        // Any other PDOException (disk full, corruption) propagates.
+                        if ($e->getCode() === '23000') {
+                            continue;
+                        }
+                        throw $e;
                     }
-                    throw $e;
                 }
                 return true;
             }

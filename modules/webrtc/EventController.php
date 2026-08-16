@@ -380,6 +380,30 @@ final class EventController
     /** GET /event/{slug} — event channel landing */
     public static function landing(array $params): void
     {
+        // Rate limit landing requests per IP: the slug is the access credential
+        // for private events, so brute-force enumeration must be throttled even
+        // with a 128-bit slug. Tracked in the DB keyed by IP so clearing cookies
+        // can't reset the budget.
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            $ip = 'unknown';
+        }
+        $hits = Database::row(
+            'SELECT hits FROM event_land_limits WHERE ip = ? AND updated_at > datetime("now", "-60 seconds")',
+            [$ip]
+        );
+        $hits = $hits ? (int) $hits['hits'] + 1 : 1;
+        if ($hits > 20) {
+            http_response_code(429);
+            header('Content-Type: text/plain; charset=utf-8');
+            exit('Too many requests. Please slow down.');
+        }
+        Database::query(
+            'INSERT INTO event_land_limits (ip, hits, updated_at) VALUES (?, ?, datetime("now"))
+             ON CONFLICT(ip) DO UPDATE SET hits = excluded.hits, updated_at = excluded.updated_at',
+            [$ip, $hits]
+        );
+
         $slug = (string) ($params['slug'] ?? '');
         $channel = ChannelService::findBySlug($slug);
         if (!$channel) {
@@ -428,7 +452,7 @@ final class EventController
     {
         $name = '';
         for ($attempt = 0; $attempt < 20; $attempt++) {
-            $candidate = '#evt-' . bin2hex(random_bytes(3));
+            $candidate = '#evt-' . bin2hex(random_bytes(16));
             if (ChannelService::find($candidate) === null) {
                 $name = $candidate;
                 break;

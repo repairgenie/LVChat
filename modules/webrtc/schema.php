@@ -118,6 +118,18 @@ return static function (PDO $pdo): void {
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_event_invites_event ON event_invites(event_id)');
     }
 
+    // Per-IP landing rate limit for /event/{slug} (the slug is the private
+    // event's access credential; enumeration must be throttled by IP).
+    if (!in_array('event_land_limits', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE event_land_limits (
+              ip TEXT PRIMARY KEY,
+              hits INTEGER NOT NULL DEFAULT 1,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"
+        );
+    }
+
     // Add event_id column to channels (links a channel to its event).
     if (!in_array('event_id', $channels, true)) {
         $pdo->exec('ALTER TABLE channels ADD COLUMN event_id INTEGER REFERENCES events(id)');

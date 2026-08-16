@@ -353,6 +353,64 @@ final class ChannelService
         );
     }
 
+    /**
+     * Channels a VIEWER is entitled to know about, selected from the TARGET's
+     * memberships: shared channels (both belong, excluding event channels whose
+     * slug is the access credential) plus public, non-event channels the target
+     * belongs to. Self-viewing returns the full list. Used by /whois and the
+     * profile page so private/secret channel names — and the 128-bit event slug
+     * credential — never leak to third parties.
+     */
+    public static function visibleChannelNames(array $target, array $viewer): array
+    {
+        $viewerIsGuest = (int) ($viewer['guest'] ?? 0) === 1;
+        $targetIsRegistered = (int) ($target['guest'] ?? 0) !== 1;
+        $self = (int) ($viewer['id'] ?? 0) === (int) ($target['id'] ?? 0)
+            && (int) ($viewer['guest'] ?? 0) === (int) ($target['guest'] ?? 0);
+        if ($self) {
+            return self::joinedChannelNames($target);
+        }
+        $out = [];
+        $seen = [];
+        if ($targetIsRegistered) {
+            if (!$viewerIsGuest) {
+                $shared = Database::all(
+                    'SELECT c.name, c.slug FROM channel_members v
+                     JOIN channel_members t ON t.channel_id = v.channel_id
+                     JOIN channels c ON c.id = v.channel_id
+                     WHERE v.user_id = ? AND t.user_id = ? AND c.event_id IS NULL',
+                    [(int) $viewer['id'], (int) $target['id']]
+                );
+                foreach ($shared as $c) {
+                    $out[] = ['name' => (string) $c['name'], 'slug' => (string) $c['slug']];
+                    $seen[(string) $c['name']] = true;
+                }
+            }
+            $publicCh = Database::all(
+                "SELECT c.name, c.slug FROM channel_members t
+                 JOIN channels c ON c.id = t.channel_id
+                 WHERE t.user_id = ? AND c.visibility = 'public' AND c.forbidden = 0 AND c.event_id IS NULL",
+                [(int) $target['id']]
+            );
+            foreach ($publicCh as $c) {
+                if (!isset($seen[(string) $c['name']])) {
+                    $out[] = ['name' => (string) $c['name'], 'slug' => (string) $c['slug']];
+                }
+            }
+        } else {
+            $guestPublic = Database::all(
+                "SELECT c.name, c.slug FROM channel_members t
+                 JOIN channels c ON c.id = t.channel_id
+                 WHERE t.guest_id = ? AND c.visibility = 'public' AND c.forbidden = 0 AND c.event_id IS NULL",
+                [(int) $target['id']]
+            );
+            foreach ($guestPublic as $c) {
+                $out[] = ['name' => (string) $c['name'], 'slug' => (string) $c['slug']];
+            }
+        }
+        return $out;
+    }
+
     public static function joinedChannelNames(array $actor): array
     {
         $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color, c.bg_fit, c.bg_overlay, c.channel_url';
@@ -571,9 +629,14 @@ final class ChannelService
 
     /** Channels the actor founded (used for the "My Channels" section). A
      *  channel counts when the actor is its owner OR holds founder level, so
-     *  stale/missing owner_id doesn't hide a channel the user actually owns. */
+     *  stale/missing owner_id doesn't hide a channel the user actually owns.
+     *  Guests can never found channels — and their id shares a numeric space
+     *  with user ids — so they always get an empty list. */
     public static function ownedChannels(array $actor): array
     {
+        if (Auth::isGuest($actor)) {
+            return [];
+        }
         return Database::all(
             "SELECT DISTINCT c.*,
                 (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id

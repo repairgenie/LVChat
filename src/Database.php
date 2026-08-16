@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '36';
+    private const SCHEMA_VERSION = '37';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -343,10 +343,20 @@ final class Database
             $pdo->exec('CREATE TABLE modules (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT "", version TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1, license TEXT NOT NULL DEFAULT "", license_status TEXT NOT NULL DEFAULT "", license_checked_at TEXT, license_expires_at TEXT, config TEXT, installed_at TEXT NOT NULL DEFAULT (datetime("now")), updated_at TEXT)');
         }
 
-        // TOTP replay prevention: track used counters to prevent code reuse
-        // within the ±1 verification window.
+        // TOTP replay prevention: track used counters per user to prevent code
+        // reuse within the ±1 verification window (a global counter store could
+        // be DoSed by one user blocking all other 30-second buckets).
         if (!in_array('totp_used_counters', $tables, true)) {
-            $pdo->exec('CREATE TABLE totp_used_counters (counter INTEGER PRIMARY KEY, expires_at TEXT NOT NULL)');
+            $pdo->exec('CREATE TABLE totp_used_counters (user_id INTEGER NOT NULL DEFAULT 0, counter INTEGER NOT NULL, expires_at TEXT NOT NULL, PRIMARY KEY (user_id, counter))');
+        } else {
+            // Older installs created the table keyed on counter only — migrate.
+            $cols = array_column($pdo->query('PRAGMA table_info(totp_used_counters)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('user_id', $cols, true)) {
+                $pdo->exec('ALTER TABLE totp_used_counters RENAME TO totp_used_counters_old');
+                $pdo->exec('CREATE TABLE totp_used_counters (user_id INTEGER NOT NULL DEFAULT 0, counter INTEGER NOT NULL, expires_at TEXT NOT NULL, PRIMARY KEY (user_id, counter))');
+                $pdo->exec('INSERT INTO totp_used_counters (user_id, counter, expires_at) SELECT 0, counter, expires_at FROM totp_used_counters_old');
+                $pdo->exec('DROP TABLE totp_used_counters_old');
+            }
         }
 
         // Analytics indexes (schema v16): keep range-aggregation charts off full scans.

@@ -213,11 +213,14 @@ final class SaaSService
         }
         if (Auth::isGuest($actor)) {
             $plan = self::freePlan();
+            // Guests share a numeric id space with registered users — never
+            // merge saas_overrides keyed on user ids for a guest actor (0 does
+            // not match any user).
             return self::mergeOverrides(
                 self::decode($plan['features'], self::DEFAULT_FEATURES),
                 self::decode($plan['limits'], self::DEFAULT_LIMITS),
                 self::decode($plan['qos'], self::DEFAULT_QOS),
-                (int) $actor['id']
+                0
             );
         }
         $userId = (int) $actor['id'];
