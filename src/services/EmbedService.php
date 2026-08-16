@@ -109,57 +109,122 @@ final class EmbedService
         return ['body' => $body, 'content_type' => $contentType !== '' ? $contentType : 'application/octet-stream'];
     }
 
-    /** Fetch a URL server-side with redirects, timeouts and a size cap. */
+    /** Fetch a URL server-side with redirects, timeouts and a size cap.
+     *  Redirects are followed manually so SSRF guards are re-applied to every
+     *  hop (disabling CURLOPT_FOLLOWLOCATION prevents redirect-to-internal
+     *  bypasses). */
     private static function fetch(string $url, int $maxBytes = self::MAX_BYTES): ?array
     {
         if (!function_exists('curl_init')) {
             return null;
         }
-        $ch = @curl_init($url);
-        if ($ch === false) {
-            return null;
-        }
-        $body = '';
-        $tooBig = false;
-        $headers = [];
-        $ok = curl_setopt_array($ch, [
-            CURLOPT_HEADER => false,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => self::MAX_REDIRECTS,
-            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
-            CURLOPT_TIMEOUT => self::READ_TIMEOUT,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; LVChatEmbed/1.0)',
-            CURLOPT_HTTPHEADER => ['Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'],
-            CURLOPT_ENCODING => '',
-            CURLOPT_WRITEFUNCTION => function ($ch, string $data) use (&$body, &$tooBig, $maxBytes): int {
+        // Wall-clock budget across ALL hops: an attacker-controlled redirect
+        // chain cannot stall the daemon beyond ~2x the per-hop read timeout.
+        $deadline = microtime(true) + self::READ_TIMEOUT * 2;
+        // Total body budget across all hops (redirect bodies are discarded):
+        // prevents a chain of huge intermediate responses from exhausting memory.
+        $totalBytes = 0;
+        $current = $url;
+        for ($hop = 0; $hop <= self::MAX_REDIRECTS; $hop++) {
+            if (microtime(true) > $deadline) {
+                return null;
+            }
+            // Validate the target host on EVERY hop.
+            $scheme = strtolower((string) parse_url($current, PHP_URL_SCHEME));
+            $host = parse_url($current, PHP_URL_HOST);
+            if (!in_array($scheme, ['http', 'https'], true) || $host === null || $host === false || $host === '') {
+                return null;
+            }
+            if (self::isLocalTarget($host)) {
+                return null;
+            }
+            // Re-check the per-hop host against the banned-URL list too.
+            if (is_callable('UrlBanService::isBanned') && UrlBanService::isBanned($host)) {
+                return null;
+            }
+            // Resolve DNS once and pin the validated IP with CURLOPT_RESOLVE so
+            // curl cannot re-resolve (DNS rebinding TOCTOU) to a private address
+            // between the SSRF check and the actual connection. '' = IP literal
+            // (no pin needed); null = rejected.
+            $resolve = self::pinnedResolve($current);
+            if ($resolve === null) {
+                return null;
+            }
+            $ch = @curl_init($current);
+            if ($ch === false) {
+                return null;
+            }
+            $body = '';
+            $tooBig = false;
+            $headers = [];
+            $opt = [
+                CURLOPT_HEADER => false,
+                CURLOPT_FOLLOWLOCATION => false, // handled manually below
+                CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
+                CURLOPT_TIMEOUT => self::READ_TIMEOUT,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; LVChatEmbed/1.0)',
+                CURLOPT_HTTPHEADER => ['Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'],
+                CURLOPT_ENCODING => '',
+            ];
+            if ($resolve !== '') {
+                $opt[CURLOPT_RESOLVE] = [$resolve];
+            }
+            // Track both the per-hop body cap AND the total across hops.
+            $opt[CURLOPT_WRITEFUNCTION] = function ($ch, string $data) use (&$body, &$tooBig, &$totalBytes, $maxBytes): int {
                 $len = strlen($data);
-                if (strlen($body) + $len > $maxBytes) {
+                if (strlen($body) + $len > $maxBytes || $totalBytes + $len > $maxBytes * (self::MAX_REDIRECTS + 1)) {
                     $tooBig = true;
                     return -1;
                 }
                 $body .= $data;
+                $totalBytes += $len;
                 return $len;
-            },
-            CURLOPT_HEADERFUNCTION => function ($ch, string $line) use (&$headers): int {
+            };
+            $opt[CURLOPT_HEADERFUNCTION] = function ($ch, string $line) use (&$headers): int {
                 $headers[] = $line;
                 return strlen($line);
-            },
-        ]);
-        if (!$ok) {
+            };
+            $ok = curl_setopt_array($ch, $opt);
+            if (!$ok) {
+                curl_close($ch);
+                return null;
+            }
+            @curl_exec($ch);
+            $code = (int) @curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $final = (string) @curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
             curl_close($ch);
-            return null;
-        }
-        @curl_exec($ch);
-        $code = (int) @curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        $final = (string) @curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-        curl_close($ch);
 
-        if ($tooBig || $body === '' || $code < 200 || $code >= 400) {
-            return null;
+            if ($tooBig) {
+                return null;
+            }
+            if ($code >= 300 && $code < 400) {
+                // Redirect — extract the Location header and loop with the guard
+                // re-applied on the next hop's host.
+                $location = null;
+                foreach ($headers as $line) {
+                    if (stripos($line, 'location:') === 0) {
+                        $location = trim(substr($line, 9));
+                        break;
+                    }
+                }
+                if ($location === null || $location === '') {
+                    return null;
+                }
+                $next = self::resolveUrl($current, $location);
+                if ($next === null) {
+                    return null;
+                }
+                $current = $next;
+                continue;
+            }
+            if ($body === '' || $code < 200 || $code >= 400) {
+                return null;
+            }
+            return ['body' => $body, 'headers' => $headers, 'final_url' => $final !== '' ? $final : $current];
         }
-        return ['body' => $body, 'headers' => $headers, 'final_url' => $final !== '' ? $final : $url];
+        return null;
     }
 
     /** Strip framing blocks and, for HTML, make relative resources resolve +
@@ -374,6 +439,65 @@ final class EmbedService
         return $origin . $path . $query . $frag;
     }
 
+    /** Resolve a host once and return a CURLOPT_RESOLVE pin entry
+     *  ("host:port:ip") for the first validated non-local address, or '' when
+     *  the URL already uses an IP literal (no DNS → no rebinding TOCTOU), or
+     *  null when the host cannot be safely validated. The LVC_EMBED_ALLOW_LOCAL
+     *  override (test harness only) disables the non-routable rejection. */
+    private static function pinnedResolve(string $url): ?string
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $port = parse_url($url, PHP_URL_PORT) ?: ($scheme === 'https' ? 443 : 80);
+        if ($host === null || $host === false || $host === '') {
+            return null;
+        }
+        $allowLocal = getenv('LVC_EMBED_ALLOW_LOCAL') === '1';
+        $host = trim($host, '[]');
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            // IPv6 literal: no DNS resolution happens, so no pin is needed.
+            // CURLOPT_RESOLVE cannot represent unbracketed IPv6 host + colons,
+            // and emitting a pin for one breaks the whole transfer.
+            return $allowLocal ? '' : (self::isNonRoutable(strtolower($host)) ? null : '');
+        }
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            if (!$allowLocal && self::isNonRoutable($host)) {
+                return null;
+            }
+            // An IPv4 literal also resolves without DNS; a pin would be harmless
+            // but pointless, so skip it.
+            return '';
+        }
+        $ips = @gethostbynamel($host);
+        if (!is_array($ips)) {
+            $ips = [];
+        }
+        $recs = @dns_get_record($host, DNS_AAAA);
+        if (is_array($recs)) {
+            foreach ($recs as $r) {
+                if (($r['type'] ?? '') === 'AAAA' && !empty($r['ipv6'])) {
+                    $ips[] = $r['ipv6'];
+                }
+            }
+        }
+        if ($ips === []) {
+            return null;
+        }
+        foreach ($ips as $ip) {
+            $ip = strtolower((string) $ip);
+            // Any private/reserved resolved address disqualifies the host.
+            if (!$allowLocal && self::isNonRoutable($ip)) {
+                return null;
+            }
+        }
+        $first = strtolower((string) $ips[0]);
+        // Bracketed IPv6 addresses are the documented CURLOPT_RESOLVE form.
+        if (filter_var($first, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return sprintf('%s:%d:[%s]', $host, $port, $first);
+        }
+        return sprintf('%s:%d:%s', $host, $port, $first);
+    }
+
     /** Reject hosts that resolve to loopback / private / link-local addresses
      *  (SSRF guard) or that cannot be resolved at all. The LVC_EMBED_ALLOW_LOCAL
      *  env override (test harness only) lets loopback targets through so the
@@ -429,11 +553,59 @@ final class EmbedService
             return false;
         }
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $bin = @inet_pton($ip);
+            if ($bin === false || strlen($bin) !== 16) {
+                return true; // unparseable — refuse
+            }
             $v = strtolower($ip);
-            if (str_contains($v, '%')) return true; // zone id
-            if ($v === '::' || $v === '::1') return true;
-            if (str_starts_with($v, 'fe80:')) return true;
-            if (str_starts_with($v, 'fc') || str_starts_with($v, 'fd')) return true;
+            // Byte-based checks defeat expanded textual forms (0:0:0:0:0:0:0:1,
+            // ::ffff:... vs ::ffff:hex, etc.) that prefix-string matching misses.
+            // ::1 and :: (all-zero with trailing 1 / all-zero).
+            if ($bin === "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                || $bin === "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01") {
+                return true;
+            }
+            // Zone id: refuse (parsed from %zone by parse_url elsewhere).
+            if (str_contains($v, '%')) return true;
+            // IPv4-mapped (::ffff:a.b.c.d): bytes 0-9 zero, bytes 10-11 are ff ff.
+            if (substr($bin, 0, 10) === "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                && substr($bin, 10, 2) === "\xff\xff") {
+                $v4 = inet_ntop(substr($bin, 12, 4));
+                return $v4 === false || self::isNonRoutable($v4);
+            }
+            // IPv4-compatible (::a.b.c.d): bytes 0-11 zero, final 4 are the v4.
+            if (substr($bin, 0, 12) === "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00") {
+                $v4 = inet_ntop(substr($bin, 12, 4));
+                return $v4 === false || self::isNonRoutable($v4);
+            }
+            // NAT64 well-known prefix (64:ff9b::/96): bytes 0-3 are 0x00 0x64 0xff 0x9b
+            // (16-bit groups "64" and "ff9b"), bytes 4-11 zero, final 4 bytes
+            // are the embedded IPv4.
+            if (substr($bin, 0, 4) === "\x00\x64\xff\x9b" && substr($bin, 4, 8) === "\x00\x00\x00\x00\x00\x00\x00\x00") {
+                $v4 = inet_ntop(substr($bin, 12, 4));
+                return $v4 === false || self::isNonRoutable($v4);
+            }
+            // 6to4 (2002::/16): bytes 2-5 are the embedded IPv4 in network order.
+            if (substr($bin, 0, 2) === "\x20\x02") {
+                $v4 = inet_ntop(substr($bin, 2, 4));
+                return $v4 === false || self::isNonRoutable($v4);
+            }
+            // Teredo (2001::/32): first 4 bytes 20 01 00 00.
+            if (substr($bin, 0, 4) === "\x20\x01\x00\x00") {
+                return true;
+            }
+            // Link-local / link-local multicast: first 10 bits 1111111010.
+            if ((ord($bin[0]) & 0xff) === 0xfe && (ord($bin[1]) & 0xc0) === 0x80) {
+                return true;
+            }
+            // Unique local (fc00::/7) — first 7 bits 1111110.
+            if ((ord($bin[0]) & 0xfe) === 0xfc) {
+                return true;
+            }
+            // IPv6 multicast (ff00::/8) and unspecified/broadcast-ish ranges.
+            if (ord($bin[0]) === 0xff) {
+                return true;
+            }
             return false;
         }
         return true;

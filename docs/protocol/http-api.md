@@ -15,6 +15,10 @@ client only touches the push/theme/sound endpoints listed at the end.)
 - **CSRF.** Every `POST` carries the session token in a `csrf` field or the
   `X-CSRF` header (see [authentication.md](authentication.md)); failure is
   HTTP **419**.
+- **Host handling.** Absolute URLs in responses (redirects, link/magic-link
+  construction) use `APP_URL` / `TRUSTED_HOSTS` when configured; the client
+  `Host` header alone is never trusted (see
+  [installation.md](../installation.md) §3.4.1).
 - **Auth.** Every `/api/*` endpoint except `/api/version` requires a session;
   failure is **401** `{"error":"Not authenticated."}`.
 - **Dual-mode responses.** `ChatController::finish()` answers **JSON** when the

@@ -127,7 +127,10 @@ One-time tokens live in `auth_tokens` (single-use `used_at`, short `expires_at`)
 - Age gate: `ageVerified` must be true (the 18+ certification checkbox).
 - Honeypot field to discourage spam registrations.
 - Rate limited per IP via `registration_attempts` (default 20 per 10 min).
-- **First account on a fresh database becomes the admin** (`role = 'admin'`).
+- **First account on a fresh database becomes admin only when `SETUP_TOKEN`
+  is set (env) and the registration POST includes `setup_token=<value>`**
+  (constant-time `hash_equals`); otherwise the first account is a regular
+  user and no admin exists until promoted (see `docs/installation.md` §4.1).
 - When `registration_requires_approval` is on, new accounts start as
   `status = 'pending'` (can browse but not chat).
 - Stale guest rows holding the same nick are converted into the real account

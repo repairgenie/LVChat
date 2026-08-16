@@ -182,6 +182,16 @@ final class PushService
         if (!$parts || ($parts['scheme'] ?? '') !== 'https' || empty($parts['host']) || strlen($endpoint) > 500) {
             return 'Invalid push endpoint.';
         }
+        // Per-user subscription cap: unlimited endpoints would let one account
+        // register a battery of slow/hanging HTTPS hosts that every send to them
+        // synchronously awaits (fan-out latency DoS) and grow unbounded rows.
+        $count = (int) Database::scalar(
+            'SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?',
+            [(int) $user['id']]
+        );
+        if ($count >= 10) {
+            return 'Too many push subscriptions for this account (max 10).';
+        }
         $p256 = self::b64uDecode($p256dh);
         $a = self::b64uDecode($auth);
         if (strlen($p256) !== 65) {
@@ -420,9 +430,16 @@ final class PushService
             return;
         }
         $active = null;
+        // Total wall-clock bound: even if many handles hang at the per-handle
+        // 2.5s timeout, the whole batch must not stall the message-sender request
+        // much longer than a single handle would.
+        $deadline = microtime(true) + 3.0;
         do {
             $rc = curl_multi_exec($mh, $active);
             if ($active) {
+                if (microtime(true) > $deadline) {
+                    break;
+                }
                 curl_multi_select($mh, 0.1);
             }
         } while ($active && $rc === CURLM_OK);
@@ -580,7 +597,7 @@ final class PushService
         if ($email !== '') {
             return 'mailto:' . $email;
         }
-        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        $host = trusted_host();
         $host = preg_replace('/:\d+$/', '', $host) ?: 'localhost';
         return 'mailto:admin@' . $host;
     }

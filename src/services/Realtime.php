@@ -120,7 +120,9 @@ final class Realtime
         if ($cfg !== '') {
             return $cfg;
         }
-        $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
+        // trusted_host() validates HTTP_HOST against APP_URL/TRUSTED_HOSTS so a
+        // poisoned Host header cannot forge the WebSocket endpoint.
+        $host = trusted_host();
         // Mirror the daemon's port resolution (bin/ws-server.php): WS_PORT env
         // wins, then the ws_port config. If these ever disagreed, the browser
         // would connect to the config port while the daemon listens on the env
@@ -342,11 +344,17 @@ final class Realtime
         if (!self::enabled()) {
             return;
         }
+        // Notifications carry user_id (registered) or guest_user_id (guest) —
+        // never bind a guest id to the user_id slot (id-collision protection).
+        $col = (int) ($user['guest'] ?? 0) === 1 ? 'guest_user_id' : 'user_id';
         $count = (int) Database::scalar(
-            'SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0',
-            [(int) $user['id'], (int) $user['id']]
+            'SELECT COUNT(*) FROM notifications WHERE ' . $col . ' = ? AND read = 0',
+            [(int) $user['id']]
         );
-        self::publish(['type' => 'bell', 'user_id' => (int) $user['id'], 'notify_count' => $count]);
+        // Include the guest flag so the gateway matches id AND identity (guest
+        // and user ids share a numeric space — a bare id match would leak the
+        // colliding identity's unread count).
+        self::publish(['type' => 'bell', 'user_id' => (int) $user['id'], 'guest' => (int) ($user['guest'] ?? 0), 'notify_count' => $count]);
     }
 
     /**

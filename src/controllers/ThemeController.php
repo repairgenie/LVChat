@@ -53,7 +53,7 @@ final class ThemeController
     /** POST /api/theme — save the viewer's personal theme. */
     public static function save(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         self::customizationAllowed();
 
@@ -90,7 +90,7 @@ final class ThemeController
     /** POST /api/theme/bg — upload the viewer's chat background image. */
     public static function uploadBg(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         self::customizationAllowed();
 
@@ -115,7 +115,7 @@ final class ThemeController
     /** POST /api/theme/bg/remove — clear the viewer's chat background image. */
     public static function removeBg(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         self::customizationAllowed();
 

@@ -126,8 +126,8 @@ final class ChatController
              LEFT JOIN users s ON s.id = n.sender_id
              LEFT JOIN guests gs ON gs.id = n.sender_guest_id
              LEFT JOIN channels c ON c.id = n.channel_id
-             WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
-            [$user['id'], $user['id']]
+             WHERE ' . (MessageService::isGuest($user) ? 'n.guest_user_id = ?' : 'n.user_id = ?') . ' AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
+            [$user['id']]
         );
         $onlineUsers = Database::all(
             "SELECT id, username, role, guest, away, status_mode FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND status_mode != 'invisible'
@@ -611,7 +611,10 @@ final class ChatController
              ORDER BY username COLLATE NOCASE"
         );
 
-        $notifyCount = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0', [$user['id'], $user['id']]);
+        $notifyCount = (int) Database::scalar(
+            'SELECT COUNT(*) FROM notifications WHERE ' . (MessageService::isGuest($user) ? 'guest_user_id = ?' : 'user_id = ?') . ' AND read = 0',
+            [$user['id']]
+        );
         $out['notify_count'] = $notifyCount;
         // Live DM sidebar data — returned on every poll regardless of which page
         // the user is on, so a DM sent to someone sitting in a channel surfaces.
@@ -700,8 +703,8 @@ final class ChatController
                 'SELECT n.kind, COALESCE(s.username, gs.nick) AS sender, n.sender_id, n.message_id FROM notifications n
                  LEFT JOIN users s ON s.id = n.sender_id
                  LEFT JOIN guests gs ON gs.id = n.sender_guest_id
-                 WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.channel_id = ? AND n.read = 0',
-                [$user['id'], $user['id'], $channel['id']]
+                 WHERE ' . (MessageService::isGuest($user) ? 'n.guest_user_id = ?' : 'n.user_id = ?') . ' AND n.channel_id = ? AND n.read = 0',
+                [$user['id'], $channel['id']]
             );
             return $out;
         }
@@ -795,6 +798,15 @@ final class ChatController
     public static function stream(): void
     {
         $user = self::requireUser();
+        // Stream-open throttle: each SSE connection pins a PHP worker, so one
+        // account must not be able to churn hundreds of them. The rt_transports
+        // row is one-per-actor (PK), so throttle on open rate via session.
+        $lastStream = (int) ($_SESSION['last_sse_ts'] ?? 0);
+        $streamDelta = time() - $lastStream;
+        if ($streamDelta >= 0 && $streamDelta < 2) {
+            self::finish(['error' => 'Too many streaming connections. Please close other tabs.'], '/app', 429);
+        }
+        $_SESSION['last_sse_ts'] = time();
         $since = max(0, (int) ($_GET['since'] ?? 0));
 
         header('Content-Type: text/event-stream');
@@ -921,7 +933,7 @@ final class ChatController
         // Rate-limit search queries: max 20 per minute.
         $lastSearch = (int) ($_SESSION['last_search_ts'] ?? 0);
         if (time() - $lastSearch < 3) {
-            self::finish(['error' => 'Search is rate-limited. Please wait.'], null, 429);
+            json_out(['error' => 'Search is rate-limited. Please wait.'], 429);
         }
         $_SESSION['last_search_ts'] = time();
         $term = trim((string) ($_GET['q'] ?? ''));
@@ -992,8 +1004,8 @@ final class ChatController
              LEFT JOIN users s ON s.id = n.sender_id
              LEFT JOIN guests gs ON gs.id = n.sender_guest_id
              LEFT JOIN channels c ON c.id = n.channel_id
-             WHERE (n.user_id = ? OR n.guest_user_id = ?) AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
-            [$user['id'], $user['id']]
+             WHERE ' . (MessageService::isGuest($user) ? 'n.guest_user_id = ?' : 'n.user_id = ?') . ' AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
+            [$user['id']]
         );
         foreach ($rows as &$r) {
             $r['created_at'] = relative_time($r['created_at']);
@@ -1005,7 +1017,13 @@ final class ChatController
     {
         $user = self::requireUser();
         self::requireCsrf();
-        Database::query('UPDATE notifications SET read = 1 WHERE user_id = ? OR guest_user_id = ?', [$user['id'], $user['id']]);
+        // Notifications carry user_id (registered) or guest_user_id (guest) —
+        // never bind a guest id to the user_id slot (id-collision protection).
+        if (MessageService::isGuest($user)) {
+            Database::query('UPDATE notifications SET read = 1 WHERE guest_user_id = ?', [$user['id']]);
+        } else {
+            Database::query('UPDATE notifications SET read = 1 WHERE user_id = ?', [$user['id']]);
+        }
         json_out(['ok' => true]);
     }
 
@@ -1015,9 +1033,15 @@ final class ChatController
         self::requireCsrf();
         $id = (int) ($_POST['id'] ?? 0);
         if ($id > 0) {
-            Database::query('DELETE FROM notifications WHERE id = ? AND (user_id = ? OR guest_user_id = ?)', [$id, $user['id'], $user['id']]);
+            if (MessageService::isGuest($user)) {
+                Database::query('DELETE FROM notifications WHERE id = ? AND guest_user_id = ?', [$id, $user['id']]);
+            } else {
+                Database::query('DELETE FROM notifications WHERE id = ? AND user_id = ?', [$id, $user['id']]);
+            }
         }
-        $count = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE (user_id = ? OR guest_user_id = ?) AND read = 0', [$user['id'], $user['id']]);
+        $count = (int) (MessageService::isGuest($user)
+            ? Database::scalar('SELECT COUNT(*) FROM notifications WHERE guest_user_id = ? AND read = 0', [$user['id']])
+            : Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [$user['id']]));
         json_out(['ok' => true, 'notify_count' => $count]);
     }
 
@@ -1082,7 +1106,7 @@ final class ChatController
             [(int) $user['id']]
         );
         if ($recentReports >= 10) {
-            self::finish(['error' => 'You are submitting reports too quickly. Slow down.'], null, 429);
+            json_out(['error' => 'You are submitting reports too quickly. Slow down.'], 429);
         }
         $id = (int) ($_POST['id'] ?? 0);
         $pm = ($_POST['pm'] ?? '0') === '1';
@@ -1114,13 +1138,16 @@ final class ChatController
             if (!$row) {
                 json_out(['error' => 'Message not found.'], 404);
             }
-            // Reporter must be one of the two participants.
-            $meU = $isGuest ? 0 : (int) $user['id'];
-            $meG = $isGuest ? (int) $user['id'] : 0;
-            $involved = ($row['sender_id'] === null ? 0 : (int) $row['sender_id']) === $meU
-                || ($row['recipient_id'] === null ? 0 : (int) $row['recipient_id']) === $meU
-                || ($row['sender_guest_id'] === null ? 0 : (int) $row['sender_guest_id']) === $meG
-                || ($row['recipient_guest_id'] === null ? 0 : (int) $row['recipient_guest_id']) === $meG;
+            // Reporter must be one of the two participants — matched against the
+            // actor's own identity column only (a registered reporter may not
+            // test the guest columns with a 0, and vice versa).
+            if ($isGuest) {
+                $involved = (int) $row['sender_guest_id'] === (int) $user['id']
+                    || (int) $row['recipient_guest_id'] === (int) $user['id'];
+            } else {
+                $involved = (int) $row['sender_id'] === (int) $user['id']
+                    || (int) $row['recipient_id'] === (int) $user['id'];
+            }
             if (!$involved) {
                 json_out(['error' => 'You cannot report this message.'], 403);
             }

@@ -46,6 +46,11 @@ final class EventController
         if (!$u) {
             json_out(['error' => 'Not signed in.'], 401);
         }
+        // Events key on registered user ids (founder_id) — guests must not act
+        // on events via a colliding guest id.
+        if ((int) ($u['guest'] ?? 0) === 1) {
+            json_out(['error' => 'Registered users only.'], 401);
+        }
         return $u;
     }
 
@@ -396,7 +401,10 @@ final class EventController
         }
 
         $status = ChannelService::joinStatus($channel, $user);
-        if (!$status['ok'] && $status['reason'] !== 'already_member') {
+        // The landing link itself is the invite: an unguessable event slug
+        // grants access, so invite_only must not block a logged-in visitor.
+        // Moderation (bans / akicks / forbidden) still applies via joinStatus.
+        if (!$status['ok'] && !in_array($status['reason'], ['already_member', 'This channel is invite-only.'], true)) {
             render_view('chat/denied', [
                 'channel' => $channel,
                 'reason' => $status['reason'],

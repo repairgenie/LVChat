@@ -28,6 +28,11 @@ CommandRegistry::register('memo', [
     'desc' => 'Send and manage offline memos.',
     'usage' => '/memo <send <nick> <message>|read [id]|list|del <id>|summary|set <notify|silent>>',
     'run' => function (array $args, array $user, ?array $channel) {
+        // Memos reference only registered user ids — a guest's numeric id would
+        // collide with a registered user's memos (read/delete/sender-spoof).
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $sub = strtolower($args[0] ?? 'list');
         $me = (int) $user['id'];
         switch ($sub) {
@@ -117,7 +122,7 @@ CommandRegistry::register('ms', [
     'desc' => 'Alias of /memo.',
     'usage' => '/ms <command> [args]',
     'run' => function (array $args, array $user, ?array $channel) {
-        $reg = CommandRegistry::get('memo');
-        return call_user_func($reg['run'], $args, $user, $channel);
+        // Re-enter the parser so the /memo handler's own gates apply.
+        return CommandParser::run('/memo' . ($args ? ' ' . implode(' ', $args) : ''), $user, $channel);
     },
 ]);

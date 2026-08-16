@@ -43,19 +43,27 @@ final class AccessService
         );
     }
 
-    /** Effective level of an actor in a channel: access-list first, then membership, else 'normal'. */
+    /** Effective level of an actor in a channel: access-list first, then membership, else 'normal'.
+     *  Guests never inherit access-list levels: channel_access rows reference
+     *  registered user ids, and guests share a numeric id space with users by
+     *  coincidence of independent AUTOINCREMENT sequences. */
     public static function effectiveLevel(int|string $channelId, int|array $actor): string
     {
+        $isGuest = is_array($actor) ? Auth::isGuest($actor) : false;
         $id = is_array($actor) ? (int) $actor['id'] : (int) $actor;
-        $access = Database::row(
-            'SELECT level FROM channel_access WHERE channel_id = ? AND user_id = ?',
-            [$channelId, $id]
-        );
-        if ($access) {
-            $level = (string) $access['level'];
-        } else {
+        if ($isGuest) {
             $m = self::member($channelId, $actor);
             $level = $m ? (string) $m['level'] : 'normal';
+        } else {
+            $access = Database::row(
+                'SELECT level FROM channel_access WHERE channel_id = ? AND user_id = ?',
+                [$channelId, $id]
+            );
+            $level = $access ? (string) $access['level'] : 'normal';
+            if (!$access) {
+                $m = self::member($channelId, $actor);
+                $level = $m ? (string) $m['level'] : 'normal';
+            }
         }
         // Helper roles are always at least half-op in any channel.
         if (self::actorIsHelper($actor) && level_weight($level) < level_weight('halfop')) {

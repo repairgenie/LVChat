@@ -13,7 +13,11 @@ Related guides: see `installation.md` for deploying/upgrading the server; see
 
 ## 1. Becoming an administrator
 
-- **First account on a fresh server** is automatically the admin.
+- **First account on a fresh server** is granted admin **only when a
+  `SETUP_TOKEN` is configured** (env) and submitted at registration
+  (`setup_token` POST field) — see `installation.md §4.1`. Without it, promote
+  yourself via SQLite as a one-time escalation:
+  `UPDATE users SET role='admin' WHERE username='you';`.
 - **Promoting others:** on **Admin → Users**, use *Make admin* / *Make staff*.
 - **O:lines (`/oper`):** instead of a shared password, create a per-user
   **o:line** on **Admin → O-lines** (username + password + operator class). The
@@ -379,6 +383,7 @@ operclass permissions**.
 | **Presence throttle (s)** | How often the server writes "last seen" per user (default 30; raises scale by making most polls read-only) |
 | **Poll interval (s)** | Client realtime poll frequency (default 2; raise to 3–5 to cut request volume) |
 | **Realtime mode** | `Polling` (shared-hosting friendly) or `SSE` (streams updates per client; holds a PHP worker each — use on php-fpm/VPS) |
+| **MFA required** | Per-role TOTP enrollment: `mfa_require_admin` (default **on**), `mfa_require_staff` (off), `mfa_require_user` (off). When on, affected users must set up an authenticator app at login before the app opens |
 | **Email (SMTP)** | Host, port, encryption (STARTTLS / SSL / none), username, password, from address/name. Used for invite, welcome, and support-reply emails. |
 | **Licensing** | **License server URL** (`license_url`), **offline policy** (`license_policy`: `grace`/`strict`/`offline`), **grace days** (`license_grace_days`), **re-check interval hours** (`license_recheck_hours`). Paid modules validate their key offline first (Ed25519 signature), then ask the license server to confirm it exists/active/within seat budget. See `docs/protocol/licensing.md`. |
 
@@ -651,6 +656,9 @@ DESC LIMIT 100;"`).
 | `giphy_api_key` | — | Giphy key; the server proxies all search/trending |
 | `webhooks_enabled` | `1` | Master switch for incoming webhooks |
 | `peak_online` | `0` | All-time concurrent peak (tracked automatically) |
+| `mfa_require_admin` | `1` | Admins must enroll TOTP at login (first admin login on a fresh install forces setup) |
+| `mfa_require_staff` | `0` | Staff-role users must enroll TOTP at login |
+| `mfa_require_user` | `0` | All registered users must enroll TOTP at login |
 | `presence_throttle` | `30` | Seconds between per-user "last seen" writes |
 | `poll_interval` | `2` | Client realtime poll interval in seconds |
 | `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |

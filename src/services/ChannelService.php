@@ -178,6 +178,11 @@ final class ChannelService
 
         $needInvite = (int) $channel['invite_only'] === 1 || $channel['visibility'] === 'secret';
         if ($needInvite) {
+            // Invites reference registered user ids only — guests can never
+            // satisfy an invite check via a colliding numeric id.
+            if (Auth::isGuest($user)) {
+                return ['ok' => false, 'reason' => 'This channel is invite-only.', 'needsKey' => false];
+            }
             $invited = Database::row(
                 'SELECT * FROM invites WHERE channel_id = ? AND user_id = ?',
                 [$channel['id'], $user['id']]
@@ -192,19 +197,22 @@ final class ChannelService
     public static function join(array $channel, array $user): void
     {
         $level = 'normal';
-        $access = Database::row(
-            'SELECT level FROM channel_access WHERE channel_id = ? AND user_id = ?',
-            [$channel['id'], $user['id']]
-        );
-        if ($access) {
-            $level = $access['level'];
-        }
         if (Auth::isGuest($user)) {
+            // Guests never inherit access-list levels: channel_access rows
+            // reference registered user ids, and guest ids are a separate
+            // AUTOINCREMENT sequence that can collide with user ids.
             Database::query(
-                'INSERT OR IGNORE INTO channel_members (channel_id, guest_id, level) VALUES (?, ?, ?)',
-                [$channel['id'], $user['id'], $level]
+                'INSERT OR IGNORE INTO channel_members (channel_id, guest_id, level) VALUES (?, ?, "normal")',
+                [$channel['id'], $user['id']]
             );
         } else {
+            $access = Database::row(
+                'SELECT level FROM channel_access WHERE channel_id = ? AND user_id = ?',
+                [$channel['id'], $user['id']]
+            );
+            if ($access) {
+                $level = $access['level'];
+            }
             Database::query(
                 'INSERT OR IGNORE INTO channel_members (channel_id, user_id, level) VALUES (?, ?, ?)',
                 [$channel['id'], $user['id'], $level]

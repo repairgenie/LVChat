@@ -28,6 +28,12 @@ CommandRegistry::register('vhost', [
     'desc' => 'Set, activate or deactivate a virtual host (hostname).',
     'usage' => '/vhost <set <host>|on|off|status>',
     'run' => function (array $args, array $user, ?array $channel) {
+        // vhost writes the users table — guests live in `guests` (their
+        // "vhost" concept does not exist) and must never mutate a registered
+        // user's row via a colliding guest id.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $sub = strtolower($args[0] ?? 'status');
         switch ($sub) {
             case 'set':
@@ -70,7 +76,7 @@ CommandRegistry::register('hs', [
     'desc' => 'Alias of /vhost.',
     'usage' => '/hs <command> [args]',
     'run' => function (array $args, array $user, ?array $channel) {
-        $reg = CommandRegistry::get('vhost');
-        return call_user_func($reg['run'], $args, $user, $channel);
+        // Re-enter the parser so the /vhost handler's own gates apply.
+        return CommandParser::run('/vhost' . ($args ? ' ' . implode(' ', $args) : ''), $user, $channel);
     },
 ]);

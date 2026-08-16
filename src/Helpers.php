@@ -50,12 +50,61 @@ function url(string $path): string
 }
 
 function base_url(): string
+    {
+        $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+        $scheme = $https ? 'https' : 'http';
+        $host = trusted_host();
+        $dir = rtrim(str_replace('/index.php', '', $_SERVER['SCRIPT_NAME'] ?? ''), '/');
+        return $scheme . '://' . $host . $dir;
+    }
+
+/** Resolve the canonical host for this request WITHOUT trusting the
+ *  client-supplied Host header blindly:
+ *   1. APP_URL (env, e.g. https://chat.example.com) wins when set.
+ *   2. TRUSTED_HOSTS (env, comma-separated hostnames) — only those exact
+ *      hosts are accepted from the Host header.
+ *   3. Otherwise fall back to SERVER_NAME (server-configured) and reject the
+ *      Host header entirely. This prevents host-header poisoning of emailed
+ *      password-reset / magic-link / invite URLs.
+ *  The returned value never contains scheme, path, or control characters. */
+function trusted_host(): string
 {
-    $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-    $scheme = $https ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $dir = rtrim(str_replace('/index.php', '', $_SERVER['SCRIPT_NAME'] ?? ''), '/');
-    return $scheme . '://' . $host . $dir;
+    $appUrl = getenv('APP_URL');
+    if ($appUrl !== false && $appUrl !== '') {
+        $parsed = parse_url((string) $appUrl);
+        if (isset($parsed['host']) && preg_match('/^[a-zA-Z0-9._\-\[\]:]+$/', $parsed['host'])) {
+            return $parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
+        }
+    }
+    $given = (string) ($_SERVER['HTTP_HOST'] ?? '');
+    $trusted = getenv('TRUSTED_HOSTS');
+    if ($trusted !== false && $trusted !== '') {
+        // Normalize allowlist entries: lowercase, host-only (strip any port).
+        $allow = [];
+        foreach (explode(',', (string) $trusted) as $entry) {
+            $clean = strtolower((string) parse_url('http://' . trim($entry), PHP_URL_HOST));
+            if ($clean !== '' && $clean !== false) {
+                $allow[] = $clean;
+            }
+        }
+        // Normalize the claimed Host the same way, then REBUILD the returned
+        // value from parsed components — never echo the raw header (userinfo /
+        // path / fragment smuggling: `Host: evil:x@good.com`, `good.com/evil`).
+        $parsed = parse_url($given !== '' ? 'http://' . $given : '');
+        $hostOnly = $parsed !== false ? strtolower((string) ($parsed['host'] ?? '')) : '';
+        if ($hostOnly !== '' && in_array($hostOnly, $allow, true)) {
+            $host = (string) $parsed['host'];
+            return $host . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
+        }
+        // Host header not allowlisted — refuse to build links from it.
+        return (string) ($_SERVER['SERVER_NAME'] ?? 'localhost');
+    }
+    // No TRUSTED_HOSTS configured: never use the client Host header.
+    $server = (string) ($_SERVER['SERVER_NAME'] ?? 'localhost');
+    if (preg_match('/^[a-zA-Z0-9._\-\[\]:]+$/', $server)) {
+        return $server;
+    }
+    return 'localhost';
 }
 
 function canonical_channel_url(string $slug): string

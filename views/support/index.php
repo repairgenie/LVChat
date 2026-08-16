@@ -58,7 +58,7 @@
         <label class="label">Description</label>
         <div class="rt-shell" data-editor="ticket-create">
           <div class="rt-toolbar" data-toolbar="ticket-create"></div>
-          <div class="rt-content" data-content="ticket-create"><?= $old['content'] ?? '' ?></div>
+          <div class="rt-content" data-content="ticket-create"><?= LegalService::sanitize((string) ($old['content'] ?? '')) ?></div>
         </div>
         <textarea name="content" id="ticket-create-content" class="hidden" required><?= h($old['content'] ?? '') ?></textarea>
       </div>

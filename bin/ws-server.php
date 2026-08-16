@@ -199,8 +199,12 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
                 break;
             case 'bell':
                 // Refresh one user's unread bell count across their open tabs.
-                $broadcast(['notify_count' => (int) ($event['notify_count'] ?? 0)], static function (array $st) use ($event): bool {
-                    return (int) ($st['user']['id'] ?? 0) === (int) ($event['user_id'] ?? -1);
+                // Match id AND guest flag (guest/user ids share a numeric space).
+                $bellUid = (int) ($event['user_id'] ?? 0);
+                $bellGuest = (int) ($event['guest'] ?? 0);
+                $broadcast(['notify_count' => (int) ($event['notify_count'] ?? 0)], static function (array $st) use ($bellUid, $bellGuest): bool {
+                    return (int) ($st['user']['id'] ?? 0) === $bellUid
+                        && (int) ($st['user']['guest'] ?? 0) === $bellGuest;
                 });
                 break;
             case 'member_removed':

@@ -236,7 +236,7 @@ final class ChannelController
     /** POST /api/channel/delete — founder deletes their channel (history preserved). */
     public static function deleteChannel(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
         if (!$channel) {
@@ -251,7 +251,7 @@ final class ChannelController
 
     public static function acceptInvite(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $slug = trim((string) ($_POST['channel'] ?? ''));
         $channel = ChannelService::findBySlug($slug);
@@ -269,7 +269,7 @@ final class ChannelController
 
     public static function declineInvite(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $slug = trim((string) ($_POST['channel'] ?? ''));
         $channel = ChannelService::findBySlug($slug);
@@ -281,11 +281,11 @@ final class ChannelController
         json_out(['ok' => true]);
     }
 
-    /** POST /api/channel/bg — channel owner sets the channel's chat background
+    /* POST /api/channel/bg — channel owner sets the channel's chat background
      *  (upload an image and/or pick a colour; empty bg_color clears the colour). */
     public static function setBackground(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
         if (!$channel) {
@@ -331,7 +331,7 @@ final class ChannelController
     /** POST /api/channel/bg/remove — channel owner clears the channel background. */
     public static function removeBackground(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $channel = ChannelService::findBySlug((string) ($_POST['channel'] ?? ''));
         if (!$channel) {
@@ -409,6 +409,9 @@ final class ChannelController
         $user = Auth::user();
         if (!$user) {
             json_out(['error' => 'Not authenticated.'], 401);
+        }
+        if ((int) ($user['guest'] ?? 0) === 1) {
+            json_out(['error' => 'Registered users only.'], 401);
         }
         Csrf::verify();
         $channel = self::settingsChannel($_POST);

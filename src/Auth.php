@@ -499,6 +499,24 @@ final class Auth
         return $u;
     }
 
+    /** Require a logged-in REGISTERED account (guests rejected). Guests share
+     *  an id space with users only by coincidence of separate AUTOINCREMENT
+     *  sequences — user-keyed writes must never run against a guest id. */
+    public static function requireAccount(): array
+    {
+        $u = self::user();
+        if (!$u) {
+            $next = $_SERVER['REQUEST_URI'] ?? '/';
+            redirect('/login?next=' . rawurlencode($next));
+        }
+        if (self::isGuest($u)) {
+            http_response_code(401);
+            header('Content-Type: application/json; charset=utf-8');
+            exit(json_encode(['error' => 'Registered users only.']));
+        }
+        return $u;
+    }
+
     public static function requireAdmin(): array
     {
         $u = self::require();

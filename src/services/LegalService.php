@@ -65,28 +65,42 @@ final class LegalService
         // Drop dangerous whole elements (and their content).
         $html = preg_replace('#<(script|style|iframe|object|embed|form|textarea|select|link|meta|base)[^>]*>.*?</\1>#is', '', $html);
         $html = preg_replace('#<(script|style|iframe|object|embed|form|textarea|select|link|meta|base)[^>]*/?>#is', '', $html);
-        // Allow a bare <a> name only if it is a safe http(s) or relative link.
+        // Re-tag every tag — both quoted AND unquoted attributes must be dealt
+        // with: a regex restricting the attribute section to quoted values let
+        // `<img src=x onerror=alert(1)>` (or `<a href=javascript:…>` or
+        // `<svg onload=…>`) pass through the sanitizer byte-for-byte.
         $html = preg_replace_callback(
-            '#<(/?)([a-zA-Z0-9]+)((?:\s+[a-zA-Z][a-zA-Z0-9:]*\s*=\s*(?:"[^"]*"|\'[^\']*\'))*)(\s*/?)>#',
+            '#<(/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>#',
             function (array $m): string {
                 $tag = strtolower($m[2]);
                 if (!in_array($tag, self::TAGS, true)) {
                     return '';
                 }
+                $attrSection = (string) $m[3];
+                // Strip any event-handler attribute (quoted or unquoted) and
+                // any unquoted expression before parsing the remainder.
+                $attrSection = preg_replace('/\s+on[a-zA-Z]+\s*(?:=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?/i', ' ', $attrSection);
+                // Also reject lone unquoted URLs that browsers treat as
+                // javascript: (e.g. <a href=javascript:alert(1)>).
+                $attrSection = preg_replace('/\s+(href|src)\s*=\s*(javascript|data|vbscript)\s*:/i', ' ', $attrSection);
                 $attrs = '';
-                if (preg_match_all('#([a-zA-Z][a-zA-Z0-9:]*)\s*=\s*("[^"]*"|\'[^\']*\')#', $m[3], $am)) {
-                    foreach ($am[1] as $i => $name) {
-                        $name = strtolower($name);
-                        if (in_array($name, ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'onchange', 'onkeydown', 'onkeyup', 'onkeypress', 'oncontextmenu', 'oncopy', 'oncut', 'onpaste', 'ondrag', 'ondrop', 'onsubmit', 'onreset', 'onselect', 'onwheel'], true)) {
+                if (preg_match_all('#([a-zA-Z][a-zA-Z0-9:_-]*)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#', $attrSection, $am, PREG_SET_ORDER)) {
+                    foreach ($am as $a) {
+                        $name = strtolower($a[1]);
+                        if (!preg_match('#^[a-zA-Z][a-zA-Z0-9:_-]*$#', $name)) {
                             continue;
                         }
-                        $val = trim($am[2][$i], "\"'");
+                        $val = trim($a[2], "\"'");
+                        // Browsers strip ASCII control characters (tab/LF/CR)
+                        // inside URLs when parsing, so java\nscript: is exactly
+                        // javascript:. Strip them BEFORE the scheme check.
+                        $val = preg_replace('/[\x00-\x1F\x7F]/', '', $val);
                         if ($name === 'href' || $name === 'src') {
-                            if (preg_match('#^(javascript|data|vbscript)\s*:#i', $val)) {
+                            if (preg_match('#^[\s]*(javascript|data|vbscript)\s*:#i', $val)) {
                                 continue;
                             }
                             $attrs .= ' ' . $name . '="' . h($val) . '"';
-                        } elseif ($tag === 'a' && $name === 'target' && $am[2][$i] === '"blank"') {
+                        } elseif ($tag === 'a' && $name === 'target' && strtolower(trim($a[2], "\"'")) === 'blank') {
                             $attrs .= ' target="_blank" rel="noopener"';
                         } elseif ($name === 'style') {
                             $style = self::safeStyle($val);
@@ -100,9 +114,10 @@ final class LegalService
                         } elseif ($name === 'type' && $val === 'checkbox') {
                             $attrs .= ' type="checkbox"';
                         }
+                        // Any other attribute (including on*) is dropped.
                     }
                 }
-                return '<' . $m[1] . $tag . $attrs . $m[4] . '>';
+                return '<' . $m[1] . $tag . $attrs . '>';
             },
             $html
         );

@@ -21,7 +21,9 @@
  * session's bearer token: after logging in the token is stored in localStorage
  * and sent as `X-LVC-Session` on every request, so the messenger works even
  * when third-party cookies are blocked (mobile Safari). The browser's session
- * cookies are still sent (credentials: 'include') for backward compatibility
+ * Auth is bearer-only (X-LVC-Session); cookies are never sent (credentials:
+ * 'omit') — the server refuses credentialed CORS for implicit origins, and
+ * bearer auth covers every endpoint including the CSRF token fetch.
  * and for resources the token doesn't cover. POSTs are form-encoded; image
  * uploads are multipart (triggers the backend's OPTIONS preflight handler).
  */
@@ -75,7 +77,7 @@ window.LvApi = (() => {
    * callers can render a helpful message instead of a blank window. */
   async function get (path) {
     try {
-      const res = await fetch(base + path, { credentials: 'include', headers: headers() })
+      const res = await fetch(base + path, { credentials: 'omit', headers: headers() })
       return res
     } catch (err) {
       return { status: 0, ok: false, res: null, error: String((err && err.message) || err) }
@@ -123,7 +125,7 @@ window.LvApi = (() => {
     try {
       res = await fetch(base + path, {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'omit',
         headers: headers({ 'content-type': 'application/x-www-form-urlencoded' }),
         body
       })
@@ -144,7 +146,7 @@ window.LvApi = (() => {
     try {
       res = await fetch(base + path, {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'omit',
         headers: headers(),
         body: formData
       })
@@ -167,7 +169,7 @@ window.LvApi = (() => {
     try {
       res = await fetch(base + '/api/messenger/login', {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'omit',
         headers: headers({ 'content-type': 'application/x-www-form-urlencoded', 'X-Messenger': '1' }),
         body: new URLSearchParams({ username, password })
       })
@@ -199,7 +201,7 @@ window.LvApi = (() => {
     try {
       res = await fetch(base + '/api/messenger/mfa', {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'omit',
         headers: headers({ 'content-type': 'application/x-www-form-urlencoded', 'X-Messenger': '1' }),
         body: new URLSearchParams({ ticket, code })
       })
@@ -224,7 +226,7 @@ window.LvApi = (() => {
       try {
         await fetch(base + '/api/messenger/logout', {
           method: 'POST',
-          credentials: 'include',
+          credentials: 'omit',
           headers: headers({ 'content-type': 'application/x-www-form-urlencoded' })
         })
       } catch (err) { /* best-effort */ }

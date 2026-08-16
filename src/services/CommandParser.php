@@ -86,9 +86,18 @@ final class CommandParser
             if (!$channel) {
                 return ['replies' => ["You must be in a channel or provide one, e.g. /$cmd #channel ..."]];
             }
+            // Membership gate: needs_channel commands operate on channels the
+            // caller actually belongs to. effectiveLevel() falls back to
+            // 'normal' for non-members, so a min_level-0 command would otherwise
+            // be usable on ANY channel by name (/topic, /chaninfo, /share, /me,
+            // /part on hidden or staff channels). Staff/opers keep their override.
+            $isStaff = $user['role'] === 'admin' || Auth::isOper($user);
+            if (!$isStaff && !AccessService::member((int) $channel['id'], $user)) {
+                return ['replies' => ["You must be a member of " . $channel['name'] . " to use /$cmd there."]];
+            }
             $level = AccessService::effectiveLevel($channel['id'], $user);
             $min = (int) $reg['min_level'];
-            if ($user['role'] !== 'admin' && !Auth::isOper($user) && level_weight($level) < $min) {
+            if (!$isStaff && level_weight($level) < $min) {
                 return ['replies' => ["You do not have permission to use /$cmd in " . $channel['name'] . '.']];
             }
         }

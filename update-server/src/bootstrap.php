@@ -26,7 +26,9 @@ declare(strict_types=1);
 define('UPDATE_ROOT', dirname(__DIR__));
 
 error_reporting(E_ALL);
-ini_set('display_errors', '1');
+// Do not leak stack traces to browsers — log server-side only.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
 
 $__cfg = [];
 $__cfgFile = UPDATE_ROOT . '/config.php';

@@ -72,10 +72,10 @@ Open <http://127.0.0.1:8000> in a browser.
 - The four default **operator classes** (`netadmin`, `serveradmin`, `globalop`,
   `localop`) and three **sound alerts** (`Ding`, `Pop`, `Chime` — generated with
   a dependency-free PHP WAV writer, no ffmpeg) are seeded automatically.
-- **The first account you register automatically becomes the server admin.**
-  Every later account is a regular user — unless you enable admin approval (see
-  the Admin Guide). Registration (and joining as a guest) requires certifying
-  you are 18+.
+- **First-run admin bootstrap:** `mfa_require_admin` defaults to `1`, so the
+  first admin is prompted to enroll **MFA (TOTP)** at first login — see
+  §4 *First-run bootstrap* below.
+- Registration (and joining as a guest) requires certifying you are 18+.
 
 ---
 
@@ -202,7 +202,7 @@ A successful run ends with:
 Deploy check passed. The app is ready.
 ```
 
-### 3.4 Database location and configuration
+## 3.4 Database location and configuration
 
 - SQLite database: `<project>/data/chat.db` — **beside** `public/`, never
   web-served, and inside `open_basedir` by default so it works on shared hosts
@@ -218,6 +218,25 @@ Deploy check passed. The app is ready.
   concurrent reads. This creates `chat.db-wal` and `chat.db-shm` alongside it;
   treat all three as a unit when copying the database.
 - `bin/deploy.sh` writes a backup named `chat.db.bak.<timestamp>` on every run.
+
+### 3.4.1 Environment variables (.env)
+
+Configuration is read from a `.env` file in the project root when present
+(`.env.example` ships with every option documented). The ones that matter for
+installation and security:
+
+| Variable | Default | Purpose |
+|---|---|---|---|
+| `CHAT_DB` | `data/chat.db` | SQLite database path |
+| `SETUP_TOKEN` | *(empty)* | **First-run admin bootstrap.** When set, the very first registered account is granted `admin` **only if** the registration POST carries `setup_token=<same value>` (see §4). Leave empty to disable admin auto-grant entirely. |
+| `TRUSTED_PROXY` | `0` | Set to `1` when the app sits behind a TLS-terminating reverse proxy (nginx/Caddy/Cloudflare). Enables honoring `X-Forwarded-For`, `X-Real-IP` and `CF-Connecting-IP` for `client_ip()`. **Leave `0` on direct connections** — with it off, spoofed proxy headers are ignored and `REMOTE_ADDR` wins. |
+| `APP_URL` | *(empty)* | Canonical public URL (`https://chat.example.com`). When set, the client-supplied `Host` header is ignored entirely (host-header poisoning defence). Used to build password-reset / magic-link / invite links and WebSocket URLs. |
+| `TRUSTED_HOSTS` | *(empty)* | Comma-separated hosts the `Host` header is allowed to claim (e.g. `chat.example.com,chat2.example.com`). Only these exact hosts are used for link/WebSocket construction; any other Host value is ignored. If both `APP_URL` and `TRUSTED_HOSTS` are unset, `SERVER_NAME` is used. |
+| `LVC_LICENSE_PUBLIC_KEY` | *(empty)* | Ed25519 public key for license verification; only needed for proxied/licensed deployments (see `docs/licensing.md`). |
+
+> **Note:** `bin/deploy.sh` ships the same variables to the container when you
+> use the Docker Compose setup (`docker-compose.yml`); `TRUSTED_PROXY=1` is set
+> by default there because the compose stack terminates TLS at the proxy.
 
 ### 3.5 Permissions (shared-hosts and everyone)
 
@@ -240,13 +259,56 @@ On a fresh database the following channels are created automatically:
 | `#help` | public | everyone |
 | `#staff` | staff | admins and `staff`-role users only |
 
-The first registered account becomes the server admin — the second and later
-accounts are regular users **unless you enable "require admin approval"** in
-Settings (new accounts then start as `pending`, able to browse but not chat,
-until approved). After that, admins can promote other users from **Admin →
-Users**, or create an **o:line** in **Admin → O-lines** (username + password +
-operator class) so a user can run `/oper <their nick> <password>` to operate
-with that class's permissions. There is **no shared operator password.**
+### 4.1 Claiming the admin account (SETUP_TOKEN)
+
+**The first registered account is *not* automatically the admin anymore.** To
+prevent anyone who reaches a fresh install before the real operator from gaining
+full control, the first account only becomes `admin` when a `SETUP_TOKEN` is
+configured **and** presented at registration:
+
+1. Set `SETUP_TOKEN=<a long random value>` in `.env` **before** the first
+   registration (record it somewhere safe — the admin grant applies only
+   while the database has *no* admin yet: once any account holds
+   `role='admin'`, presenting the token again does nothing).
+2. Register your first account and include the token in the POST:
+
+   ```html
+   <form method="post" action="/register">
+     <input type="hidden" name="setup_token" value="YOUR-TOKEN" />
+     ...
+   ```
+
+   From the command line / API the same field works:
+
+   ```bash
+   curl -s -c cookies.txt -b cookies.txt \
+     -d 'username=admin&email=admin@example.com&password=secret&age18=1&setup_token=YOUR-TOKEN' \
+     http://127.0.0.1:8000/register
+   ```
+
+   (The web UI has no setup-token field; you can inject it via the browser
+   devtools or use the API/curl path once.)
+
+3. Every later registration is a regular user — *unless* you enable **"require
+   admin approval"** in Settings (new accounts then start as `pending`, able to
+   browse but not chat, until approved). After that, admins can promote users
+   from **Admin → Users**, or create an **o:line** in **Admin → O-lines**
+   (username + password + operator class) so a user can run
+   `/oper <their nick> <password>` to operate with that class's permissions.
+   There is **no shared operator password.**
+
+> If you **don't** set `SETUP_TOKEN`, the first account becomes a regular user
+> and *no one* is admin. Reach `/admin` afterwards by promoting yourself in
+> SQLite: `UPDATE users SET role='admin', status='active' WHERE username='you';`
+> (admins can also do this from **Admin → Users**).
+
+### 4.2 First admin login is MFA-gated
+
+`mfa_require_admin` defaults to `1`, so the freshly promoted admin is prompted
+to **enroll a TOTP authenticator** (QR code) at first login before the app
+opens. Keep the recovery secret somewhere safe. You can relax this later under
+**Admin → Settings → Security** (`mfa_require_admin` / `mfa_require_staff` /
+`mfa_require_user`).
 
 Anyone — including people who don't want an account — can **Join as guest**
 from the login page (or an embedded channel link) with just a nickname and an
@@ -394,6 +456,20 @@ depends on the desktop client.
 
 - Passwords: `argon2id` via `password_hash`/`password_verify`; rehashed
   automatically on login if the algorithm parameters change.
+- **Admin bootstrap:** the first account only becomes admin when a
+  `SETUP_TOKEN` is set in the environment *and* submitted at registration
+  (`setup_token` POST field, constant-time `hash_equals` comparison). Leave it
+  unset on a fresh install and nobody is admin until you promote manually.
+  See §4.1.
+- **MFA:** `mfa_require_admin` defaults to `1` — first login as admin forces
+  TOTP enrollment; `mfa_require_staff`/`mfa_require_user` default to `0`.
+- **Proxy header trust:** `client_ip()` honors `X-Forwarded-For`,
+  `X-Real-IP`, `CF-Connecting-IP` only when `TRUSTED_PROXY=1`; otherwise
+  spoofed headers are ignored and `REMOTE_ADDR` is used (spoof-proof on
+  direct connections).
+- **Host-header poisoning defence:** outbound links and WebSocket URLs use
+  `APP_URL` (when set) or only hosts listed in `TRUSTED_HOSTS`; the client
+  `Host` header is otherwise ignored. See §3.4.1.
 - Channel keys and webhook tokens (SHA-256 of the token; the raw token is shown
   once) are stored hashed.
 - CSRF tokens are required on every POST (forms and the AJAX API).
@@ -402,7 +478,7 @@ depends on the desktop client.
 - All output is HTML-escaped; chat markup (bold/italic/code/blocks/mentions) is
   rendered from escaped input, and the legal-page rich text is sanitized against
   a tag/attribute allow-list (event handlers and `javascript:`/`data:` URIs
-  stripped).
+  stripped — including unquoted-attribute variants).
 - Sending is rate-limited (per user, 12 messages/DMs per 5 seconds); global spam
   filters, shuns, and `*line` bans are enforced server-side, not just in the UI.
 - Uploads are validated by real MIME sniffing (`getimagesize`), size-capped

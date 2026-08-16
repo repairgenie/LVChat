@@ -139,6 +139,15 @@ final class WebhookService
 
         // Route through the same moderation checks as a normal send.
         $bot = self::botAccount($hook, $name, $avatar);
+        // Rate limit: max 30 posts per 60 seconds per webhook — mirrors the
+        // per-user message throttle so a leaked token can't flood a channel.
+        $recentPosts = (int) Database::scalar(
+            'SELECT COUNT(*) FROM messages WHERE channel_id = ? AND sender_id = ? AND created_at > datetime("now", "-60 seconds")',
+            [(int) $channel['id'], (int) $bot['id']]
+        );
+        if ($recentPosts >= 30) {
+            return ['ok' => false, 'error' => 'This webhook is posting too quickly. Slow down.', 'status' => 429];
+        }
         $blocked = BanService::sendBlocked($bot, $body, 'c');
         if ($blocked) {
             return ['ok' => false, 'error' => $blocked, 'status' => 403];

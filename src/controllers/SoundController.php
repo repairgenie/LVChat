@@ -41,7 +41,7 @@ final class SoundController
     /** POST /api/sound/prefs — set the DM and channel sounds (0/empty = off). */
     public static function prefs(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         SoundService::savePrefs($user, self::soundId($_POST['dm_sound'] ?? null), self::soundId($_POST['channel_sound'] ?? null));
         json_out(['ok' => true]);
@@ -50,7 +50,7 @@ final class SoundController
     /** POST /api/sound/override — set a specific user's sound (0/empty = mute). */
     public static function setOverride(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $target = (int) ($_POST['target_user_id'] ?? 0);
         $r = SoundService::setOverride($user, $target, self::soundId($_POST['sound'] ?? null));
@@ -63,7 +63,7 @@ final class SoundController
     /** POST /api/sound/override/remove — revert a user to the default sounds. */
     public static function removeOverride(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         SoundService::removeOverride($user, (int) ($_POST['target_user_id'] ?? 0));
         json_out(['ok' => true]);

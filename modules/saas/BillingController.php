@@ -36,7 +36,9 @@ final class BillingController
 {
     private static function requireUser(): array
     {
-        return Auth::require();
+        // Billing rows key on registered user ids — reject guests (their ids
+        // can collide with a user's id and cancel/downgrade their plan).
+        return Auth::requireAccount();
     }
 
     private static function requireCsrf(): void

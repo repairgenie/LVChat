@@ -51,7 +51,7 @@ final class UserController
     /** POST /api/status — set the caller's presence status (online/away/dnd/invisible/custom). */
     public static function status(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $mode = (string) ($_POST['status_mode'] ?? '');
         if (!in_array($mode, Auth::STATUS_MODES, true)) {
@@ -68,9 +68,13 @@ final class UserController
         json_out(['ok' => true, 'status' => Auth::statusInfo($row), 'away' => $row['away']]);
     }
 
-    /** GET /api/csrf — the session's CSRF token for app clients that post JSON/form bodies. */
+    /** GET /api/csrf — the session's CSRF token for app clients that post JSON/form bodies.
+     *  Requires an authenticated session so an unauthenticated cross-origin page
+     *  cannot read a victim's token (defense-in-depth behind the credentialed
+     *  CORS restriction in bootstrap.php). */
     public static function csrf(): void
     {
+        Auth::require();
         json_out(['ok' => true, 'csrf' => Csrf::token()]);
     }
 
@@ -130,11 +134,17 @@ final class UserController
     {
         $user = Auth::require();
         Csrf::verify();
+        // Throttle password verification like logins (10 per 10 min per IP).
+        if (login_attempt_count() >= login_attempt_max()) {
+            json_out(['error' => 'Too many attempts. Please wait a few minutes.'], 429);
+        }
         $current = (string) ($_POST['current'] ?? '');
         $new = (string) ($_POST['new'] ?? '');
         if (!password_verify($current, $user['password_hash'])) {
+            login_attempt_record();
             json_out(['error' => 'Current password is incorrect.'], 403);
         }
+        login_attempt_clear();
         if (strlen($new) < 8) {
             json_out(['error' => 'New password must be at least 8 characters.'], 400);
         }
@@ -148,7 +158,7 @@ final class UserController
 
     public static function updateProfile(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $fields = [];
         if (isset($_POST['vhost'])) {
@@ -198,7 +208,7 @@ final class UserController
 
     public static function uploadAvatar(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         if (!isset($_FILES['avatar']) || !UploadService::isImageUpload($_FILES['avatar'])) {
             json_out(['error' => 'Choose an image file first.'], 400);
@@ -229,7 +239,7 @@ final class UserController
 
     public static function removeAvatar(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $old = Database::scalar('SELECT avatar FROM users WHERE id = ?', [$user['id']]);
         Database::query('UPDATE users SET avatar = NULL WHERE id = ?', [$user['id']]);
@@ -262,7 +272,7 @@ final class UserController
     /** POST /api/mfa/enable — confirm enrollment with a valid code from the authenticator. */
     public static function mfaEnable(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
         $secret = (string) ($_SESSION['mfa_selfsetup_secret'] ?? '');
         if ($secret === '') {
@@ -281,8 +291,12 @@ final class UserController
     /** POST /api/mfa/disable — requires the account password; blocked when the class requires MFA. */
     public static function mfaDisable(): void
     {
-        $user = Auth::require();
+        $user = Auth::requireAccount();
         Csrf::verify();
+        // Throttle password verification like logins (10 per 10 min per IP).
+        if (login_attempt_count() >= login_attempt_max()) {
+            json_out(['error' => 'Too many attempts. Please wait a few minutes.'], 429);
+        }
         if (!TotpService::enabled($user)) {
             json_out(['error' => 'Two-factor authentication is not enabled.'], 400);
         }
@@ -291,8 +305,10 @@ final class UserController
         }
         $password = (string) ($_POST['password'] ?? '');
         if (!password_verify($password, $user['password_hash'])) {
+            login_attempt_record();
             json_out(['error' => 'Password is incorrect.'], 403);
         }
+        login_attempt_clear();
         TotpService::disable((int) $user['id']);
         log_audit('mfa_disable', $user['username']);
         json_out(['ok' => true]);

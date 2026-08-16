@@ -213,17 +213,53 @@ self.addEventListener('fetch', (event) => {
 
   // Offline-reading data: /api/poll (live deltas + presence) and /api/history
   // ("Load earlier messages"). Network first, cached response on failure.
+  // Only the latest response per pathname is kept (query params like since=
+  // change on every poll, so the cache never grows unbounded), and stale
+  // responses are discarded after 10 minutes to avoid serving a previous
+  // user's private data offline.
   if (API_CACHEABLE.has(url.pathname)) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
           if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_API).then((cache) => cache.put(event.request, copy));
+            // Stamp the response with our own cache time: the Date header may
+            // be absent or skew, and we need a reliable age for the offline
+            // staleness guard below.
+            const copy = new Response(response.clone().body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            });
+            copy.headers.set('x-lvc-cache-time', String(Date.now()));
+            caches.open(CACHE_API).then((cache) =>
+              // Bound growth: keep only the latest entry per pathname. The
+              // query string varies (since=, channel=) so without this the
+              // cache grows on every poll.
+              cache.keys().then((keys) =>
+                Promise.all(
+                  keys
+                    .filter((k) => new URL(k.url).pathname === url.pathname && k.url !== event.request.url)
+                    .map((k) => cache.delete(k))
+                ).then(() => cache.put(event.request, copy))
+              )
+            );
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() =>
+          // Exact-URL match only: the query string identifies the channel/DM,
+          // so a fallback must never serve another conversation's payload —
+          // and never a previous user's private data.
+          caches.match(event.request).then((cached) => {
+            if (!cached) return Response.error();
+            const storedAt = Number(cached.headers.get('x-lvc-cache-time') || 0) || Date.now();
+            if (Date.now() - storedAt > 10 * 60 * 1000) {
+              caches.open(CACHE_API).then((cache) => cache.delete(event.request));
+              return Response.error();
+            }
+            return cached;
+          })
+        )
     );
     return;
   }
@@ -241,15 +277,31 @@ self.addEventListener('fetch', (event) => {
       fetch(event.request)
         .then((response) => {
           if (response.ok) {
-            const copy = response.clone();
+            // Stamp the cached page with our own timestamp so the offline
+            // fallback can refuse stale copies that may belong to another user.
+            const copy = new Response(response.clone().body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            });
+            copy.headers.set('x-lvc-cache-time', String(Date.now()));
             caches.open(CACHE_PAGES).then((cache) => cache.put(event.request, copy));
           }
           return response;
         })
         .catch(() =>
-          caches.match(event.request).then((cached) =>
-            cached || caches.match('/offline.html')
-          )
+          caches.match(event.request).then((cached) => {
+            if (!cached) return caches.match('/offline.html');
+            // Never serve a page cached more than 30 minutes ago: the /app page
+            // embeds the user's rendered messages, so an old copy could expose
+            // a previous user's private conversation on a shared device.
+            const storedAt = Number(cached.headers.get('x-lvc-cache-time') || 0) || Date.now();
+            if (Date.now() - storedAt > 30 * 60 * 1000) {
+              caches.open(CACHE_PAGES).then((cache) => cache.delete(event.request));
+              return caches.match('/offline.html');
+            }
+            return cached;
+          })
         )
     );
     return;

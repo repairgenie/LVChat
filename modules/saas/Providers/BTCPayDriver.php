@@ -43,7 +43,10 @@ final class BTCPayDriver implements SaasProviderDriver
     {
         return trim((string) (config_get('btcpay_url', '') ?? '')) !== ''
             && trim((string) (config_get('btcpay_api_key', '') ?? '')) !== ''
-            && trim((string) (config_get('btcpay_store_id', '') ?? '')) !== '';
+            && trim((string) (config_get('btcpay_store_id', '') ?? '')) !== ''
+            // The webhook secret is mandatory: webhooks with no signature (or a
+            // skipped signature check) could be forged to activate plans for free.
+            && trim((string) (config_get('btcpay_webhook_secret', '') ?? '')) !== '';
     }
 
     private static function base(): string
@@ -91,7 +94,13 @@ final class BTCPayDriver implements SaasProviderDriver
     public function handleWebhook(string $payload, array $headers): array
     {
         $secret = (string) (config_get('btcpay_webhook_secret', '') ?? '');
-        if ($secret !== '' && !self::verifySignature($payload, (string) ($headers['btcpay-sig'] ?? ''), $secret)) {
+        // The secret is mandatory — an unconfigured secret must reject every
+        // webhook rather than skip verification (which would let anyone forge
+        // "InvoiceSettled" events and activate paid plans for free).
+        if ($secret === '') {
+            return ['ok' => false, 'error' => 'webhook secret not configured'];
+        }
+        if (!self::verifySignature($payload, (string) ($headers['btcpay-sig'] ?? ''), $secret)) {
             return ['ok' => false, 'error' => 'bad signature'];
         }
         $event = json_decode($payload, true);

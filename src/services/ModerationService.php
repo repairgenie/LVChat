@@ -115,9 +115,13 @@ final class ModerationService
         if ($targetUserId < 1 || !Database::row('SELECT id FROM users WHERE id = ?', [$targetUserId])) {
             return; // never write a timeline entry for a non-existent account
         }
+        // actor_id references users — a guest actor's id must never be stored
+        // there (guest/user id-collision would attribute the note to someone
+        // else). Null it out for guests.
+        $actorId = (int) ($actor['guest'] ?? 0) === 1 ? null : (int) $actor['id'];
         Database::query(
             'INSERT INTO user_notes (user_id, actor_id, action, reason) VALUES (?, ?, ?, ?)',
-            [$targetUserId, (int) $actor['id'], $action, mb_substr($reason, 0, 1000)]
+            [$targetUserId, $actorId, $action, mb_substr($reason, 0, 1000)]
         );
     }
 

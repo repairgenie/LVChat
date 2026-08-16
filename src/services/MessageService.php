@@ -613,6 +613,20 @@ final class MessageService
                 return 'You can only edit messages within 5 minutes of posting.';
             }
         }
+        // Kind-scoped URL re-validation: the renderer wraps a gif/image first line
+        // in <a href="…">, so an edited URL must still be a safe media URL —
+        // otherwise it could carry javascript:/data: into the href.
+        $kind = (string) ($msg['kind'] ?? 'message');
+        $firstLine = strtok(trim($content), "\n");
+        if ($kind === 'gif') {
+            if ($firstLine === false || !GifService::validMediaUrl($firstLine)) {
+                return 'Invalid media URL for a GIF message.';
+            }
+        } elseif ($kind === 'image') {
+            if ($firstLine === false || !preg_match('#^/(uploads|assets)/[a-zA-Z0-9_./\-]+$#', $firstLine)) {
+                return 'Invalid image path for an image message.';
+            }
+        }
         Database::query(
             'UPDATE messages SET content = ?, edited_at = datetime("now") WHERE id = ?',
             [mb_substr($content, 0, 2000), $messageId]

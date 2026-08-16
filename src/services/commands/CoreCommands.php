@@ -115,7 +115,13 @@ CommandRegistry::register('quit', [
                 $msg .= ' (' . $reason . ')';
             }
             MessageService::system($c['id'], 'quit', $msg);
-            Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$c['id'], $user['id']]);
+            // Guest memberships live in guest_id columns — never touch the
+            // user_id rows of a registered user that shares this guest's id.
+            if (Auth::isGuest($user)) {
+                Database::query('DELETE FROM channel_members WHERE channel_id = ? AND guest_id = ?', [$c['id'], $user['id']]);
+            } else {
+                Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$c['id'], $user['id']]);
+            }
             ChannelService::afterMemberRemoval($c['id']);
         }
         return ['replies' => ['Goodbye!'], 'redirect' => '/logout'];
@@ -196,6 +202,11 @@ CommandRegistry::register('nick', [
     'desc' => 'Change your username.',
     'usage' => '/nick <newnick>',
     'run' => function (array $args, array $user, ?array $channel) {
+        // Nick changes write the users table — guests live in `guests` and
+        // must not mutate a registered user who shares their numeric id.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Create an account to change your nickname.']];
+        }
         $newnick = $args[0] ?? null;
         if (!$newnick || !preg_match('/^[A-Za-z0-9_\-\[\]\\`^{}|]{2,32}$/', $newnick)) {
             return ['replies' => ['Usage: /nick <newnick> (2-32 chars, IRC-safe symbols)']];
@@ -230,6 +241,11 @@ CommandRegistry::register('away', [
     'desc' => 'Set yourself away. Use /back to return.',
     'usage' => '/away [message]',
     'run' => function (array $args, array $user, ?array $channel) {
+        // away writes the users table — reject guests (guest presences are
+        // implicit and short-lived; see guests table).
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $msg = implode(' ', $args);
         Database::query(
             'UPDATE users SET away = ?, away_at = datetime("now"), status_mode = \'away\' WHERE id = ?',
@@ -244,6 +260,10 @@ CommandRegistry::register('back', [
     'desc' => 'Return from being away.',
     'usage' => '/back',
     'run' => function (array $args, array $user, ?array $channel) {
+        // back writes the users table — reject guests (see /away guard).
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         Database::query('UPDATE users SET away = NULL, away_at = NULL, status_mode = \'online\' WHERE id = ?', [$user['id']]);
         return ['replies' => ['You are back.']];
     },
@@ -322,7 +342,7 @@ CommandRegistry::register('topic', [
         if (!$args) {
             return ['replies' => ["Topic for " . $channel['name'] . ': ' . ($channel['topic'] ?: '(none)')]];
         }
-        $level = AccessService::effectiveLevel($channel['id'], (int) $user['id']);
+        $level = AccessService::effectiveLevel($channel['id'], $user);
         if ((int) $channel['topic_locked'] === 1 && level_weight($level) < level_weight('op') && $user['role'] !== 'admin') {
             return ['replies' => ['You must be a channel operator (+o) to change the topic.']];
         }
@@ -367,6 +387,11 @@ CommandRegistry::register('invite', [
         if (!$nick) {
             return ['replies' => ['Usage: /invite <nick> [#channel]']];
         }
+        // Invites reference registered user ids only (invited_by, sender_id) —
+        // reject guests to avoid id-collision writes.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $target = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
@@ -402,6 +427,10 @@ CommandRegistry::register('knock', [
         $name = $args[0] ?? null;
         if (!$name) {
             return ['replies' => ['Usage: /knock <#channel>']];
+        }
+        // Knock notifications store the sender in a users-keyed column.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
         }
         $ch = ChannelService::find($name);
         if (!$ch) {

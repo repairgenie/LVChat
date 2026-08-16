@@ -78,14 +78,16 @@ final class BanService
         return false;
     }
 
-    /** Add a ban. $kind: channel_ban|quiet|kline|gline|zline|shun. Returns error string or null. */
+    /** Add a ban. $kind: channel_ban|quiet|kline|gline|zline|shun. Returns error string or null.
+     *  $setBy is a registered user id; pass null for guest actors (their guest
+     *  id must never land in the users-keyed set_by column). */
     public static function addBan(
         string $kind,
         int|string|null $channelId,
         string $mask,
         ?string $reason,
         ?int $durationSeconds,
-        int $setBy,
+        ?int $setBy,
         ?int $targetUserId = null
     ): ?string {
         $mask = trim($mask);

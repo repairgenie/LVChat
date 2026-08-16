@@ -31,6 +31,25 @@ declare(strict_types=1);
  */
 final class EmbedController
 {
+    /** Session-based rate limit: max 30 embed requests per 60 seconds (allows
+     *  normal bursts like a single page's subresources but throttles floods). */
+    private static function rateLimit(string $key): void
+    {
+        $k = 'embed_bucket_' . $key;
+        $window = [0, time()]; // [count, windowStart]
+        $saved = (array) ($_SESSION[$k] ?? []);
+        if (is_array($saved) && ($saved[1] ?? 0) > time() - 60) {
+            $window = [$saved[0] ?? 0, (int) ($saved[1] ?? time())];
+        }
+        if ($window[0] >= 30) {
+            http_response_code(429);
+            header('Content-Type: text/plain; charset=utf-8');
+            exit('Too many requests. Please slow down.');
+        }
+        $window[0]++;
+        $_SESSION[$k] = $window;
+    }
+
     public static function proxy(): void
     {
         $user = Auth::user();
@@ -39,6 +58,10 @@ final class EmbedController
             header('Content-Type: text/plain; charset=utf-8');
             exit('Sign in to view this page.');
         }
+        // Rate limit: each fetch is a multi-hop server-side request (up to 4 MB,
+        // 8 s connect / 15 s read timeouts) — an unthrottled flood would pin
+        // workers and burn bandwidth.
+        self::rateLimit('embed');
 
         $url = (string) ($_GET['url'] ?? '');
         $result = EmbedService::proxy($url);
@@ -71,6 +94,8 @@ final class EmbedController
             header('Content-Type: text/plain; charset=utf-8');
             exit('Sign in to view this page.');
         }
+        // Same budget as the page proxy (each is a server-side fetch).
+        self::rateLimit('embed');
 
         $url = (string) ($_GET['url'] ?? '');
         $result = EmbedService::resource($url);
@@ -88,15 +113,25 @@ final class EmbedController
         header('Cache-Control: public, max-age=300');
         header('Referrer-Policy: no-referrer');
         // Validate Content-Type from remote server to prevent MIME confusion.
-        $safeTypes = ['text/css', 'text/javascript', 'application/javascript', 'font/woff', 'font/woff2', 'image/', 'audio/', 'video/'];
+        // SVG/XML/HTML are explicitly excluded: served as application/octet-stream
+        // so a top-level navigation can never execute attacker-controlled scripts
+        // in the chat origin (this endpoint has no per-request sandbox by design
+        // of the opaque-origin embed flow).
         $ct = strtolower($result['content_type']);
         $ctSafe = false;
+        // Fonts include legacy MIME types still served by common nginx/apache
+        // configs; fonts are inert binary data with no script execution.
+        $safeTypes = ['text/css', 'text/javascript', 'application/javascript', 'font/', 'application/font-', 'application/x-font-', 'application/vnd.ms-fontobject', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/vnd.microsoft.icon', 'image/x-icon', 'audio/', 'video/'];
         foreach ($safeTypes as $prefix) {
             if (str_starts_with($ct, $prefix)) { $ctSafe = true; break; }
         }
-        if (!$ctSafe) {
+        if (!$ctSafe || str_contains($ct, 'svg') || str_contains($ct, 'xml') || str_contains($ct, 'html')) {
             header('Content-Type: application/octet-stream');
         }
+        // Defense-in-depth: sandbox any document-level navigation of proxied
+        // output (opaque origin, no same-origin) so even a served HTML/SVG body
+        // cannot touch the chat app's origin if loaded at the top level.
+        header('Content-Security-Policy: sandbox allow-forms allow-popups');
         echo $result['body'];
         exit;
     }

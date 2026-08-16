@@ -32,11 +32,12 @@ CommandRegistry::register('ns', [
         if (!$sub) {
             return ['replies' => ['Usage: /ns <command> [args]']];
         }
-        $reg = CommandRegistry::get($sub);
-        if (!$reg) {
+        if (!CommandRegistry::get($sub)) {
             return ['replies' => ["Unknown NickServ command: $sub"]];
         }
-        return call_user_func($reg['run'], $args, $user, $channel);
+        // Re-enter the parser so the TARGET command's gates are enforced —
+        // never call its handler directly.
+        return CommandParser::run('/' . $sub . ($args ? ' ' . implode(' ', $args) : ''), $user, $channel);
     },
 ]);
 
@@ -47,6 +48,12 @@ CommandRegistry::register('register', [
     'run' => function (array $args, array $user, ?array $channel) {
         $name = $args[0] ?? null;
         if ($name && preg_match('/^[#&]/', $name)) {
+            // Channel registration writes users-keyed rows (owner_id, user_id,
+            // founder membership) — guests must never claim a channel via a
+            // colliding guest id.
+            if (Auth::isGuest($user)) {
+                return ['replies' => ['Create an account to register a channel.']];
+            }
             $ch = ChannelService::find($name);
             if (!$ch) {
                 $created = ChannelService::create($user, $name);
@@ -142,6 +149,11 @@ CommandRegistry::register('ghost', [
     'desc' => 'Terminate your other sessions.',
     'usage' => '/ghost <nick>',
     'run' => function (array $args, array $user, ?array $channel) {
+        // Ghosting kills sessions keyed on the users table — guests must not
+        // terminate a registered user's sessions via a colliding guest id.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $nick = $args[0] ?? $user['username'];
         if (strtolower($nick) !== strtolower($user['username'])) {
             return ['replies' => ['You can only ghost your own nick.']];
@@ -156,6 +168,9 @@ CommandRegistry::register('release', [
     'desc' => 'Release your nick (terminate other sessions and reclaim it).',
     'usage' => '/release <nick>',
     'run' => function (array $args, array $user, ?array $channel) {
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $nick = $args[0] ?? $user['username'];
         if (strtolower($nick) !== strtolower($user['username'])) {
             return ['replies' => ['You can only release your own nick.']];
@@ -170,6 +185,9 @@ CommandRegistry::register('recover', [
     'desc' => 'Recover your nick (same as /release).',
     'usage' => '/recover <nick>',
     'run' => function (array $args, array $user, ?array $channel) {
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $nick = $args[0] ?? $user['username'];
         Auth::killSessions((int) $user['id']);
         return ['replies' => ["$nick recovered."]];

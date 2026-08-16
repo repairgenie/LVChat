@@ -82,6 +82,15 @@ final class UploadService
         if ($info === false) {
             return ['ok' => false, 'error' => 'That file is not a valid image.'];
         }
+        // Pixel-bomb guard: a tiny file may declare enormous dimensions
+        // (getimagesize only reads the header), which would force GD to allocate
+        // ~bytes-per-pixel * width * height during decode — a memory-exhaustion
+        // DoS vector. Reject implausible dimensions up front.
+        $w = (int) ($info[0] ?? 0);
+        $h = (int) ($info[1] ?? 0);
+        if ($w > 16384 || $h > 16384 || ($w > 0 && $h > 0 && $w * $h > 40_000_000)) {
+            return ['ok' => false, 'error' => 'Image dimensions are too large (max 16384×16384).'];
+        }
         $mime = (string) ($info['mime'] ?? '');
         $mimeToExt = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
         if (!isset($mimeToExt[$mime])) {
@@ -167,6 +176,13 @@ final class UploadService
         }
         $w = imagesx($src);
         $h = imagesy($src);
+        // Defense-in-depth: refuse anything that decoded larger than the
+        // validated header cap (a crafted file could enlarge on decode).
+        if ($w > 16384 || $h > 16384 || ($w > 0 && $h > 0 && $w * $h > 40_000_000)) {
+            imagedestroy($src);
+            @unlink($path);
+            return false;
+        }
         if ($w <= $maxDim && $h <= $maxDim) {
             imagedestroy($src);
             return $path;

@@ -66,6 +66,12 @@ CommandRegistry::register('set', [
     'run' => function (array $args, array $user, ?array $channel) {
         // NickServ mode: account options when the first argument is not a channel.
         if (empty($args[0]) || !preg_match('/^[#&]/', $args[0])) {
+            // Account options mutate the users table keyed on the actor id —
+            // guests share an id space with users (separate AUTOINCREMENT), so
+            // a colliding guest must never write registered-user rows.
+            if (Auth::isGuest($user)) {
+                return ['replies' => ['Registered users only.']];
+            }
             $opt = strtolower($args[0] ?? '');
             $val = implode(' ', array_slice($args, 1));
             switch ($opt) {
@@ -95,6 +101,13 @@ CommandRegistry::register('set', [
         }
 
         // ChanServ mode.
+        // The founder check below compares owner_id to the actor's numeric id —
+        // a guest id can collide with the owner's user id, so guests must never
+        // reach this branch (full channel takeover: key, visibility, founder
+        // transfer).
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         $name = array_shift($args);
         $channel = ChannelService::find($name);
         if (!$channel) {
@@ -229,6 +242,11 @@ CommandRegistry::register('akick', [
     'min_level' => 4,
     'run' => function (array $args, array $user, ?array $channel) {
         $sub = strtolower($args[0] ?? 'list');
+        // akick writes users-keyed columns (target_user_id, added_by) —
+        // reject guests whose id could collide with a registered user's.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         switch ($sub) {
             case 'list':
                 $rows = Database::all('SELECT * FROM akick WHERE channel_id = ? ORDER BY added_at DESC', [$channel['id']]);
@@ -254,7 +272,7 @@ CommandRegistry::register('akick', [
                 if ($userId) {
                     $mem = AccessService::member($channel['id'], $userId);
                     // Only kick the target if their level is below the actor's level.
-                    $actorLevel = AccessService::effectiveLevel($channel['id'], (int) $user['id']);
+                    $actorLevel = AccessService::effectiveLevel($channel['id'], $user);
                     if ($mem && level_weight($mem['level']) < level_weight($actorLevel)) {
                         Database::query('DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', [$channel['id'], $userId]);
                         ChannelService::afterMemberRemoval($channel['id']);
@@ -332,6 +350,10 @@ CommandRegistry::register('senak', [
         if ($msg === '') {
             return ['replies' => ['Usage: /senak <#channel> <message>']];
         }
+        // SENAK notifications store the sender in a users-keyed column.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         // Rate-limit senak to prevent operator notification flooding.
         $lastSenak = (int) ($_SESSION['last_senak_ts'] ?? 0);
         if (time() - $lastSenak < 30) {
@@ -396,10 +418,12 @@ CommandRegistry::register('cs', [
         if (!$sub) {
             return ['replies' => ['Usage: /cs <command> [args]']];
         }
-        $reg = CommandRegistry::get($sub);
-        if (!$reg) {
+        if (!CommandRegistry::get($sub)) {
             return ['replies' => ["Unknown ChanServ command: $sub"]];
         }
-        return call_user_func($reg['run'], $args, $user, $channel);
+        // Re-enter the parser so the TARGET command's gates (server_admin,
+        // netadmin, needs_channel, min_level) are enforced — never call its
+        // handler directly.
+        return CommandParser::run('/' . $sub . ($args ? ' ' . implode(' ', $args) : ''), $user, $channel);
     },
 ]);

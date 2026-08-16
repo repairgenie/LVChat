@@ -152,24 +152,36 @@ if ($tz && in_array($tz, DateTimeZone::listIdentifiers(), true)) {
 // Allowed origins come from the CHAT_CORS_ORIGINS env var or the `app_origins`
 // config key (comma-separated). The built-in `null` origin (file://) and any
 // http://127.0.0.1:* origin cover the local Electron messenger out of the box.
+//
+// Credentialed CORS (Access-Control-Allow-Credentials) is emitted ONLY for
+// explicitly-configured origins. The `null` origin and localhost are never
+// granted credentials: any opaque-origin page (sandboxed iframe, data: or
+// blob: document) sends Origin: null and would otherwise be able to read the
+// victim's Authenticated responses (including the CSRF token from /api/csrf)
+// with the SameSite=None session cookie. The Electron messenger authenticates
+// with the X-LVC-Session bearer header, which needs no cookie credentials.
 $__corsOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if ($__corsOrigin !== '') {
     $__corsAllowed = false;
+    $__corsConfigured = false;
     $__corsList = trim((string) (config_get('app_origins') ?? getenv('CHAT_CORS_ORIGINS')));
     if ($__corsList !== '') {
         foreach (explode(',', $__corsList) as $__o) {
             if (strcasecmp(trim($__o), $__corsOrigin) === 0) {
                 $__corsAllowed = true;
+                $__corsConfigured = true;
                 break;
             }
         }
     }
     if (!$__corsAllowed && ($__corsOrigin === 'null' || preg_match('#^http://127\.0\.0\.1(:\d+)?$#', $__corsOrigin))) {
-        $__corsAllowed = true;
+        $__corsAllowed = true; // non-credentialed only
     }
     if ($__corsAllowed) {
         header('Access-Control-Allow-Origin: ' . $__corsOrigin);
-        header('Access-Control-Allow-Credentials: true');
+        if ($__corsConfigured) {
+            header('Access-Control-Allow-Credentials: true');
+        }
         header('Vary: Origin');
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
         header('Access-Control-Allow-Headers: Content-Type, X-CSRF, X-Messenger, X-LVC-Session');
@@ -177,7 +189,7 @@ if ($__corsOrigin !== '') {
     }
     unset($__o, $__corsList);
 }
-unset($__corsOrigin, $__corsAllowed);
+unset($__corsOrigin, $__corsAllowed, $__corsConfigured);
 
 // HSTS: tell browsers to only use HTTPS for this domain (1 year, include subdomains).
 if ($secure) {

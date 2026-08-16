@@ -30,8 +30,16 @@ final class OpenClawController
         if (str_starts_with($auth, 'Bearer ')) {
             $apiKey = substr($auth, 7);
         }
-        if ($apiKey === '') {
-            $apiKey = (string) ($_GET['api_key'] ?? '');
+        // The ?api_key= fallback leaks keys into logs/history, so it is only
+        // honored for loopback clients. Use REMOTE_ADDR (the real TCP peer,
+        // unforgeable) — never header-derived IPs, which can be spoofed even
+        // when TRUSTED_PROXY=1.
+        $peer = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+        $isLoopback = $peer === '127.0.0.1' || $peer === '::1'
+            || str_starts_with($peer, '127.')
+            || $peer === 'localhost';
+        if ($apiKey === '' && isset($_GET['api_key']) && $isLoopback) {
+            $apiKey = (string) $_GET['api_key'];
         }
         $bot = OpenClawBotService::authenticate($apiKey);
         if (!$bot) {

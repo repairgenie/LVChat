@@ -28,8 +28,17 @@ CommandRegistry::register('oper', [
     'desc' => 'Oper up against your o:line and gain your operator class permissions.',
     'usage' => '/oper <username> <password>',
     'run' => function (array $args, array $user, ?array $channel) {
+        // O:lines reference registered usernames and grant operator powers —
+        // anonymous guests must never oper up.
+        if (Auth::isGuest($user)) {
+            return ['replies' => ['Registered users only.']];
+        }
         if ($user['role'] === 'admin') {
             return ['replies' => ['You are already an IRC Operator (server admin).']];
+        }
+        // Throttle failed oper attempts like logins: 10 per 10 minutes per IP.
+        if (login_attempt_count() >= login_attempt_max()) {
+            return ['replies' => ['Too many oper attempts. Please wait a few minutes.']];
         }
         $name = $args[0] ?? '';
         $pw = $args[1] ?? '';
@@ -38,8 +47,10 @@ CommandRegistry::register('oper', [
         }
         $op = Database::row('SELECT * FROM opers WHERE username = ? COLLATE NOCASE', [$name]);
         if (!$op || (int) $op['enabled'] !== 1 || !password_verify($pw, $op['password_hash'])) {
+            login_attempt_record();
             return ['replies' => ['Incorrect oper credentials.']];
         }
+        login_attempt_clear();
         $class = Database::row('SELECT * FROM operclasses WHERE id = ?', [$op['operclass_id']]);
         if (!$class) {
             return ['replies' => ['Your operator class no longer exists.']];
@@ -104,23 +115,24 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
             // ? with * (functionally equivalent in maskMatch), then check.
             $normalized = preg_replace('/\?/', '*', $target);
             $normalized = preg_replace('/\*+/', '*', $normalized);
-            // A mask is overly broad if:
-            // - It is just "*" (matches everything)
-            // - The host component (after @) is entirely wildcards/dots
-            //   (e.g. *@*, *@*.*, *!*@*.*)
-            // IP-based masks (no @) are NOT blocked — they target specific ranges.
-            $isOverlyBroad = false;
-            if ($normalized === '*') {
-                $isOverlyBroad = true;
-            } elseif (str_contains($normalized, '@')) {
-                $hostPart = substr($normalized, strrpos($normalized, '@') + 1);
-                // Strip all wildcards and dots — if nothing remains, the host
-                // is purely wildcards and matches every hostname.
-                $stripped = preg_replace('/[*.\s]/', '', $hostPart);
-                if ($stripped === '') {
-                    $isOverlyBroad = true;
-                }
+            // A mask is overly broad only when BOTH its nick component
+            // (everything before the first '!' or '@') and its host component
+            // (after '@') are pure wildcards/dots — i.e. it matches every user
+            // ("*", "*@*", "*!*@*.*"). A specific nick with a wildcard host
+            // ("nick!*@*") targets that one nick and is fine. IP-based masks
+            // (no !/@, e.g. CIDR) are never blocked — they target specific ranges.
+            $nickPart = $normalized;
+            if (($bang = strpos($normalized, '!')) !== false) {
+                $nickPart = substr($normalized, 0, $bang);
+            } elseif (($atPos = strpos($normalized, '@')) !== false) {
+                $nickPart = substr($normalized, 0, $atPos);
             }
+            $nickStripped = preg_replace('/[*.\s]/', '', $nickPart);
+            $hostPart = str_contains($normalized, '@')
+                ? substr($normalized, strrpos($normalized, '@') + 1)
+                : '';
+            $hostStripped = $hostPart === '' ? '' : preg_replace('/[*.\s]/', '', $hostPart);
+            $isOverlyBroad = $nickStripped === '' && $hostStripped === '';
             if ($isOverlyBroad) {
                 return ['replies' => ['This mask is too broad and would affect all users.']];
             }

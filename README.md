@@ -249,9 +249,12 @@ docker compose logs -f
   `data/chat.db`), `lvchat_uploads` (`public/uploads/`), `lvchat_avatars`
   (`public/assets/avatars/`).
 
-The first account you register becomes the server admin. Realtime mode defaults
-to polling; switch it to WebSocket under **Admin → Settings** — the gateway is
-already running inside the container.
+The first account you register becomes the server admin **only if you set a
+`SETUP_TOKEN`** in `.env` and submit it as `setup_token` at registration (see
+`docs/installation.md §4`). The first admin login is **MFA-gated**
+(`mfa_require_admin` defaults on). Realtime mode defaults to polling; switch it
+to WebSocket under **Admin → Settings** — the gateway is already running inside
+the container.
 
 TLS is left to a reverse proxy in front of the container (Caddy, nginx,
 Cloudflare, ...); the container itself speaks plain HTTP on :80 and ws on :8080.
@@ -398,9 +401,13 @@ Run `/mode` with no flags to see the full explanation of every mode inline.
 
 ## Admin setup
 
-There are **no hardcoded default credentials**. The first account registered on a fresh
-database automatically becomes the server admin (the second and later accounts are regular
-users). Log in as that account to reach `/admin`.
+There are **no hardcoded default credentials**. To become admin on a fresh
+install, set `SETUP_TOKEN` in `.env` and register the first account with
+`setup_token=<value>` (see `docs/installation.md §4`). Without it the first
+account is a regular user and nobody is admin until you promote yourself
+(`UPDATE users SET role='admin' WHERE username='you';` in SQLite, or have an
+existing admin do it from the Users page). Log in as that account to reach
+`/admin`.
 
 After that, admins can promote other users from the **Users** page, or create an **o:line**
 (an IRC-style operator line) in **Admin → O-lines** (username + password + operator class)

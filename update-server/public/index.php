@@ -187,13 +187,33 @@ if ($path === '/admin') {
     }
     if ($method === 'POST') {
         Csrf::verify();
+        // Rate-limit login attempts: 5 per 15 minutes per IP.
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+        $attemptsFile = UPDATE_ROOT . '/data/attempts.ser';
+        $attempts = [];
+        if (is_file($attemptsFile)) {
+            $attempts = (array) @unserialize((string) file_get_contents($attemptsFile), ['allowed_classes' => false]);
+        }
+        $attempts = is_array($attempts) ? $attempts : [];
+        $win = time() - 900;
+        $attempts = array_filter($attempts, fn ($a) => ($a['ts'] ?? 0) > $win);
+        $mine = array_values(array_filter($attempts, fn ($a) => ($a['ip'] ?? '') === $ip));
+        if (count($mine) >= 5) {
+            http_response_code(429);
+            flash('Too many login attempts. Please wait a few minutes.');
+            redirect('/admin');
+        }
         $pass = (string) ($_POST['password'] ?? '');
         if (admin_verify($pass)) {
+            $attempts[] = ['ip' => $ip, 'ts' => time()];
+            @file_put_contents($attemptsFile, serialize($attempts), LOCK_EX);
             session_regenerate_id(true);
             $_SESSION['update_admin'] = true;
             flash('Signed in.');
             redirect('/admin');
         }
+        $attempts[] = ['ip' => $ip, 'ts' => time()];
+        @file_put_contents($attemptsFile, serialize($attempts), LOCK_EX);
         flash('Incorrect password.');
         redirect('/admin');
     }

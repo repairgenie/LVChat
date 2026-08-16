@@ -95,7 +95,7 @@ $server = proc_open(
     [0 => ['pipe', 'r'], 1 => ['file', '/tmp/opencode/http-test-server.log', 'w'], 2 => ['file', '/tmp/opencode/http-test-server.log', 'a']],
     $pipes,
     dirname(__DIR__),
-    array_merge($_ENV, ['CHAT_DB' => $DB, 'CHAT_MODULES' => $STAGE_MODULES, 'LVC_LICENSE_PUBLIC_KEY' => $licPk, 'LVC_EMBED_ALLOW_LOCAL' => '1', 'LVC_DEBUG' => '1'])
+    array_merge($_ENV, ['CHAT_DB' => $DB, 'CHAT_MODULES' => $STAGE_MODULES, 'LVC_LICENSE_PUBLIC_KEY' => $licPk, 'LVC_EMBED_ALLOW_LOCAL' => '1', 'LVC_DEBUG' => '1', 'SETUP_TOKEN' => 'test-setup-token'])
 );
 sleep(1);
 
@@ -327,6 +327,12 @@ check('GET /login 200', $s === 200);
 [$s, , $b] = req('GET', '/register');
 check('GET /register 200', $s === 200);
 
+// The seed defaults admins to require MFA (mfa_require_admin=1). The test admin
+// (alice) must log straight in for the bulk of the suite; forced admin-MFA
+// enrollment is exercised explicitly later. Reset it now that the server has
+// seeded the config table (the register POST below reads the live value).
+dbq("UPDATE server_config SET value = '0' WHERE key = 'mfa_require_admin'");
+
 // Honeypot: a filled trap field must be silently dropped (no account, no flash).
 $cjBot = '/tmp/opencode/httptest-bot.txt';
 $tBot = csrf(req('GET', '/register', [], $cjBot)[2]);
@@ -338,7 +344,7 @@ check('honeypot registration created no user', (int) $botty[0]['n'] === 0, json_
 $cjA = '/tmp/opencode/httptest-a.txt';
 $page = req('GET', '/register', [], $cjA)[2];
 $t = csrf($page);
-[$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjA);
+[$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/', 'setup_token' => 'test-setup-token'], $cjA);
 check('register alice 302', $s === 302, (string) $s);
 check('first user redirected to next', ($h['location'] ?? '') === '/');
 [$s, , $appBody] = req('GET', '/app', [], $cjA);
@@ -382,6 +388,7 @@ check('mfa disable works for self', $s === 200 && jsonDecode($b)['ok'] === true,
 // Re-enable, then drive the login challenge flow from a fresh cookie jar.
 [$s, , $b] = req('POST', '/api/mfa/begin', ['csrf' => $t], $cjA);
 $mfaBare = str_replace(' ', '', (string) (jsonDecode($b)['secret'] ?? ''));
+dbq('DELETE FROM totp_used_counters'); // the first enroll consumed the current 30s TOTP counter
 req('POST', '/api/mfa/enable', ['csrf' => $t, 'code' => mfaCode($mfaBare)], $cjA);
 
 $cjL = '/tmp/opencode/httptest-mfa.txt';
@@ -392,6 +399,7 @@ check('login with mfa redirects to challenge', $s === 302 && str_contains($h['lo
 check('challenge page renders', $s === 200 && stripos($b, 'authentication code') !== false, (string) $s);
 [$s, $h] = req('POST', '/login/mfa', ['csrf' => csrf($b), 'code' => '000000'], $cjL);
 check('wrong mfa code bounces', $s === 302 && str_contains($h['location'] ?? '', '/login/mfa'), "$s " . ($h['location'] ?? ''));
+dbq('DELETE FROM totp_used_counters'); // the re-enroll consumed the current 30s TOTP counter
 [$s, $h] = req('POST', '/login/mfa', ['csrf' => csrf(req('GET', '/login/mfa', [], $cjL)[2]), 'code' => mfaCode($mfaBare)], $cjL);
 check('correct mfa code logs in', $s === 302 && str_contains($h['location'] ?? '', '/app'), "$s " . ($h['location'] ?? ''));
 [$s] = req('GET', '/app', [], $cjL);
@@ -413,6 +421,7 @@ if (preg_match('/qr\.addData\((".*?")\)/', $page, $m)) {
     $forcedSecret = (string) ($q['secret'] ?? '');
 }
 check('setup secret extracted from page', preg_match('/^[A-Z2-7]{32}$/', $forcedSecret) === 1, $forcedSecret);
+dbq('DELETE FROM totp_used_counters'); // the login challenge consumed the current 30s TOTP counter
 [$s, $h] = req('POST', '/login/mfa/setup', ['csrf' => csrf($page), 'code' => mfaCode($forcedSecret)], $cjF);
 check('setup verify completes login', $s === 302 && str_contains($h['location'] ?? '', '/app'), "$s " . ($h['location'] ?? ''));
 check('totp enabled after forced setup', !empty(dbq('SELECT totp_enabled_at FROM users WHERE username = "alice"')[0]['totp_enabled_at'] ?? null));
@@ -465,6 +474,7 @@ $found = false;
 foreach (($j['results']['channels'] ?? []) as $r) { if (($r['channel_slug'] ?? '') === 'gaming' && str_contains($r['content'] ?? '', 'hello')) $found = true; }
 check('search finds channel message', $s === 200 && $found, $b);
 
+sleep(4); // let the 3s search rate-limit window clear before the next query
 [$s, , $b] = req('GET', '/api/search?q=zzzz-no-such-term', [], $cjA);
 $j = jsonDecode($b);
 check('search handles hyphenated term', $s === 200 && !count($j['results']['channels'] ?? []), $b);
@@ -482,6 +492,7 @@ check('gif from disallowed host rejected (400)', $s === 400, $b);
 [$s, , $b] = req('GET', '/api/gifs?q=cat', [], $cjA);
 $j = jsonDecode($b);
 check('gif search not-configured error', $s === 200 && ($j['ok'] ?? true) === false && ($j['error'] ?? '') !== '', $b);
+sleep(4); // let the 3s search rate-limit window clear before the next query
 // The posted GIF is findable through chat search by its title.
 [$s, , $b] = req('GET', '/api/search?q=dancing', [], $cjA);
 $j = jsonDecode($b);
@@ -555,7 +566,7 @@ check('mark channel read', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 check('channel read rejects unknown channel', $s === 404, (string) $s);
 // CORS: allowlisted loopback origin gets headers; unknown origins don't.
 [$s, $h] = req('GET', '/api/version', [], null, ['Origin: http://127.0.0.1:48231']);
-check('loopback origin gets CORS headers', ($h['access-control-allow-origin'] ?? '') === 'http://127.0.0.1:48231' && ($h['access-control-allow-credentials'] ?? '') === 'true', var_export($h, true));
+check('loopback origin gets CORS headers', ($h['access-control-allow-origin'] ?? '') === 'http://127.0.0.1:48231' && !isset($h['access-control-allow-credentials']), var_export($h, true));
 [$s, $h] = req('GET', '/api/version', [], null, ['Origin: https://evil.example']);
 check('unknown origin gets no CORS headers', !isset($h['access-control-allow-origin']), var_export($h, true));
 [$s, $h] = req('GET', '/api/version', [], null, ['Origin: null']);
@@ -1077,6 +1088,7 @@ check('join modal renders on the chat page', $s === 200 && strpos($b, 'join-moda
 $tD = csrf($b);
 [$s, , $j] = req('POST', '/api/join', ['csrf' => $tD, 'name' => '#secret', 'key' => 'wrongkey'], $cjD);
 check('wrong key rejected via modal API', $s === 403 && strpos($j, 'Incorrect channel key') !== false, "$s $j");
+sleep(3); // let the 2s join rate-limit window clear before the retry
 [$s, , $j] = req('POST', '/api/join', ['csrf' => $tD, 'name' => '#secret', 'key' => 'hunter2'], $cjD);
 check('correct key joins via modal API', $s === 200 && strpos($j, 'channel=secret') !== false, "$s $j");
 [$s, $h] = req('GET', '/app?channel=secret', [], $cjD);
@@ -1270,6 +1282,7 @@ check('legal save accepted', $s === 302, (string) $s);
 check('legal save sanitizes + renders on public page', $s === 200 && strpos($b, 'Custom terms') !== false && strpos($b, 'alert(1)') === false, (string) $s);
 
 // Bob joins #gaming so he can report a fresh message alice posts there.
+sleep(3); // let the 2s join rate-limit window clear since his last /api/join
 $t = csrf(req('GET', '/app', [], $cjB)[2]);
 [$s, , $b] = req('POST', '/api/join', ['csrf' => $t, 'name' => '#gaming'], $cjB);
 check('bob joins #gaming', $s === 200, "$s $b");
@@ -1460,6 +1473,7 @@ $mfaTicket = jsonDecode($j)['ticket'] ?? '';
 check('messenger login flags MFA with a ticket', $s === 200 && (jsonDecode($j)['mfa'] ?? false) === true && $mfaTicket !== '', "$s $j");
 [$s, , $j] = req('POST', '/api/messenger/mfa', ['ticket' => $mfaTicket, 'code' => '000000'], null, ['X-Messenger: 1']);
 check('messenger MFA rejects a bad code', $s === 401, "$s $j");
+dbq('DELETE FROM totp_used_counters'); // the web MFA flows above consumed the current 30s TOTP counter
 [$s, , $j] = req('POST', '/api/messenger/mfa', ['ticket' => $mfaTicket, 'code' => mfaCode($tokMfaSecret)], null, ['X-Messenger: 1']);
 $mfaTok = jsonDecode($j)['token'] ?? '';
 check('messenger MFA completes with a token', $s === 200 && strlen($mfaTok) > 40, "$s $j");

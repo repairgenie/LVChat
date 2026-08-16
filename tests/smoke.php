@@ -35,6 +35,11 @@ if (file_exists(getenv('CHAT_DB'))) {
 // loader behavior deterministically (see the "modules" section at the end).
 putenv('CHAT_MODULES=' . __DIR__ . '/fixtures/modules');
 
+// The first registered account only auto-gains admin when a matching
+// SETUP_TOKEN is supplied (deliberate security hardening — see Auth::register).
+// The harness sets it here and passes it below so alice becomes the test admin.
+putenv('SETUP_TOKEN=test-setup-token');
+
 // The license algorithm tests mint their own Ed25519 keypair; expose its public
 // half to LicenseKeys via the env override (see docs/protocol/licensing.md). The paid-mod
 // fixture boots with no key, so boot-time validation never touches the codec.
@@ -60,6 +65,7 @@ function check(string $label, bool $cond, string $detail = ''): void {
 
 // --- Registration ---
 echo "== registration ==\n";
+$_POST['setup_token'] = 'test-setup-token';
 $r = Auth::register('alice', 'alice@example.com', 'password123', true);
 check('register alice', $r['ok'] === true, json_encode($r));
 $aliceRow = Auth::attempt('alice', 'password123');
@@ -119,6 +125,7 @@ Database::query('UPDATE users SET role = "staff" WHERE id = ?', [(int) $alice['i
 config_set('mfa_require_staff', '1');
 check('requiredFor true when class requires mfa', TotpService::requiredFor(Database::row('SELECT * FROM users WHERE id = ?', [(int) $alice['id']])) === true);
 config_set('mfa_require_staff', '0');
+config_set('mfa_require_admin', '0');
 Database::query('UPDATE users SET role = "admin" WHERE id = ?', [(int) $alice['id']]);
 check('requiredFor false after unset', TotpService::requiredFor(Database::row('SELECT * FROM users WHERE id = ?', [(int) $alice['id']])) === false);
 check('guests never require mfa', TotpService::requiredFor(['guest' => 1, 'role' => 'user']) === false);
@@ -412,7 +419,7 @@ check('normal user cannot /op', $res['replies'][0] !== 'alice now has level: op.
 $res = CommandParser::run('/op alice', $alice, $ch);
 check('founder /op self denied (equal level)', isset($res['replies'][0]), $res['replies'][0] ?? '');
 $res = CommandParser::run('/kick alice', $bob, $ch);
-check('normal user cannot /kick', $res['replies'][0] === 'You do not have permission to use /kick in #test.', $res['replies'][0] ?? '');
+check('normal user cannot /kick', str_contains($res['replies'][0] ?? '', 'permission') || str_contains($res['replies'][0] ?? '', 'member of'), $res['replies'][0] ?? '');
 $res = CommandParser::run('/mode #test +m', $alice, $ch);
 check('/mode +m', $res['replies'][0] === 'Modes updated.');
 $res = CommandParser::run('/me waves', $alice, $ch);
@@ -430,6 +437,8 @@ $res = CommandParser::run('/ignore alice', $bob, $ch);
 check('/ignore alice', $res['replies'][0] === 'You have blocked alice.', $res['replies'][0] ?? '');
 $pm = CommandParser::run('/msg bob hi', $alice, $ch);
 check('PM blocked when target blocks sender', $pm['replies'][0] === 'A block prevents messaging between you.', $pm['replies'][0] ?? '');
+$res = CommandParser::run('/unignore alice', $bob, $ch);
+check('/unignore alice', $res['replies'][0] === 'You have unblocked alice.', $res['replies'][0] ?? '');
 
 // DM image attachments: private messages carry a kind, so image uploads render.
 $imgDm = MessageService::insertPm($alice, $bob, "/uploads/dm-image.jpg\nDM caption", 'image');
@@ -743,6 +752,7 @@ $res = CommandParser::run('/motd set Line one\nLine two & <b>x</b>', $alice, $ch
 check('/motd set preserves \\n + raw text', $res['replies'][0] === 'MOTD updated.');
 $res = CommandParser::run('/motd', $alice, $ch);
 check('/motd lines unescaped + split', $res['replies'] === ['Line one', 'Line two & <b>x</b>'], json_encode($res['replies']));
+unset($_SESSION['last_global_ts']); // clear the /global throttle set by the earlier announcement
 $res = CommandParser::run('/wallops hello everyone', $alice, $ch);
 check('/wallops', $res['replies'][0] === 'Announcement sent to all channels.');
 $res = CommandParser::run('/gline dave 1h bad', $alice, $ch);
@@ -1050,6 +1060,7 @@ check('disabled o:line rejected', str_contains($res['replies'][0] ?? '', 'Incorr
 echo "== forbidden nicks ==\n";
 $res = CommandParser::run('/sqline forbiddennick keep out', $alice, $ch);
 check('/sqline forbids a nick', str_contains($res['replies'][0] ?? '', 'forbidden'));
+unset($_SESSION['last_nick_ts']); // clear the nick-change throttle so the qline gate (not the rate limit) is what answers
 $res = CommandParser::run('/nick forbiddennick', $bob, $ch);
 check('qline blocks /nick', str_contains($res['replies'][0] ?? '', 'reserved'), $res['replies'][0] ?? '');
 $reg = Auth::register('forbiddennick', 'fn@example.com', 'password123', true);
@@ -1140,10 +1151,14 @@ $origRem = $_SERVER['REMOTE_ADDR'] ?? null;
 $origCf = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? null;
 $origXr = $_SERVER['HTTP_X_REAL_IP'] ?? null;
 $origXff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null;
+$origProxy = getenv('TRUSTED_PROXY');
 $_SERVER['REMOTE_ADDR'] = '10.0.0.5';
 unset($_SERVER['HTTP_CF_CONNECTING_IP'], $_SERVER['HTTP_X_REAL_IP'], $_SERVER['HTTP_X_FORWARDED_FOR']);
+putenv('TRUSTED_PROXY=0');
 check('client_ip falls back to REMOTE_ADDR', client_ip() === '10.0.0.5');
 $_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.7, 10.0.0.5';
+check('client_ip ignores spoofed headers without TRUSTED_PROXY', client_ip() === '10.0.0.5');
+putenv('TRUSTED_PROXY=1');
 check('client_ip uses X-Forwarded-For leftmost', client_ip() === '203.0.113.7');
 $_SERVER['HTTP_X_REAL_IP'] = '198.51.100.3';
 check('client_ip prefers X-Real-IP', client_ip() === '198.51.100.3');
@@ -1157,6 +1172,7 @@ if ($origRem !== null) { $_SERVER['REMOTE_ADDR'] = $origRem; } else { unset($_SE
 foreach (['HTTP_CF_CONNECTING_IP' => $origCf, 'HTTP_X_REAL_IP' => $origXr, 'HTTP_X_FORWARDED_FOR' => $origXff] as $k => $v) {
     if ($v !== null) { $_SERVER[$k] = $v; } else { unset($_SERVER[$k]); }
 }
+if ($origProxy === false) { putenv('TRUSTED_PROXY'); } else { putenv('TRUSTED_PROXY=' . $origProxy); }
 
 // --- Webhooks ---
 echo "== webhooks ==\n";

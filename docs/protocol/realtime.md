@@ -92,7 +92,9 @@ On `es.onerror` the client closes the EventSource and reopens it after
 ### 3.1 Handshake
 
 1. The chat page embeds `data-rt-ticket` (one-time ticket, 60 s TTL) and
-   `data-ws-url` (e.g. `wss://chat.example.com:8080/`).
+   `data-ws-url` (e.g. `wss://chat.example.com:8080/`). The host used to build
+   that URL comes from `APP_URL` / `TRUSTED_HOSTS` when set — the client `Host`
+   header is never trusted on its own (see `docs/installation.md` §3.4.1).
 2. The client opens `ws(s)://host:port/?ticket=<token>`.
 
    ```js

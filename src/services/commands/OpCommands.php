@@ -158,7 +158,7 @@ final class OpCommands
         }
         $isGuest = Auth::isGuest($target);
         $mask = strtolower($target['username']) . '!*@*';
-        BanService::addBan('channel_ban', $channel['id'], $mask, $reason ?: null, null, (int) $user['id'], $isGuest ? null : (int) $target['id']);
+        BanService::addBan('channel_ban', $channel['id'], $mask, $reason ?: null, null, Auth::isGuest($user) ? null : (int) $user['id'], $isGuest ? null : (int) $target['id']);
         if (!$isGuest) {
             ModerationService::record($target, 'ban', 'applied', $mask, $reason, 'c', (int) $channel['id']);
             ModerationService::note((int) $target['id'], $user, 'ban', $channel['name'] . ($reason ? ' — ' . $reason : ''));
@@ -198,7 +198,7 @@ final class OpCommands
                 return ['replies' => ["No such user: $target"]];
             }
         }
-        BanService::addBan('channel_ban', $channel['id'], $target, $reason, $duration, (int) $user['id'], $userId);
+        BanService::addBan('channel_ban', $channel['id'], $target, $reason, $duration, Auth::isGuest($user) ? null : (int) $user['id'], $userId);
         $display = $duration !== null ? self::fmtDuration($duration) : 'permanent';
         log_audit('ban', $channel['name'], "$target / $display" . ($reason ? " / $reason" : ''));
         if ($userId) {
@@ -225,10 +225,14 @@ final class OpCommands
         $ok = false;
         $u = self::targetUser($target);
         if ($u) {
-            $ok = (bool) Database::query(
-                'DELETE FROM bans WHERE kind = "channel_ban" AND channel_id = ? AND target_user_id = ?',
-                [$channel['id'], $u['id']]
-            )->rowCount();
+            // target_user_id references registered users only — a guest's id in
+            // that column slot would delete the colliding registered user's ban.
+            if (!Auth::isGuest($u)) {
+                $ok = (bool) Database::query(
+                    'DELETE FROM bans WHERE kind = "channel_ban" AND channel_id = ? AND target_user_id = ?',
+                    [$channel['id'], $u['id']]
+                )->rowCount();
+            }
             if (!$ok) {
                 $ok = (bool) Database::query(
                     'DELETE FROM bans WHERE kind = "channel_ban" AND channel_id = ? AND mask = ? COLLATE NOCASE',
@@ -261,7 +265,7 @@ final class OpCommands
         $isGuest = Auth::isGuest($target);
         $dur = parse_duration($duration);
         $mask = strtolower($target['username']) . '!*@*';
-        BanService::addBan('quiet', $channel['id'], $mask, null, $dur, (int) $user['id'], $isGuest ? null : (int) $target['id']);
+        BanService::addBan('quiet', $channel['id'], $mask, null, $dur, Auth::isGuest($user) ? null : (int) $user['id'], $isGuest ? null : (int) $target['id']);
         if (!$isGuest) {
             ModerationService::record($target, 'quiet', 'applied', $mask, '', 'c', (int) $channel['id']);
             ModerationService::note((int) $target['id'], $user, 'warn', 'Muted in ' . $channel['name'] . ' (+q)' . ($dur ? ' for ' . self::fmtDuration($dur) : ''));
@@ -385,7 +389,7 @@ final class OpCommands
 
     private static function applyModeFlag(array $channel, array $user, string $flag, bool $add, array &$rest): array|string
     {
-        $level = AccessService::effectiveLevel($channel['id'], (int) $user['id']);
+        $level = AccessService::effectiveLevel($channel['id'], $user);
         $w = level_weight($level);
         $isHalfop = $w >= level_weight('halfop'); // half-op: +b +v +m +i +t +k, kick
         $isOp = $w >= level_weight('op');          // op: everything above + +l +C +p +s +o
@@ -466,7 +470,7 @@ final class OpCommands
                     return 'Usage: /mode +b <mask> or /mode -b <mask>';
                 }
                 if ($add) {
-                    BanService::addBan('channel_ban', $channel['id'], $mask, null, null, (int) $user['id']);
+                    BanService::addBan('channel_ban', $channel['id'], $mask, null, null, Auth::isGuest($user) ? null : (int) $user['id']);
                     return ['channel_id' => $channel['id'], 'kind' => 'ban', 'content' => $user['username'] . " banned $mask"];
                 }
                 BanService::removeByMask('channel_ban', $channel['id'], $mask);
@@ -496,7 +500,7 @@ final class OpCommands
         if (!$channel) {
             return ['replies' => ['You must be in a channel or provide one, e.g. /clear <#channel> <users|bans|ops|voices|topic|modes>']];
         }
-        $level = AccessService::effectiveLevel($channel['id'], (int) $user['id']);
+        $level = AccessService::effectiveLevel($channel['id'], $user);
         $isFounder = level_weight($level) >= level_weight('founder');
         $isOp = level_weight($level) >= level_weight('op');
         switch ($what) {
@@ -532,7 +536,13 @@ final class OpCommands
                 }
                 return ['replies' => ["Cleared $what."]];
             case 'topic':
+                // Honours the +t topic lock like /topic does: a locked topic
+                // requires op level to clear (or staff).
+                if (!self::isStaff($user) && (int) $channel['topic_locked'] === 1 && !$isOp) {
+                    return ['replies' => ['You must be a channel operator (+o) to clear a locked topic.']];
+                }
                 ChannelService::update($channel['id'], ['topic' => '']);
+                MessageService::system($channel['id'], 'topic', $user['username'] . ' cleared the topic');
                 return ['replies' => ['Topic cleared.']];
             default:
                 return ['replies' => ['Usage: /clear <users|bans|ops|voices|topic|modes>']];
