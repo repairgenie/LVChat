@@ -2427,6 +2427,12 @@ check('notify partner registered', $s === 302, (string) $s);
 [$s, , $appN] = req('GET', '/app', [], $cjNT);
 check('web app exposes notify prefs to the client', $s === 200 && str_contains($appN, 'data-notify-prefs'), (string) $s);
 req('GET', '/app', [], $cjNB);
+// Issue #15: signing in no longer auto-joins #general — the tests below
+// exercise #general deliberately, so join it explicitly for both accounts.
+[$s] = req('POST', '/api/join', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'name' => '#general'], $cjNT);
+check('notify user joined #general', $s === 200, (string) $s);
+[$s] = req('POST', '/api/join', ['csrf' => csrf(req('GET', '/app', [], $cjNB)[2]), 'name' => '#general'], $cjNB);
+check('notify partner joined #general', $s === 200, (string) $s);
 
 // /api/notify/prefs: defaults, save, roundtrip, validation, auth gate.
 [$s, , $b] = req('GET', '/api/notify/prefs', [], $cjNT);

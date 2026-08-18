@@ -3998,6 +3998,7 @@ if (j.mode) {
       if (first) oldest = parseInt(first.dataset.id, 10);
       const params2 = new URLSearchParams({ before: oldest || 1e12 });
       if (CHANNEL) params2.set('channel', CHANNEL);
+      if (DM) params2.set('dm', DM);
       const tryLoad = () => {
         fetch('/api/history?' + params2.toString())
           .then((r) => r.json())

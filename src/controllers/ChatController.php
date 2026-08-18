@@ -95,10 +95,16 @@ final class ChatController
             }
         }
         if (!$channel && !$dm && !isset($_GET['channel'])) {
-            $channel = ChannelService::findBySlug('general');
-            if ($channel && !AccessService::member($channel['id'], $user)) {
-                ChannelService::join($channel, $user);
-            }
+            // Issue #15 — never force users into #general. Only auto-open a
+            // channel the user already belongs to (most recently read first);
+            // users with no memberships land on the neutral home view.
+            $memberCol = Auth::isGuest($user) ? 'guest_id' : 'user_id';
+            $channel = Database::row(
+                "SELECT c.* FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+                 WHERE cm.$memberCol = ?
+                 ORDER BY cm.last_read_id DESC, cm.joined_at DESC LIMIT 1",
+                [(int) $user['id']]
+            );
         }
         // Messaging yourself is allowed (an IRC hallmark) — no self-DM guard.
 
@@ -171,10 +177,11 @@ final class ChatController
         }
         // Registered (non-guest) users for the @mention autocomplete pool,
         // ordered so the most recently active online users come first.
+        // searchable = 0 accounts opt out of being found by name (Issue #14).
         $mentionUsers = Database::all(
             "SELECT id, username,
                     CASE WHEN last_seen >= datetime('now', '-30 seconds') AND away IS NULL THEN 1 ELSE 0 END AS online
-             FROM users WHERE guest = 0 AND status = 'active' AND id != ?
+             FROM users WHERE guest = 0 AND status = 'active' AND id != ? AND searchable = 1
              ORDER BY online DESC, last_seen DESC, username COLLATE NOCASE LIMIT 2000",
             [$user['id']]
         );

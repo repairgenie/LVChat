@@ -133,6 +133,7 @@
     pendingJoin: null,
     pendingCall: null,
     pendingCallAt: 0,    // ms when the outgoing call was initiated (race guard)
+    pendingCallVideo: false, // outgoing call should start with the camera on
     evt: null,            // { id, slug, title, invite_code, invite_url, status } for the current event
     ringSeconds: 20,     // server ring timeout (call_ring_seconds)
     ringStarted: {},     // call_id -> ms when its ring was first seen
@@ -152,6 +153,7 @@
     hands: {},           // identity -> raised hand?
     reactions: [],       // transient floating emoji: { emoji, name, at }
     ringAudio: null,     // synthesized ring tone element
+    outgoingRing: false, // caller-side ring tone active for an outgoing call
     recording: { enabled: false, active: null },  // egress recording state
   };
 
@@ -309,6 +311,13 @@
       state.connecting = false;
       state.inVoice = true;
       applyDevicePrefs();
+      // A video call (Issue #17) starts with the camera on: the caller asked
+      // for it at initiate-time, so flip the camera on the moment the room is
+      // live, then clear the intent (later joins stay audio-only).
+      if (state.pendingCallVideo) {
+        state.pendingCallVideo = false;
+        setCamera(true);
+      }
       render();
     });
 
@@ -1083,6 +1092,8 @@
   }
 
   function leaveVoice() {
+    state.pendingCallVideo = false;
+    state.outgoingRing = false;
     stopRing();
     if (state.room) { try { state.room.disconnect(); } catch (e) {} }
     state.room = null;
@@ -1096,15 +1107,20 @@
     render();
   }
 
-  function startCall() {
+  function startCall(video) {
     var dm = currentDm();
     if (!dm) return;
+    state.pendingCallVideo = !!video;
     api('/api/webrtc/call/initiate', { user: dm }).then(function (j) {
       if (!j.ok) { toast(j.error || 'Could not start the call.'); return; }
       state.pendingCall = j.call_id;
       state.pendingCallAt = Date.now();
       state.ringStarted[j.call_id] = Date.now();
       state.ringSeconds = j.ring_seconds || state.ringSeconds || 20;
+      // Audible ring on the caller side: initiated by a click, so the
+      // autoplay policy permits immediate playback here.
+      state.outgoingRing = true;
+      playRing();
       render();
     });
   }
@@ -1133,6 +1149,8 @@
     var call = state.calls.active || state.calls.outgoing[0] || null;
     if (call) api('/api/webrtc/call/end', { call_id: call.call_id });
     state.pendingCall = null;
+    state.pendingCallVideo = false;
+    state.outgoingRing = false;
     stopRing();
     if (state.room) { try { state.room.disconnect(); } catch (e) {} }
     state.room = null;
@@ -1183,6 +1201,7 @@
     if (state.pendingCall && !active && !state.calls.outgoing[0] && Date.now() - state.pendingCallAt > POLL_MS * 1.5) {
       var cid = state.pendingCall;
       state.pendingCall = null;
+      state.pendingCallVideo = false;
       delete state.ringStarted[cid];
       toast(recentMessage(findRecentCall(cid)));
     }
@@ -1359,6 +1378,8 @@
   }
 
   /* ── DOM ────────────────────────────────────────────────────────────── */
+  var ICON_VIDEO = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10l5-3v10l-5-3"/></svg>';
+
   function ensureEls() {
     if (els.dropdown) return;
     var header = hostHeaderEl();
@@ -1391,6 +1412,18 @@
       onMainClick();
     });
     menu.appendChild(els.ddCallItem);
+
+    els.ddVideoCallItem = document.createElement('button');
+    els.ddVideoCallItem.type = 'button';
+    els.ddVideoCallItem.className = 'lvcvoice-dd-item';
+    els.ddVideoCallItem.innerHTML = '<span class="lvcvoice-dd-item-icon" style="color:#a78bfa">' + ICON_VIDEO + '</span><span class="lvcvoice-dd-item-label">Video call</span>';
+    els.ddVideoCallItem.addEventListener('click', function () {
+      closeDropdown();
+      if (state.calls.active || state.calls.outgoing[0]) { endCall(); return; }
+      if (state.inVoice) { leaveVoice(); return; }
+      startCall(true);
+    });
+    menu.appendChild(els.ddVideoCallItem);
 
     els.ddEvtItem = document.createElement('button');
     els.ddEvtItem.type = 'button';
@@ -1686,7 +1719,7 @@
       stopRing();
     });
     el._currentRingId = function (v) { if (arguments.length) currentRingId = v; return currentRingId; };
-    el._ringVisible = function (vis) { if (arguments.length) { if (vis) playRing(); else stopRing(); } return vis; };
+    el._ringVisible = function (vis) { if (arguments.length) { if (vis) playRing(); else if (!state.outgoingRing) stopRing(); } return vis; };
     return el;
   }
 
@@ -1838,6 +1871,19 @@
     try { if (state.ringAudio) { state.ringAudio.pause(); state.ringAudio.currentTime = 0; } } catch (e) {}
   }
 
+  /* Autoplay policy: an incoming call can arrive at any time, so its first
+   * ring playback is NOT gesture-initiated and browsers may block it. Retry
+   * on the next click/keypress — by then the page has a user gesture and the
+   * ring becomes audible. No-ops while nothing is ringing. */
+  function unlockRingAudio() {
+    try {
+      if (!els.ring || els.ring.classList.contains('hidden')) return;
+      playRing();
+    } catch (e) { /* audio unavailable */ }
+  }
+  document.addEventListener('click', unlockRingAudio);
+  document.addEventListener('keydown', unlockRingAudio);
+
   function onMainClick() {
     var dm = currentDm();
     if (dm) { startCall(); return; }
@@ -1905,6 +1951,8 @@
     }
 
     if (els.ddEvtItem) els.ddEvtItem.classList.toggle('hidden', !!dm);
+    // Video calls are a 1:1 initiation — offer them only next to a chat.
+    if (els.ddVideoCallItem) els.ddVideoCallItem.classList.toggle('hidden', !dm || !!state.calls.active || !!state.calls.outgoing[0]);
 
     // Call pill.
     var call = state.calls.active;
@@ -1919,8 +1967,19 @@
         els.pill.classList.remove('active');
         els.pill.classList.add('ringing');
         els.pill.querySelector('.pill-text').textContent = ringText(outgoing, 'Ringing');
+        // Keep the caller-side ring tone playing while the call is ringing;
+        // it stops here as soon as the outgoing call resolves (accepted,
+        // declined, timed out, or ended).
+        if (!state.outgoingRing) {
+          state.outgoingRing = true;
+          playRing();
+        }
       } else {
         els.pill.classList.add('hidden');
+        if (state.outgoingRing) {
+          state.outgoingRing = false;
+          stopRing();
+        }
       }
     }
 

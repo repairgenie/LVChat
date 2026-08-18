@@ -39,7 +39,7 @@ function safe_next(string $path): string
 {
     $path = trim($path);
     if ($path === '' || $path[0] !== '/' || str_starts_with($path, '//') || str_contains($path, '\\') || preg_match('/[\x00-\x1F\x7F]/', $path)) {
-        return '/app?channel=general';
+        return '/app';
     }
     return $path;
 }

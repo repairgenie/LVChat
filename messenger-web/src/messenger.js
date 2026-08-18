@@ -92,17 +92,20 @@ const notif = {
 }
 
 /* The window may have been opened as a dedicated conversation window:
- * messenger.html?profile=<id>&chat=room:slug | chat=dm:username */
+ * messenger.html?profile=<id>&chat=room:slug | chat=dm:username
+ * A &jump=<msg_id> asks the opened conversation to scroll to that message. */
 function parseChatTarget () {
   const params = new URLSearchParams(location.search)
   const chat = params.get('chat') || ''
   const sep = chat.indexOf(':')
+  const jump = params.get('jump')
   if (sep === -1) return
   const type = chat.slice(0, sep)
   const id = chat.slice(sep + 1)
   if ((type === 'dm' || type === 'room') && id) {
     state.chatWindow = true
     state._chatTarget = { type, id }
+    if (jump) state._chatTarget.jump = jump
   }
 }
 
@@ -426,7 +429,7 @@ async function startMain (me) {
 
   if (state.chatWindow && state._chatTarget) {
     try {
-      await openConversation(state._chatTarget.type, state._chatTarget.id)
+      await openConversation(state._chatTarget.type, state._chatTarget.id, state._chatTarget.jump)
     } catch (err) { /* leave whatever rendered */ }
     // Dedicated conversation windows live in real time too: openConversation
     // only does a one-shot poll, so keep polling (and subscribe via WebSocket)

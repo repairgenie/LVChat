@@ -26,9 +26,9 @@ final class AuthController
     public static function loginForm(): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
-        $next = safe_next((string) ($_GET['next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_GET['next'] ?? '/app'));
         render_view('auth/login', [
             'next' => $next,
             'error' => flash(),
@@ -40,7 +40,7 @@ final class AuthController
         Csrf::verify();
         $username = trim($_POST['username'] ?? '');
         $password = (string) ($_POST['password'] ?? '');
-        $next = safe_next((string) ($_POST['next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_POST['next'] ?? '/app'));
 
         if (login_attempt_count() >= login_attempt_max()) {
             flash('Too many failed login attempts. Please wait a few minutes and try again.');
@@ -93,7 +93,7 @@ final class AuthController
     public static function mfaForm(): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
         if (empty($_SESSION['mfa_pending_uid'])) {
             redirect('/login');
@@ -105,7 +105,7 @@ final class AuthController
     {
         Csrf::verify();
         $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
-        $next = safe_next((string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_SESSION['mfa_pending_next'] ?? '/app'));
         if (!$uid) {
             redirect('/login');
         }
@@ -129,7 +129,7 @@ final class AuthController
     public static function mfaSetupForm(): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
         $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
         $secret = (string) ($_SESSION['mfa_setup_secret'] ?? '');
@@ -151,7 +151,7 @@ final class AuthController
     {
         Csrf::verify();
         $uid = (int) ($_SESSION['mfa_pending_uid'] ?? 0);
-        $next = safe_next((string) ($_SESSION['mfa_pending_next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_SESSION['mfa_pending_next'] ?? '/app'));
         $secret = (string) ($_SESSION['mfa_setup_secret'] ?? '');
         if (!$uid || $secret === '') {
             redirect('/login');
@@ -178,9 +178,9 @@ final class AuthController
     public static function registerForm(): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
-        $next = safe_next((string) ($_GET['next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_GET['next'] ?? '/app'));
         $inviteToken = trim((string) ($_GET['invite'] ?? ''));
         $invite = null;
         if ($inviteToken !== '') {
@@ -210,7 +210,7 @@ final class AuthController
             log_audit('bot_signup_blocked', trim((string) ($_POST['username'] ?? '')));
             redirect('/register');
         }
-        $next = safe_next((string) ($_POST['next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_POST['next'] ?? '/app'));
         $inviteToken = trim((string) ($_POST['invite'] ?? ''));
         $username = trim($_POST['username'] ?? '');
         $email = trim($_POST['email'] ?? '');
@@ -280,7 +280,7 @@ final class AuthController
     public static function forgotPasswordForm(): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
         render_view('auth/forgot-password', [
             'error' => flash(),
@@ -317,7 +317,7 @@ final class AuthController
     public static function resetPasswordForm(array $params): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
         $token = (string) ($params['token'] ?? '');
         $row = AuthTokenService::validate($token, AuthTokenService::TYPE_RESET);
@@ -371,7 +371,7 @@ final class AuthController
     public static function magicLoginForm(): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
         render_view('auth/magic-link', [
             'error' => flash(),
@@ -406,7 +406,7 @@ final class AuthController
     public static function magicLogin(array $params): void
     {
         if (Auth::user()) {
-            redirect('/app?channel=general');
+            redirect('/app');
         }
         $token = (string) ($params['token'] ?? '');
         $row = AuthTokenService::validate($token, AuthTokenService::TYPE_MAGIC);
@@ -432,23 +432,23 @@ final class AuthController
         login_attempt_clear();
         // MFA gate — magic links must still pass TOTP like a password login.
         if (TotpService::enabled($row)) {
-            self::beginMfa($row, '/app?channel=general');
+            self::beginMfa($row, '/app');
             redirect('/login/mfa');
         }
         if (TotpService::requiredFor($row)) {
-            self::beginMfa($row, '/app?channel=general');
+            self::beginMfa($row, '/app');
             $_SESSION['mfa_setup_secret'] = TotpService::generateSecret();
             redirect('/login/mfa/setup');
         }
         Auth::login($row);
         log_audit('magic_login', 'user#' . (int) $row['id']);
-        redirect('/app?channel=general');
+        redirect('/app');
     }
 
     public static function guestLogin(): void
     {
         Csrf::verify();
-        $next = safe_next((string) ($_POST['next'] ?? '/app?channel=general'));
+        $next = safe_next((string) ($_POST['next'] ?? '/app'));
         $nick = trim((string) ($_POST['nick'] ?? ''));
         $age18 = ($_POST['age18'] ?? '0') === '1';
         if (login_attempt_count() >= login_attempt_max()) {

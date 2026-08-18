@@ -98,6 +98,7 @@ function openMessenger (conv) {
   let target = './messenger.html';
   if (conv && conv.type && conv.id) {
     target += '?chat=' + encodeURIComponent(conv.type + ':' + conv.id);
+    if (conv.msg_id) target += '&jump=' + encodeURIComponent(conv.msg_id);
   }
   return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then((clientList) => {
@@ -121,6 +122,7 @@ self.addEventListener('push', (event) => {
   const p = payload.data || {};
   const type = p.type || payload.type || 'channel';
   const id = p.channel || p.username || null;
+  const msgId = p.msg_id || null;
   const title = String(payload.title || 'LVChat Messenger');
   const body = String(payload.body || '');
   event.waitUntil(
@@ -129,7 +131,7 @@ self.addEventListener('push', (event) => {
       tag: String(payload.tag || ''),
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
-      data: { conv: type && id ? { type, id } : null }
+      data: { conv: type && id ? { type, id, msg_id: msgId } : null }
     })
   );
 });
