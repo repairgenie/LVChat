@@ -18,7 +18,7 @@
 ?>
 
 <div class="max-w-md mx-auto">
-  <div class="card p-8">
+  <div class="card auth-card p-8">
     <div class="flex items-center gap-3 mb-8">
       <?= logo_mark() ?>
       <div>

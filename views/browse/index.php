@@ -109,7 +109,7 @@ function channel_card(array $c, array $joinedMap): string {
     </div>
     <?php if (!$channels): ?>
     <div class="py-16 text-center">
-      <div class="text-4xl mb-3 opacity-40">🔍</div>
+      <div class="text-4xl mb-3 opacity-40 text-discord-500"><?= icon('globe', 'w-8 h-8') ?></div>
       <div class="text-discord-400 text-sm font-medium">No public channels found</div>
       <div class="text-discord-500 text-xs mt-1">Be the first to create one!</div>
     </div>

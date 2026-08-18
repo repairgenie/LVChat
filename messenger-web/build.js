@@ -162,12 +162,15 @@ function build (opts) {
     './messenger.html',
     './messenger.css',
     './messenger.js',
+    './icons.js',
     './api.js',
     './emoji.js',
     './web-bridge.js',
     './config.js',
     './voice.css',
     './voice.js',
+    './fonts/InterVariable.woff2',
+    './fonts/InterVariable-Italic.woff2',
     './vendor/livekit-client.umd.js',
     './vendor/selfie-segmentation/selfie_segmentation.js',
     './manifest.webmanifest',
@@ -194,8 +197,12 @@ function build (opts) {
   write(path.join(OUT, 'sw.js'), sw)
 
   // Static assets.
-  for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'web-bridge.js', 'voice.css', 'voice.js', 'offline.html']) {
+  for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'icons.js', 'web-bridge.js', 'voice.css', 'voice.js', 'offline.html']) {
     copy(path.join(SRC, f), path.join(OUT, f))
+  }
+  fs.mkdirSync(path.join(OUT, 'fonts'), { recursive: true })
+  for (const f of fs.readdirSync(path.join(SRC, 'fonts'))) {
+    copy(path.join(SRC, 'fonts', f), path.join(OUT, 'fonts', f))
   }
   fs.mkdirSync(path.join(OUT, 'vendor'), { recursive: true })
   copy(path.join(SRC, 'vendor', 'livekit-client.umd.js'), path.join(OUT, 'vendor', 'livekit-client.umd.js'))

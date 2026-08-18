@@ -113,7 +113,7 @@ final class EventLogService
             . '</ul>'
             . '</div>';
 
-        return Mailer::sendWithAttachment(
+        $result = Mailer::sendWithAttachment(
             $founder['email'],
             "Event Log: {$event['title']}",
             $text,
@@ -121,6 +121,11 @@ final class EventLogService
             $zipPath,
             $filename
         );
+        // sendWithAttachment returns an array, not a bool — convert before the
+        // : bool return type. Returning the raw array used to throw a TypeError
+        // AFTER the mail was delivered, aborting the cron tick before the event
+        // was marked ended — so the exact same email went out on every tick.
+        return !empty($result['ok']);
     }
 
     /** Fetch all chat log rows for the channel name. */

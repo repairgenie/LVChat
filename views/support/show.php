@@ -123,7 +123,7 @@ $imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
           <img src="<?= h($att['url']) ?>" alt="<?= h($att['name']) ?>" class="att-img" onclick="openLightbox(this.src)">
           <?php else: ?>
           <a href="<?= h($att['url']) ?>" download="<?= h($att['name']) ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-discord-750 border border-discord-600 text-xs text-discord-200 hover:text-white hover:border-discord-500">
-            📎 <?= h($att['name']) ?>
+            <?= icon('paperclip', 'w-3.5 h-3.5') ?> <?= h($att['name']) ?>
           </a>
           <?php endif; ?>
         <?php endforeach; ?>

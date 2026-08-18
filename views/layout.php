@@ -42,6 +42,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
   <?php require ROOT . '/views/partials/theme.php'; ?>
   <?php require ROOT . '/views/partials/pwa.php'; ?>
+  <script src="/assets/js/icons.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/icons.js') ?>"></script>
 </head>
 <body class="bg-discord-900 text-discord-200 antialiased min-h-screen flex flex-col" data-csrf="<?= h(Csrf::token()) ?>">
   <header class="bg-discord-950/60 border-b border-discord-800">
@@ -70,7 +71,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
         </form>
       </nav>
       <?php else: ?>
-      <button id="theme-toggle" class="px-2 py-1.5 rounded-md hover:bg-discord-750 text-sm" title="Switch theme">🌙</button>
+      <button id="theme-toggle" class="px-2 py-1.5 rounded-md hover:bg-discord-750" title="Switch theme"><?= icon('moon', 'w-4 h-4') ?></button>
       <?php endif; ?>
     </div>
   </header>
@@ -100,7 +101,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
   (function () {
     var btn = document.getElementById('theme-toggle');
     if (!btn) return;
-    function icon() { btn.textContent = document.documentElement.classList.contains('light') ? '☀️' : '🌙'; }
+    function icon() { btn.innerHTML = document.documentElement.classList.contains('light') ? window.icon('sun', 'w-4 h-4') : window.icon('moon', 'w-4 h-4'); }
     btn.addEventListener('click', function () {
       var light = document.documentElement.classList.toggle('light');
       var theme = light ? 'light' : 'dark';

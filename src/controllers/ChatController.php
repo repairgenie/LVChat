@@ -685,6 +685,7 @@ final class ChatController
                     MessageService::markDmRead($user, $t);
                 }
                 $out['dm'] = $t['username'];
+                $out['typing'] = TypingService::forDm((string) $t['username']);
                 $out['presence'][] = array_merge([
                     'username' => $t['username'],
                     'level' => 'normal',
@@ -716,6 +717,7 @@ final class ChatController
             $out['messages'] = MessageService::hydrateReactions(MessageService::forChannel((int) $channel['id'], $since), $user);
             $out['channel'] = $channel['slug'];
             $out['topic'] = $channel['topic'];
+            $out['typing'] = TypingService::forChannel((int) $channel['id'], (int) $user['id']);
             // The embedded channel URL (null when unset or its domain is banned).
             $out['channel_url'] = ChannelService::channelUrl($channel);
             $out['url_banned'] = ChannelService::channelUrlBanned($channel);
@@ -752,6 +754,7 @@ final class ChatController
         // Periodic presence sweep: mark stale users offline so they don't
         // appear ghost-online. Runs at most once every 60 seconds per process.
         self::presenceSweep();
+        TypingService::sweep();
         json_out(self::pollPayload($user, $since));
     }
 
@@ -961,6 +964,127 @@ final class ChatController
         }
         self::pushMsgUpdate($id, 'reaction', ['reactions' => $r['reactions']['rows'] ?? []]);
         json_out(['ok' => true, 'added' => $r['added'], 'reactions' => $r['reactions']]);
+    }
+
+    /** POST /api/message/pin — pin a channel message (ops/admins). */
+    public static function pinMessage(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        $id = (int) ($_POST['id'] ?? 0);
+        $r = self::setPin($id, $user, true);
+        if (is_string($r)) {
+            json_out(['error' => $r], 403);
+        }
+        log_audit('message_pin', 'msg#' . $id, $user['username']);
+        json_out(['ok' => true, 'pins' => $r]);
+    }
+
+    /** POST /api/message/unpin — remove a pinned message (ops/admins). */
+    public static function unpinMessage(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        $id = (int) ($_POST['id'] ?? 0);
+        $r = self::setPin($id, $user, false);
+        if (is_string($r)) {
+            json_out(['error' => $r], 403);
+        }
+        log_audit('message_unpin', 'msg#' . $id, $user['username']);
+        json_out(['ok' => true, 'pins' => $r]);
+    }
+
+    /** Shared pin/unpin logic. Returns the updated pin list or an error string. */
+    private static function setPin(int $id, array $user, bool $pin): array|string
+    {
+        $msg = Database::one('SELECT id, channel_id, content, username, sender_id, kind FROM messages WHERE id = ?', [$id]);
+        if (!$msg) {
+            return 'Message not found.';
+        }
+        if ($msg['kind'] !== 'message' && $msg['kind'] !== 'action') {
+            return 'Only chat messages can be pinned.';
+        }
+        // Ops (level >= 3) and admins may pin; founders included via weight.
+        $level = AccessService::effectiveLevel((int) $msg['channel_id'], (int) $user['id']);
+        $canPin = $user['role'] === 'admin' || level_weight($level) >= 3;
+        if (!$canPin) {
+            return 'Only operators and admins can pin messages here.';
+        }
+        if ($pin) {
+            Database::query(
+                'INSERT OR IGNORE INTO pinned_messages (message_id, channel_id, pinned_by) VALUES (?, ?, ?)',
+                [(int) $msg['id'], (int) $msg['channel_id'], (int) $user['id']]
+            );
+        } else {
+            Database::query('DELETE FROM pinned_messages WHERE message_id = ?', [(int) $msg['id']]);
+        }
+        self::pushMsgUpdate($id, $pin ? 'pin' : 'unpin');
+        return self::pinsFor(self::channelSlugById((int) $msg['channel_id']));
+    }
+
+    private static function channelSlugById(int $channelId): string
+    {
+        return (string) (Database::scalar('SELECT slug FROM channels WHERE id = ?', [$channelId]) ?? '');
+    }
+
+    /** GET /api/channel/pins?channel=slug — current pins for a channel. */
+    public static function channelPins(): void
+    {
+        $user = self::requireUser();
+        $slug = (string) ($_GET['channel'] ?? '');
+        $channel = ChannelService::findBySlug($slug);
+        if (!$channel) {
+            json_out(['error' => 'Channel not found.'], 404);
+        }
+        $member = AccessService::member($channel['id'], $user);
+        if (!$member) {
+            json_out(['error' => 'Not a member of this channel.'], 403);
+        }
+        json_out(['ok' => true, 'pins' => self::pinsFor($slug)]);
+    }
+
+    /** Pinned-message summaries (id, sender, excerpt, time) for a channel. */
+    private static function pinsFor(string $slug): array
+    {
+        return Database::all(
+            "SELECT pm.message_id, pm.created_at, m.created_at AS message_at,
+                    COALESCE((SELECT u.username FROM users u WHERE u.id = m.sender_id),
+                             (SELECT g.nick FROM guests g WHERE g.id = m.sender_guest_id), '?') AS username,
+                    m.sender_id, m.sender_guest_id, m.content
+             FROM pinned_messages pm
+             JOIN messages m ON m.id = pm.message_id
+             JOIN channels c ON c.id = pm.channel_id
+             WHERE c.slug = ?
+             ORDER BY pm.id DESC LIMIT 50",
+            [$slug]
+        );
+    }
+
+    /** POST /api/typing — record that the user is typing in a conversation. */
+    public static function typing(): void
+    {
+        $user = self::requireUser();
+        self::requireCsrf();
+        $channelId = null;
+        $dm = null;
+        $slug = (string) ($_POST['channel'] ?? '');
+        if ($slug !== '') {
+            $channel = ChannelService::findBySlug($slug);
+            if ($channel && AccessService::member($channel['id'], $user)) {
+                $channelId = (int) $channel['id'];
+            }
+        } elseif (isset($_POST['dm'])) {
+            $dm = trim((string) $_POST['dm']);
+            if ($dm !== '') {
+                $partner = Auth::findActor($dm);
+                if (!$partner) {
+                    json_out(['ok' => true]); // unknown actor — nothing to record
+                    return;
+                }
+            }
+        }
+        TypingService::touch($user, $channelId, $dm);
+        json_out(['ok' => true]);
     }
 
     public static function search(): void

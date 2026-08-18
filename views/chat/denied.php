@@ -20,7 +20,7 @@
  $title = 'Access denied'; ?>
 <div class="max-w-md mx-auto text-center">
   <div class="card p-8">
-    <div class="mx-auto mb-4 w-14 h-14 rounded-2xl bg-red-500/10 flex items-center justify-center text-2xl">🚫</div>
+    <div class="mx-auto mb-4 w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400"><?= icon('eye-off', 'w-6 h-6') ?></div>
     <h1 class="text-xl font-bold text-white"><?= h($channel['name']) ?></h1>
     <p class="text-sm text-discord-400 mt-2 mb-6"><?= h($reason) ?></p>
     <?php if ((int) $channel['invite_only'] === 1): ?>

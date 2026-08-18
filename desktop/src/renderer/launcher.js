@@ -145,6 +145,10 @@ function renderServers () {
   for (const profile of profilesData) {
     const li = el('li')
 
+    const icon = el('div', 'site-icon')
+    icon.textContent = (profile.name || '?').charAt(0).toUpperCase()
+    li.appendChild(icon)
+
     const grow = el('div', 'grow')
     const top = el('div', 'row')
     const name = el('div', 'site-name', profile.name)

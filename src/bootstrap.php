@@ -69,6 +69,7 @@ session_start();
 
 require ROOT . '/src/Database.php';
 require ROOT . '/src/Helpers.php';
+require ROOT . '/src/Icons.php';
 require ROOT . '/src/Csrf.php';
 require ROOT . '/src/Auth.php';
 require ROOT . '/src/Router.php';
@@ -81,6 +82,7 @@ require ROOT . '/src/services/CensorService.php';
 require ROOT . '/src/services/UploadService.php';
 require ROOT . '/src/services/GifService.php';
 require ROOT . '/src/services/SoundService.php';
+require ROOT . '/src/services/TypingService.php';
 require ROOT . '/src/services/ThemeService.php';
 require ROOT . '/src/services/WebhookService.php';
 require ROOT . '/src/services/OpenClawBotService.php';

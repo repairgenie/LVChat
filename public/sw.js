@@ -39,7 +39,7 @@
 
 'use strict';
 
-const CACHE_STATIC = 'lvc-static-v1';
+const CACHE_STATIC = 'lvc-static-v2';
 const CACHE_PAGES = 'lvc-pages-v1';
 const CACHE_API = 'lvc-api-v1';
 
@@ -47,6 +47,9 @@ const PRECACHE = [
   '/manifest',
   '/assets/css/app.css',
   '/assets/js/app.js',
+  '/assets/js/icons.js',
+  '/assets/fonts/InterVariable.woff2',
+  '/assets/fonts/InterVariable-Italic.woff2',
   '/assets/vendor/tiptap/tiptap-bundle.js',
   '/assets/sounds/chime.wav',
   '/assets/sounds/ding.wav',

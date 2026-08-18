@@ -688,6 +688,22 @@ function avatar_url(?string $avatar): ?string
     return url($avatar);
 }
 
+/* Deterministic gradient tile for users without an uploaded avatar —
+   Discord-style colourful initial tile, hashed from the username so every
+   client (web, JS mirror in app.js, messenger) shows the same colours. */
+function avatar_gradient(string $name): string
+{
+    $palettes = [
+        ['#f59e0b', '#ef4444'], ['#ec4899', '#8b5cf6'], ['#3b82f6', '#06b6d4'],
+        ['#10b981', '#84cc16'], ['#f97316', '#f43f5e'], ['#6366f1', '#a855f7'],
+        ['#14b8a6', '#3b82f6'], ['#eab308', '#f97316'], ['#ef4444', '#f97316'],
+        ['#8b5cf6', '#ec4899'],
+    ];
+    $hash = array_sum(array_map('ord', str_split(strtolower((string) $name))));
+    [$c1, $c2] = $palettes[$hash % count($palettes)];
+    return "background:linear-gradient(135deg,{$c1},{$c2})";
+}
+
 /** Avatar <img> with the initial-letter fallback baked in for a given user row. */
 function avatar_img(array $user, string $classes = 'w-10 h-10 rounded-full'): string
 {
@@ -695,5 +711,5 @@ function avatar_img(array $user, string $classes = 'w-10 h-10 rounded-full'): st
     if (!empty($user['avatar'])) {
         return '<img src="' . h(url((string) $user['avatar'])) . '" alt="' . h($user['username']) . '" loading="lazy" class="' . h($classes) . ' object-cover">';
     }
-    return '<div class="' . h($classes) . ' bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600 shrink-0">' . $initial . '</div>';
+    return '<div style="' . avatar_gradient((string) ($user['username'] ?? '?')) . '" class="' . h($classes) . ' flex items-center justify-center text-sm font-bold text-white border border-black/20 shrink-0">' . $initial . '</div>';
 }

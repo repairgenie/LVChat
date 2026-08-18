@@ -126,6 +126,19 @@ function reactions_html(array $m, array $viewer): string {
     return $html;
 }
 
+function msg_action_buttons(array $viewer, array $m): string {
+    $mine = ((int) $m['sender_id'] === (int) $viewer['id'])
+        || (!empty($m['username']) && strcasecmp((string) $m['username'], (string) $viewer['username']) === 0);
+    $canEdit = $viewer['role'] === 'admin' || $mine;
+    $html = '<button type="button" class="msg-react-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Add a reaction">' . icon('smile') . '</button>'
+        . '<button type="button" class="msg-reply-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Reply">' . icon('reply') . '</button>';
+    if ($canEdit) {
+        $html .= '<button type="button" class="msg-edit p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Edit">' . icon('edit') . '</button>'
+            . '<button type="button" class="msg-del p-1.5 rounded-md text-discord-400 hover:text-red-400 hover:bg-discord-700" title="Delete">' . icon('trash') . '</button>';
+    }
+    return $html;
+}
+
 function msg_html(array $m, ?array $prev, array $viewer): string {
     $system = in_array($m['kind'], MessageService::SYSTEM_KINDS, true);
     if ($system) {
@@ -139,7 +152,7 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
         return '<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="' . (int) $m['id'] . '" data-kind="action" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '">'
             . '<div class="w-10 shrink-0"></div>'
             . '<div class="text-sm ' . ($isAdmin ? 'text-red-400' : 'text-discord-200') . '"' . $rc . '><span class="italic">* <span class="font-medium ' . $nameColor . '"' . $rc . '>' . h($m['username']) . '</span>' . $guestTag . ' ' . chat_markup($m['content']) . '</span></div>'
-            . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5 ml-auto" title="More">⋮</button>'
+            . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white self-start mt-0.5 ml-auto p-0.5" title="More">' . icon('more-h', 'w-3.5 h-3.5') . '</button>'
             . '</div>';
     }
 
@@ -176,19 +189,13 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
             . '<div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>'
             . reactions_html($m, $viewer)
             . '</div>'
-            . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5" title="More">⋮</button>'
+            . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white self-start mt-0.5 p-0.5" title="More">' . icon('more-h', 'w-3.5 h-3.5') . '</button>'
             . '</div>';
     }
 
-    $actions = '';
-    $mine = ((int) $m['sender_id'] === (int) $viewer['id'])
-        || (!empty($m['username']) && strcasecmp((string) $m['username'], (string) $viewer['username']) === 0);
-    if ($viewer['role'] === 'admin' || $mine) {
-        $actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
-            . '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
-    }
+    $actions = msg_action_buttons($viewer, $m);
 
-    return '<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '" data-bot="' . (!empty($m['bot']) ? '1' : '0') . '">'
+    return '<div class="msg group relative px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="' . (int) $m['id'] . '" data-kind="' . h($m['kind']) . '" data-is-pm="' . (!empty($m['is_pm']) ? '1' : '0') . '" data-author="' . h($m['username']) . '" data-guest="' . (!empty($m['guest']) ? '1' : '0') . '" data-bot="' . (!empty($m['bot']) ? '1' : '0') . '">'
         . '<div class="w-10 h-10 shrink-0">' . avatar_img($m, 'w-10 h-10 rounded-full') . '</div>'
         . '<div class="min-w-0 flex-1">'
         . '<div class="flex items-baseline gap-2 h-[22px]">'
@@ -200,8 +207,8 @@ function msg_html(array $m, ?array $prev, array $viewer): string {
         . '<div class="msg-content text-[15px] leading-[1.4] ' . $contentColor . ' break-words"' . $contentStyle . '>' . chat_content_html($m) . '</div>'
         . reactions_html($m, $viewer)
         . '</div>'
-        . '<div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">' . $actions . '</div>'
-        . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-1" title="More">⋮</button>'
+        . '<div class="msg-actions absolute right-4 -top-3 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 rounded-lg border border-discord-700 bg-discord-850 shadow-lg px-1 py-0.5 transition-opacity z-10">' . $actions . '</div>'
+        . '<button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-1" title="More">' . icon('more-h') . '</button>'
         . '</div>';
 }
 
@@ -210,7 +217,7 @@ function channel_link(array $c, string $channelSlug, array $user): string {
     $unread = (int) ($c['unread'] ?? 0);
     $online = (int) ($c['online'] ?? 0);
     $vis = $c['visibility'] !== 'public'
-        ? '<span class="chan-vis text-[10px] text-discord-400' . ($unread > 0 ? '' : ' ml-auto') . '">' . ($c['visibility'] === 'secret' ? '🔒' : ($c['visibility'] === 'staff' ? '🛡' : '👁')) . '</span>'
+        ? '<span class="chan-vis text-discord-400' . ($unread > 0 ? '' : ' ml-auto') . '" title="' . h(ucfirst((string) $c['visibility'])) . ' channel">' . icon($c['visibility'] === 'secret' ? 'lock' : ($c['visibility'] === 'staff' ? 'shield' : 'eye'), 'w-3.5 h-3.5') . '</span>'
         : '';
     $badge = $unread > 0
         ? '<span class="unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">' . ($unread > 99 ? '99+' : $unread) . '</span>'
@@ -228,7 +235,7 @@ function channel_link(array $c, string $channelSlug, array $user): string {
         . ' data-bg-overlay="' . (int) ($c['bg_overlay'] ?? ThemeService::CHAT_BG_OVERLAY_DEFAULT) . '"'
         . ' class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ' . $cls . '">'
         . '<span class="truncate ' . $nameCls . '">' . h($c['name']) . '</span>' . $onlineHtml . $badge . $vis
-        . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>'
+        . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white ml-auto shrink-0 p-0.5" title="More">' . icon('more-h', 'w-3.5 h-3.5') . '</button>'
         . '</a>';
 }
 
@@ -245,7 +252,7 @@ function member_html(array $m, bool $online): string {
         ' . avatar_img($m, 'w-6 h-6 rounded-full') . '
         <span class="w-2 h-2 rounded-full shrink-0 ' . $stDot . '"></span>
         <span class="min-w-0"><span class="block truncate">' . h($m['username']) . $guestTag . '</span>' . ($stText !== '' ? '<span class="block truncate text-[11px] text-discord-500">' . h($stText) . '</span>' : '') . '</span>' . $badge
-        . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button></a>';
+        . '<button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">' . icon('more-h', 'w-3.5 h-3.5') . '</button></a>';
 }
 
 /* Tailwind dot class for a user's presence (mirrors presenceDot in app.js). */
@@ -378,9 +385,9 @@ function presence_label(array $u): string {
       <span class="font-bold text-white text-sm truncate"><?= h($site) ?></span>
       <?php endif; ?>
       <div class="flex items-center gap-1.5">
-        <button id="theme-toggle" class="text-discord-300 hover:text-white text-base leading-none p-1 md:block hidden" title="Switch theme" aria-label="Switch theme">🌙</button>
-        <button id="bell" class="relative text-discord-300 hover:text-white text-lg leading-none" title="Notifications" aria-label="Notifications">
-          🔔<span id="bell-dot" class="hidden absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center"></span>
+        <button id="theme-toggle" class="text-discord-300 hover:text-white p-1.5 rounded-md hover:bg-discord-600/40 md:block hidden" title="Switch theme" aria-label="Switch theme"><?= icon('moon', 'w-4 h-4') ?></button>
+        <button id="bell" class="relative text-discord-300 hover:text-white p-1.5 rounded-md hover:bg-discord-600/40" title="Notifications" aria-label="Notifications">
+          <?= icon('bell', 'w-4 h-4') ?><span id="bell-dot" class="hidden absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white flex items-center justify-center"></span>
         </button>
       </div>
     </div>
@@ -397,13 +404,13 @@ function presence_label(array $u): string {
       <?php if ($user['role'] === 'admin'): ?>
       <nav class="px-2 pt-3">
         <a href="/admin" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-red-400 font-bold hover:bg-discord-600/40 hover:text-red-300 text-sm">
-          <span class="text-red-400">🛡</span> Admin dashboard
+          <?= icon('shield', 'w-4 h-4') ?> Admin dashboard
         </a>
       </nav>
       <?php elseif ($user['role'] === 'staff'): ?>
       <nav class="px-2 pt-3">
         <a href="/admin/moderation" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-amber-400 hover:bg-discord-600/40 hover:text-amber-300 text-sm font-medium">
-          <span class="text-discord-400">🛡</span> Moderation
+          <?= icon('shield', 'w-4 h-4 text-discord-400') ?> Moderation
         </a>
       </nav>
       <?php endif; ?>
@@ -420,11 +427,11 @@ function presence_label(array $u): string {
       <nav class="px-2 pt-2 pb-2">
         <div class="px-2 text-xs font-bold uppercase tracking-wide text-discord-400 flex items-center justify-between">
           <span>Text channels</span>
-          <button id="create-channel" class="text-discord-400 hover:text-white text-sm" title="Create a channel" aria-label="Create a channel">＋</button>
+          <button id="create-channel" class="text-discord-400 hover:text-white p-1 rounded" title="Create a channel" aria-label="Create a channel"><?= icon('plus', 'w-3.5 h-3.5') ?></button>
         </div>
         <div class="mt-1 space-y-0.5">
           <button id="browse-btn-sidebar" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-discord-300 hover:bg-discord-600/40 hover:text-white text-sm w-full text-left cursor-pointer">
-            <span class="text-discord-400">🌐</span> Browse channels
+            <?= icon('globe', 'w-4 h-4 text-discord-400') ?> Browse channels
           </button>
           <?php foreach ($otherChannels as $c): ?><?= channel_link($c, $channelSlug, $user) ?><?php endforeach; ?>
         </div>
@@ -445,7 +452,7 @@ function presence_label(array $u): string {
             <span class="w-2 h-2 rounded-full <?= !empty($d['away']) ? 'bg-amber-400' : ($dOnline ? 'bg-green-500' : 'bg-discord-500') ?>"></span>
             <span class="truncate <?= ($d['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?> <?= $unreadCls ?>"><?= h($d['username']) ?><?= !empty($d['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
             <?php if ($ucnt): ?><span class="ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><?= $ucnt > 99 ? '99+' : $ucnt ?></span><?php endif; ?>
-            <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
+            <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white ml-auto shrink-0 p-0.5" title="More"><?= icon('more-h', 'w-3.5 h-3.5') ?></button>
           </a>
           <?php endforeach; ?>
         </div>
@@ -457,7 +464,7 @@ function presence_label(array $u): string {
           <?php foreach ($onlineUsers as $ou): ?>
           <a href="/app?dm=<?= h(rawurlencode($ou['username'])) ?>" data-ctx-user="<?= h($ou['username']) ?>" data-user-id="<?= (int) ($ou['id'] ?? 0) ?>" data-guest="<?= !empty($ou['guest']) ? '1' : '0' ?>" class="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-discord-300 hover:bg-discord-600/40">
             <span class="w-2 h-2 rounded-full <?= presence_dot_class($ou) ?>"></span><span class="<?= ($ou['role'] ?? '') === 'admin' ? 'text-red-400' : '' ?>"><?= h($ou['username']) ?><?= !empty($ou['guest']) ? ' <span class="text-[10px] text-discord-500">(guest)</span>' : '' ?></span>
-            <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
+            <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white ml-auto shrink-0 p-0.5" title="More"><?= icon('more-h', 'w-3.5 h-3.5') ?></button>
           </a>
           <?php endforeach; ?>
           <?php if (!$onlineUsers): ?><div class="px-2 py-1 text-xs text-discord-500">Nobody online</div><?php endif; ?>
@@ -485,7 +492,7 @@ function presence_label(array $u): string {
             default => 'bg-green-500',
         };
         ?>
-        <div id="me-header-avatar" class="relative w-8 h-8 rounded-full bg-blurple flex items-center justify-center text-sm font-bold text-white cursor-pointer" title="Set your status">
+        <div id="me-header-avatar" class="relative w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="<?= avatar_gradient((string) $user['username']) ?>" title="Set your status">
           <?= h(strtoupper(mb_substr($user['username'], 0, 1))) ?>
           <span class="avatar-status absolute -right-0.5 -bottom-0.5 w-3 h-3 rounded-full border-2 border-sidebar <?= $stDot ?>"></span>
         </div>
@@ -496,7 +503,7 @@ function presence_label(array $u): string {
           </button>
         </div>
         <div class="relative">
-          <button id="user-menu-btn" class="text-discord-400 hover:text-white text-xs px-1">⚙</button>
+          <button id="user-menu-btn" class="text-discord-400 hover:text-white p-1.5 rounded-md hover:bg-discord-700/50"><?= icon('gear', 'w-4 h-4') ?></button>
           <div id="user-menu" class="hidden absolute bottom-9 right-0 w-56 card p-1.5 shadow-xl z-50">
             <a href="/u/<?= h(rawurlencode($user['username'])) ?>" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Profile & settings</a>
             <a href="/support" class="block px-2 py-1.5 rounded hover:bg-discord-750 text-sm">Support</a>
@@ -530,23 +537,23 @@ function presence_label(array $u): string {
   <!-- ── Center: chat ── -->
   <section class="flex-1 flex flex-col min-w-0 min-h-0 bg-discord-750">
     <header class="min-h-12 pl-2 pr-4 border-b border-discord-800 bg-discord-750 flex items-center gap-3 shadow-sm shrink-0">
-      <button id="sidebar-toggle" class="btn-ghost !p-1.5 text-lg leading-none" title="Toggle channel list" aria-label="Toggle channel list">☰</button>
+      <button id="sidebar-toggle" class="btn-ghost !p-1.5" title="Toggle channel list" aria-label="Toggle channel list"><?= icon('menu', 'w-[18px] h-[18px]') ?></button>
       <?php if ($channel): ?>
-      <span class="font-bold text-white text-sm"><?= h($channel['name']) ?></span>
+      <span class="font-bold text-white text-sm flex items-center gap-1.5"><?= icon('hash', 'w-4 h-4 text-discord-400') ?><?= h($channel['name']) ?></span>
       <span id="header-topic" class="text-xs text-discord-400 truncate max-w-md hidden sm:block"><?= $channel['topic'] !== '' ? chat_markup_plain($channel['topic']) : '' ?></span>
-      <div class="relative ml-auto flex items-center gap-2">
-        <input id="search-input" type="search" placeholder="Search chat…" autocomplete="off"
+      <div class="relative ml-auto flex items-center gap-1">
+        <input id="search-input" type="search" placeholder="Search chat… (Ctrl+K)" autocomplete="off"
                class="input w-40 md:w-56 !py-1 !text-xs hidden md:block" title="Search messages in your channels and DMs">
-        <div id="search-results" class="hidden absolute top-9 right-0 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin"></div>
-        <button id="share-btn" class="btn-ghost text-xs hidden md:flex" title="Copy shareable link">🔗 Share</button>
+        <div id="search-results" class="hidden absolute top-10 right-0 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-50 max-h-[60vh] overflow-y-auto scrollbar-thin"></div>
+        <button id="share-btn" class="btn-ghost text-xs hidden md:flex"><?= icon('link', 'w-3.5 h-3.5') ?> <span class="hidden xl:inline">Share</span></button>
         <?php if ($canManageSettings): ?>
-        <button id="chan-settings-btn" class="btn-ghost text-xs hidden md:flex" title="Channel settings">⚙ Settings</button>
+        <button id="chan-settings-btn" class="btn-ghost text-xs hidden md:flex"><?= icon('gear', 'w-3.5 h-3.5') ?> <span class="hidden xl:inline">Settings</span></button>
         <?php endif; ?>
-        <button id="mute-btn" class="btn-ghost text-xs hidden md:flex" data-mode="<?= h($notifyMode) ?>" title="<?= h($notifyMode === 'muted' ? 'Unmute channel' : ($notifyMode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel')) ?>"><?= $notifyMode === 'muted' ? '🔕 Muted' : ($notifyMode === 'mentions' ? '🔔 Mentions' : '🔔') ?></button>
-        <button type="button" data-embed class="btn-ghost text-xs hidden md:flex" title="Get HTML embed code for this channel">&lt;/&gt; Embed</button>
-        <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
-        <button id="part-btn" class="btn-ghost text-xs text-red-400 hidden md:flex" title="Leave channel">✕ Leave</button>
-        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel">👥</button>
+        <button id="mute-btn" class="btn-ghost text-xs hidden md:flex" data-mode="<?= h($notifyMode) ?>" title="<?= h($notifyMode === 'muted' ? 'Unmute channel' : ($notifyMode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel')) ?>"><?= $notifyMode === 'muted' ? icon('bell-off', 'w-3.5 h-3.5') : ($notifyMode === 'mentions' ? icon('bell-ring', 'w-3.5 h-3.5') : icon('bell', 'w-3.5 h-3.5')) ?></button>
+        <button type="button" data-embed class="btn-ghost text-xs hidden md:flex" title="Get HTML embed code for this channel"><?= icon('code', 'w-3.5 h-3.5') ?></button>
+        <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone"><?= icon('download', 'w-3.5 h-3.5') ?></button>
+        <button id="part-btn" class="btn-ghost text-xs text-red-400 hidden md:flex" title="Leave channel"><?= icon('log-out', 'w-3.5 h-3.5') ?></button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel"><?= icon('users', 'w-3.5 h-3.5') ?></button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php elseif ($dm): ?>
@@ -555,19 +562,19 @@ function presence_label(array $u): string {
         <span class="w-2 h-2 rounded-full <?= presence_dot_class($dm) ?>"></span>
         <?= h(presence_label($dm)) ?><?php $dmSt = presence_status_text($dm); if ($dmSt !== ''): ?> — <span class="truncate max-w-[24ch]"><?= h($dmSt) ?></span><?php endif; ?>
       </span>
-      <div class="relative ml-auto flex items-center gap-2">
-        <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone">⬇ How to install</button>
-        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel">👥</button>
+      <div class="relative ml-auto flex items-center gap-1">
+        <button id="install-btn" class="btn-ghost text-xs hidden md:flex" title="Install the app on your computer or phone"><?= icon('download', 'w-3.5 h-3.5') ?></button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel"><?= icon('users', 'w-3.5 h-3.5') ?></button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php else: ?>
       <span class="font-bold text-white text-sm"><?= h($site) ?></span>
       <span class="text-xs text-discord-400 truncate">You are not in any channel. Create one or browse the list.</span>
-      <div class="relative ml-auto flex items-center gap-2">
-        <button id="browse-btn-header" class="btn-primary text-xs hidden md:flex cursor-pointer">Browse channels</button>
-        <button id="create-channel-2" class="btn-ghost text-xs hidden md:flex">＋ New channel</button>
-        <button id="install-btn" class="btn-ghost text-xs hidden md:flex">⬇ How to install</button>
-        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel">👥</button>
+      <div class="relative ml-auto flex items-center gap-1">
+        <button id="browse-btn-header" class="btn-primary text-xs hidden md:flex cursor-pointer"><?= icon('globe', 'w-3.5 h-3.5') ?> Browse channels</button>
+        <button id="create-channel-2" class="btn-ghost text-xs hidden md:flex"><?= icon('plus', 'w-3.5 h-3.5') ?> New channel</button>
+        <button id="install-btn" class="btn-ghost text-xs hidden md:flex"><?= icon('download', 'w-3.5 h-3.5') ?></button>
+        <button id="right-panel-toggle" class="btn-ghost text-xs hidden md:flex" title="Toggle friends & members panel" aria-label="Toggle friends and members panel"><?= icon('users', 'w-3.5 h-3.5') ?></button>
         <?php require ROOT . '/views/partials/header-menu.php'; ?>
       </div>
       <?php endif; ?>
@@ -588,7 +595,7 @@ function presence_label(array $u): string {
         This is a temporary channel (not registered) — it will disappear when the last person leaves.
         <?php endif; ?>
       </span>
-      <button type="button" id="unregistered-dismiss" class="shrink-0 text-sm leading-none px-1.5 py-0.5 rounded opacity-70 hover:opacity-100 hover:bg-black/10" title="Dismiss">✕</button>
+      <button type="button" id="unregistered-dismiss" class="shrink-0 text-sm leading-none px-1.5 py-0.5 rounded opacity-70 hover:opacity-100 hover:bg-black/10" title="Dismiss"><?= icon('x', 'w-4 h-4') ?></button>
     </div>
     <script>
     (function () {
@@ -645,30 +652,49 @@ function presence_label(array $u): string {
       endforeach;
       ?>
       <?php if (!$messages && !$motd): ?>
-      <div class="h-full flex items-center justify-center text-discord-500 text-sm">No messages yet. Say hello!</div>
+      <div class="h-full flex flex-col items-center justify-center text-center px-6">
+        <div class="w-14 h-14 rounded-2xl bg-discord-800 border border-discord-700 flex items-center justify-center mb-4"><?= icon('message-circle', 'w-6 h-6 text-blurple') ?></div>
+        <div class="text-discord-200 font-semibold"><?= $channel ? 'Welcome to ' . h($channel['name']) : ($dm ? 'Say hi to ' . h($dm['username']) : 'Welcome to ' . h($site)) ?></div>
+        <p class="text-sm text-discord-500 mt-1 max-w-sm"><?= $channel && $channel['topic'] !== '' ? h(mb_substr($channel['topic'], 0, 140)) : 'No messages yet — say hello and start the conversation.' ?></p>
+        <button id="empty-compose-tip" class="hidden mt-5 btn-ghost text-xs"><?= icon('keyboard', 'w-3.5 h-3.5') ?> Start typing</button>
+      </div>
       <?php endif; ?>
     </div>
 
-    <div id="composer" class="px-4 pt-2 pb-4 shrink-0 bg-discord-750">
+    <div id="pinned-bar" class="hidden items-center gap-2 px-4 py-1.5 border-t border-discord-700 bg-discord-850/80 text-xs shrink-0 relative">
+      <button id="pinned-bar-btn" class="flex items-center gap-2 text-discord-300 hover:text-white font-medium"><?= icon('pin', 'w-3.5 h-3.5 text-blurple') ?> <span id="pinned-count">0</span> <span id="pinned-label">pinned</span> <span class="text-discord-500 font-normal">·</span> <span id="pinned-latest" class="text-discord-400 truncate max-w-[30ch] text-[11px]"></span></button>
+      <div id="pins-pop" class="hidden absolute bottom-full left-3 mb-1 w-96 max-w-[calc(100vw-2rem)] card shadow-2xl z-40 max-h-80 overflow-y-auto scrollbar-thin p-1.5"></div>
+    </div>
+
+    <div id="typing-ind" class="hidden min-h-[22px] flex items-center gap-1.5 px-4 py-0.5 text-xs text-discord-400 shrink-0 select-none">
+      <span class="inline-flex gap-0.5 items-end h-3.5">
+        <span class="typing-dot w-1 h-1 rounded-full bg-discord-400"></span>
+        <span class="typing-dot w-1 h-1 rounded-full bg-discord-400"></span>
+        <span class="typing-dot w-1 h-1 rounded-full bg-discord-400"></span>
+      </span>
+      <span id="typing-label"></span>
+    </div>
+
+    <div id="composer" class="px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] shrink-0 bg-discord-750">
       <div id="autocomplete" class="hidden mb-2 card max-h-56 overflow-y-auto scrollbar-thin"></div>
       <div id="emoji-panel" class="hidden mb-2 card p-2 grid grid-cols-8 gap-1 max-h-56 overflow-y-auto scrollbar-thin"></div>
       <div id="gif-panel" class="hidden mb-2 card max-h-96 flex flex-col">
         <div class="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b border-discord-700 shrink-0">
           <span class="text-xs font-bold uppercase tracking-wide text-discord-400">GIF</span>
           <input id="gif-search" type="search" placeholder="Search Giphy…" autocomplete="off" class="input flex-1 !py-1.5 !text-xs">
-          <button type="button" id="gif-close" class="text-discord-400 hover:text-white text-xs px-1" title="Close">✕</button>
+          <button type="button" id="gif-close" class="text-discord-400 hover:text-white p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
         </div>
         <div id="gif-grid" class="grid grid-cols-4 gap-1.5 overflow-y-auto scrollbar-thin p-2"></div>
         <div id="gif-status" class="hidden px-3 py-2 text-xs text-discord-400 border-t border-discord-700 shrink-0"></div>
         <button type="button" id="gif-more" class="hidden py-2 text-xs text-blurple hover:text-white hover:bg-blurple/10 transition-colors shrink-0">Load more GIFs</button>
       </div>
       <div id="reply-chip" class="hidden mb-2 flex items-center gap-2 card px-3 py-1.5 text-sm text-discord-300">
-        <span class="text-xs text-blurple font-semibold">↪ Replying to</span>
+        <span class="text-xs text-blurple font-semibold"><?= icon('reply', 'w-3.5 h-3.5') ?> Replying to</span>
         <span id="reply-chip-name" class="font-semibold text-white truncate"></span>
         <span id="reply-chip-excerpt" class="truncate text-discord-400"></span>
-        <button type="button" id="reply-cancel" class="ml-auto text-discord-400 hover:text-white text-xs px-1" title="Cancel reply">✕</button>
+        <button type="button" id="reply-cancel" class="ml-auto text-discord-400 hover:text-white p-1" title="Cancel reply"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
-      <form id="send-form" method="post" action="/api/send" class="relative">
+      <form id="send-form" method="post" action="/api/send">
         <?= Csrf::field() ?>
         <?php if ($dm): ?>
         <input type="hidden" name="recipient" value="<?= h($dm['username']) ?>">
@@ -676,17 +702,22 @@ function presence_label(array $u): string {
         <input type="hidden" name="channel" value="<?= h($channel['slug']) ?>">
         <?php endif; ?>
         <input type="hidden" id="reply-to-input" name="reply_to" value="">
-        <textarea id="chat-input" name="content" rows="1" autocomplete="off" spellcheck="false"
-               class="input pr-48 py-2.5 resize-none bg-discord-800 !rounded-lg !border-transparent focus:!border-transparent shadow align-middle max-h-40 overflow-y-auto"
-               placeholder="<?= h($channel ? "Message " . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
-               <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
-        <button type="button" id="upload-btn" class="absolute right-36 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Upload an image">📎</button>
-        <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
-        <button type="button" id="gif-btn" class="absolute right-24 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-xs font-bold <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Send a GIF">GIF</button>
-        <button type="button" id="emoji-btn" class="absolute right-12 top-1/2 -translate-y-1/2 btn-ghost !p-1.5 !rounded-md text-base <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji">😀</button>
-        <button type="submit" class="absolute right-2 top-1/2 -translate-y-1/2 btn-primary !p-1.5 !rounded-md" title="Send">➤</button>
+        <div id="attach-preview" class="hidden mb-1.5 flex items-center gap-2"></div>
+        <div class="flex items-end gap-1 rounded-xl border border-discord-600 bg-discord-800 px-1.5 py-1 transition-colors focus-within:border-blurple/60 focus-within:ring-1 focus-within:ring-blurple/30 shadow-sm">
+          <textarea id="chat-input" name="content" rows="1" autocomplete="off" spellcheck="false"
+                 class="flex-1 min-w-0 bg-transparent border-0 focus:ring-0 focus:outline-none resize-none max-h-40 py-1.5 px-1.5 text-sm text-discord-100 placeholder:text-discord-400"
+                 placeholder="<?= h($channel ? "Message " . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
+                 <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
+          <div class="flex items-center gap-0.5 shrink-0">
+            <button type="button" id="upload-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? 'inline-flex' : 'hidden' ?>" title="Upload an image"><?= icon('paperclip', 'w-4 h-4') ?></button>
+            <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+            <button type="button" id="emoji-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji"><?= icon('smile', 'w-4 h-4') ?></button>
+            <button type="button" id="gif-btn" class="btn-ghost !p-1.5 !rounded-lg text-xs font-bold <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Send a GIF">GIF</button>
+            <button type="submit" id="send-btn" class="btn-primary !p-2 !rounded-lg" title="Send"><?= icon('send', 'w-4 h-4') ?></button>
+          </div>
+        </div>
+        <div class="text-[11px] text-discord-400 mt-1.5 px-1">Type <span class="text-discord-200">/</span> for commands · <span class="text-discord-200">@nick</span> to mention · <span class="text-discord-200">Enter</span> to send · <span class="text-discord-200">Shift+Enter</span> newline · <span class="text-discord-200">**bold**</span> <span class="text-discord-200">*italic*</span> <span class="text-discord-200">```code```</span></div>
       </form>
-      <div class="text-[11px] text-discord-400 mt-1.5 px-1">Type <span class="text-discord-200">/</span> for commands · <span class="text-discord-200">@nick</span> to mention · <span class="text-discord-200">Enter</span> to send · <span class="text-discord-200">Shift+Enter</span> newline · <span class="text-discord-200">**bold**</span> <span class="text-discord-200">*italic*</span> <span class="text-discord-200">```code```</span></div>
     </div>
   </section>
 
@@ -733,7 +764,7 @@ function presence_label(array $u): string {
           <span class="w-2 h-2 rounded-full <?= $f['away'] ? 'bg-amber-400' : 'bg-green-500' ?>"></span>
           <?= avatar_img(['username' => $f['username'], 'avatar' => $f['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
           <span class="truncate"><?= h($f['username']) ?></span>
-          <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
+          <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white ml-auto shrink-0 p-0.5" title="More"><?= icon('more-h', 'w-3.5 h-3.5') ?></button>
         </a>
         <?php endforeach; ?>
       </div>
@@ -746,7 +777,7 @@ function presence_label(array $u): string {
           <span class="w-2 h-2 rounded-full bg-discord-500"></span>
           <?= avatar_img(['username' => $f['username'], 'avatar' => $f['avatar'] ?? null, 'guest' => 0], 'w-6 h-6 rounded-full') ?>
           <span class="truncate"><?= h($f['username']) ?></span>
-          <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 ml-auto shrink-0" title="More">⋮</button>
+          <button type="button" class="ctx-btn md:hidden text-discord-400 hover:text-white ml-auto shrink-0 p-0.5" title="More"><?= icon('more-h', 'w-3.5 h-3.5') ?></button>
         </a>
         <?php endforeach; ?>
       </div>
@@ -889,7 +920,7 @@ function presence_label(array $u): string {
           <h2 class="text-2xl font-extrabold text-white tracking-tight">Channel Browser</h2>
           <p class="text-sm text-discord-400 mt-1">Discover and join public channels on <?= h($site) ?></p>
         </div>
-        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-lg leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-discord-700/80 transition-colors mt-0.5" title="Close">✕</button>
+        <button type="button" data-browse-close class="text-discord-400 hover:text-white text-lg leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-discord-700/80 transition-colors mt-0.5" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <div class="px-6 pb-4 shrink-0">
         <div class="flex flex-wrap gap-3 items-stretch">
@@ -934,12 +965,25 @@ function presence_label(array $u): string {
           </div>
           <div id="browse-list" class="space-y-2"></div>
           <div id="browse-empty" class="hidden py-16 text-center">
-            <div class="text-4xl mb-3 opacity-40">🔍</div>
+            <div class="mx-auto mb-3 w-12 h-12 rounded-2xl bg-discord-800 border border-discord-700 flex items-center justify-center text-discord-500"><?= icon('search', 'w-5 h-5') ?></div>
             <div class="text-discord-400 text-sm font-medium">No channels found</div>
             <div class="text-discord-500 text-xs mt-1">Try a different search or filter</div>
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Quick switcher (Ctrl+K / ⌘K) -->
+  <div id="switcher-modal" class="hidden fixed inset-0 z-[350] flex items-start justify-center pt-[14vh] p-4">
+    <div class="absolute inset-0 bg-black/70" data-switcher-close></div>
+    <div class="relative card shadow-2xl w-[min(94vw,560px)] overflow-hidden modal-card">
+      <div class="flex items-center gap-2.5 px-4 py-3 border-b border-discord-700 bg-discord-850">
+        <span class="text-discord-400"><?= icon('search', 'w-4 h-4') ?></span>
+        <input id="switcher-input" type="text" placeholder="Jump to a channel, DM or message…" autocomplete="off" spellcheck="false" class="flex-1 bg-transparent border-0 focus:ring-0 focus:outline-none text-sm text-white placeholder:text-discord-400">
+        <kbd class="text-[10px] font-semibold text-discord-400 border border-discord-600 rounded px-1.5 py-0.5">ESC</kbd>
+      </div>
+      <div id="switcher-list" class="max-h-[50vh] overflow-y-auto scrollbar-thin p-1.5 space-y-0.5"></div>
     </div>
   </div>
 
@@ -949,7 +993,7 @@ function presence_label(array $u): string {
     <div class="relative card p-6 w-[min(92vw,480px)] shadow-2xl max-h-[90vh] overflow-y-auto scrollbar-thin">
       <div class="flex items-center justify-between mb-1">
         <h2 class="text-lg font-bold text-white">Create a channel</h2>
-        <button type="button" data-create-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+        <button type="button" data-create-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <p class="text-xs text-discord-400 mb-4">Give your channel a name, set the topic, and choose who can find it.</p>
       <form id="create-form" class="space-y-4">
@@ -1021,7 +1065,7 @@ function presence_label(array $u): string {
       <button id="notif-clear" class="text-xs text-discord-400 hover:text-white cursor-pointer">Mark all read</button>
     </div>
     <div id="push-row" class="hidden px-3 py-2 border-b border-discord-700 flex items-center justify-between gap-2 text-xs shrink-0">
-      <span class="text-discord-300">🔔 Browser push</span>
+      <span class="text-discord-300 inline-flex items-center gap-1.5"><?= icon('bell', 'w-3.5 h-3.5') ?> Browser push</span>
       <button id="push-enable" class="btn-ghost !py-1 !text-xs">Enable</button>
     </div>
     <div id="notif-list" class="flex-1 overflow-y-auto scrollbar-thin p-1.5 text-sm min-h-0"></div>
@@ -1039,7 +1083,7 @@ function presence_label(array $u): string {
     <div class="relative card p-6 w-[min(92vw,480px)] shadow-2xl">
       <div class="flex items-center justify-between mb-1">
         <h2 class="text-lg font-bold text-white">Report message</h2>
-        <button type="button" data-report-close class="text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
+        <button type="button" data-report-close class="text-discord-400 hover:text-white text-lg leading-none p-1"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <p class="text-xs text-discord-400 mb-4">This report goes to the staff. The message content is included.</p>
       <div class="mb-3 rounded-lg bg-discord-850 border border-discord-700 px-3 py-2 text-sm text-discord-300 max-h-72 overflow-y-auto scrollbar-thin">
@@ -1067,7 +1111,7 @@ function presence_label(array $u): string {
   <div id="guest-profile-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/70" data-guest-modal-close></div>
     <div class="relative card p-6 w-[min(92vw,400px)] shadow-2xl text-center">
-      <button type="button" data-guest-modal-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
+      <button type="button" data-guest-modal-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1"><?= icon('x', 'w-4 h-4') ?></button>
       <div class="mx-auto w-16 h-16 rounded-full bg-discord-600 flex items-center justify-center text-2xl font-bold text-white mb-3" id="guest-profile-avatar"></div>
       <h2 class="text-lg font-bold text-white" id="guest-profile-name"></h2>
       <p class="text-sm text-discord-400 mt-2">Profile does not exist</p>
@@ -1080,7 +1124,7 @@ function presence_label(array $u): string {
   <div id="chan-bg-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/70" data-chan-bg-close></div>
     <div class="relative card p-6 w-[min(92vw,440px)] shadow-2xl max-h-[85vh] overflow-y-auto scrollbar-thin">
-      <button type="button" data-chan-bg-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1">✕</button>
+      <button type="button" data-chan-bg-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1"><?= icon('x', 'w-4 h-4') ?></button>
       <h2 class="text-lg font-bold text-white">Channel background</h2>
       <p class="text-xs text-discord-400 mt-1 mb-4">Everyone viewing this channel sees this behind the message list.</p>
       <div class="space-y-4">
@@ -1123,7 +1167,7 @@ function presence_label(array $u): string {
     <div class="relative card shadow-2xl w-[min(94vw,760px)] max-h-[88vh] flex flex-col overflow-hidden">
       <div class="flex items-center justify-between px-5 pt-4 pb-3 border-b border-discord-700 shrink-0">
         <h2 class="text-lg font-bold text-white">Channel settings <span id="cs-name" class="text-blurple"></span></h2>
-        <button type="button" data-chan-settings-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+        <button type="button" data-chan-settings-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <div id="cs-tabs" class="flex flex-wrap gap-1 px-3 py-2 border-b border-discord-700 bg-discord-850 shrink-0"></div>
       <div id="cs-body" class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-4 space-y-4"></div>
@@ -1133,7 +1177,7 @@ function presence_label(array $u): string {
 
   <!-- Image lightbox -->
   <div id="lightbox" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/85">
-    <button data-lightbox-close class="absolute top-3 right-3 text-white text-2xl leading-none p-2">✕</button>
+    <button data-lightbox-close class="absolute top-3 right-3 text-white text-2xl leading-none p-2"><?= icon('x', 'w-4 h-4') ?></button>
     <img id="lightbox-img" src="" alt="" class="max-h-[90vh] max-w-full object-contain rounded-lg">
   </div>
 
@@ -1185,15 +1229,15 @@ function presence_label(array $u): string {
     <div class="relative card shadow-2xl w-[min(92vw,480px)] flex flex-col max-h-[80vh]">
       <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
         <h2 class="text-lg font-bold text-white">How to install <?= h($site) ?></h2>
-        <button type="button" data-install-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+        <button type="button" data-install-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <div id="install-body" class="px-6 py-4 overflow-y-auto scrollbar-thin space-y-5 text-sm">
-        <button id="install-now" class="hidden btn-primary w-full justify-center">⬇ Install now</button>
+        <button id="install-now" class="hidden btn-primary w-full justify-center"><?= icon('download', 'w-4 h-4') ?> Install now</button>
 
         <div class="pt-1 border-t border-discord-700">
           <div class="text-xs font-bold uppercase tracking-wide text-discord-400 mb-1.5">Desktop apps</div>
           <p class="text-discord-200 mb-2.5">Prefer a native app? LVChat also ships desktop clients for Windows, macOS and Linux.</p>
-          <button id="download-open-btn" type="button" class="btn-ghost w-full justify-center">⬇ Download the desktop app</button>
+          <button id="download-open-btn" type="button" class="btn-ghost w-full justify-center"><?= icon('download', 'w-4 h-4') ?> Download the desktop app</button>
         </div>
 
         <div>
@@ -1237,7 +1281,7 @@ function presence_label(array $u): string {
     <div class="relative card shadow-2xl w-[min(92vw,600px)] flex flex-col max-h-[80vh]">
       <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
         <h2 class="text-lg font-bold text-white">Download <?= h($site) ?></h2>
-        <button type="button" data-download-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+        <button type="button" data-download-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <div class="px-6 py-4 overflow-y-auto scrollbar-thin">
         <p class="text-sm text-discord-200">Two desktop apps are available — pick the one that fits how you work:</p>
@@ -1304,7 +1348,7 @@ function presence_label(array $u): string {
     <div class="relative card shadow-2xl w-[min(92vw,480px)] flex flex-col max-h-[80vh]">
       <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
         <h2 class="text-lg font-bold text-white">App install isn't supported here</h2>
-        <button type="button" data-install-unsupported-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close">✕</button>
+        <button type="button" data-install-unsupported-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <div class="px-6 py-4 overflow-y-auto scrollbar-thin space-y-4 text-sm">
         <p class="text-discord-200">Your current browser doesn't support installing this chat as an app. To get the standalone app experience, use one of these instead:</p>
@@ -1326,6 +1370,7 @@ function presence_label(array $u): string {
   <script src="/assets/vendor/ai/purify.min.js"></script>
   <script src="/assets/vendor/ai/highlight.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark-dimmed.min.css">
+  <script src="/assets/js/icons.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/icons.js') ?>"></script>
   <script src="/assets/js/app.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/app.js') ?>"></script>
   <script>
   // JS-health watchdog: explains why the chat scripts aren't running, if they aren't.

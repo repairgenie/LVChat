@@ -28,7 +28,7 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
 ?>
 <!-- X button: return to the chat -->
 <div class="flex justify-end mb-2">
-  <button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost !p-2" title="Back to chat" aria-label="Close profile">✕</button>
+  <button type="button" onclick="if (history.length > 1) history.back(); else location='/app';" class="btn-ghost !p-2" title="Back to chat" aria-label="Close profile"><?= icon('x', 'w-4 h-4') ?></button>
 </div>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
   <div class="card p-6 text-center md:col-span-1">
@@ -65,7 +65,7 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
     <div class="mt-4 text-xs text-discord-400">Registered <?= date('M j, Y', strtotime($user['registered_at'] . ' UTC')) ?></div>
 
     <?php if ($isSelf && $themeCustomizationEnabled): ?>
-    <button id="profile-theme-toggle" class="btn-ghost w-full justify-center mt-4 text-sm">🌙 Dark mode</button>
+    <button id="profile-theme-toggle" class="btn-ghost w-full justify-center mt-4 text-sm" data-theme-btn></button>
     <?php endif; ?>
 
     <?php if (!$isSelf): ?>
@@ -640,7 +640,7 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
 
   const themeBtn = document.getElementById('profile-theme-toggle');
   if (themeBtn) {
-    function setIcon() { themeBtn.textContent = document.documentElement.classList.contains('light') ? '☀️ Light mode' : '🌙 Dark mode'; }
+    function setIcon() { themeBtn.innerHTML = (document.documentElement.classList.contains('light') ? window.icon('sun', 'w-4 h-4') : window.icon('moon', 'w-4 h-4')) + ' ' + (document.documentElement.classList.contains('light') ? 'Light mode' : 'Dark mode'); }
     setIcon();
     themeBtn.addEventListener('click', () => {
       const light = document.documentElement.classList.toggle('light');

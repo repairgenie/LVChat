@@ -287,6 +287,24 @@ CREATE TABLE IF NOT EXISTS channel_notify (
   mode TEXT NOT NULL DEFAULT 'all',
   UNIQUE (channel_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS typing_indicators (
+  channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+  actor_type TEXT NOT NULL DEFAULT 'user',
+  actor_id INTEGER NOT NULL,
+  actor_name TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (channel_id, actor_type, actor_id)
+);
+
+CREATE TABLE IF NOT EXISTS pinned_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  pinned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (message_id)
+);
 CREATE INDEX IF NOT EXISTS idx_channel_notify_user ON channel_notify(user_id);
 
 -- Sound alerts: audio files uploaded by admins and offered to every user for

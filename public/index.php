@@ -92,6 +92,10 @@ $router->post('/api/channel/invite/decline', [ChannelController::class, 'decline
 $router->post('/api/message/delete', [ChatController::class, 'deleteMessage']);
 $router->post('/api/message/edit', [ChatController::class, 'editMessage']);
 $router->post('/api/message/reaction', [ChatController::class, 'reaction']);
+$router->post('/api/message/pin', [ChatController::class, 'pinMessage']);
+$router->post('/api/message/unpin', [ChatController::class, 'unpinMessage']);
+$router->get('/api/channel/pins', [ChatController::class, 'channelPins']);
+$router->post('/api/typing', [ChatController::class, 'typing']);
 $router->post('/api/report', [ChatController::class, 'report']);
 $router->get('/api/history', [ChatController::class, 'historyApi']);
 $router->get('/api/search', [ChatController::class, 'search']);

@@ -66,7 +66,7 @@ $fullWidth = true;
       <div class="flex items-center gap-2 shrink-0">
         <button id="log-refresh" class="btn-ghost text-xs !py-1">⟳ Refresh</button>
         <a id="log-export" class="btn-primary text-xs !py-1" href="#" download>Export</a>
-        <button data-close class="btn-ghost text-xs !py-1">✕</button>
+        <button data-close class="btn-ghost text-xs !py-1"><?= icon('x', 'w-3.5 h-3.5') ?></button>
       </div>
     </div>
     <textarea id="log-content" readonly spellcheck="false"

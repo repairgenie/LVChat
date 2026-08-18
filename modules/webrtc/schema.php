@@ -93,6 +93,7 @@ return static function (PDO $pdo): void {
               started_at TEXT,
               ended_at TEXT,
               reminder_sent INTEGER NOT NULL DEFAULT 0,
+              log_sent INTEGER NOT NULL DEFAULT 0,
               status TEXT NOT NULL DEFAULT 'draft',
               created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )"
@@ -100,6 +101,13 @@ return static function (PDO $pdo): void {
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_events_scheduled ON events(scheduled_at)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_events_founder ON events(founder_id)');
+    }
+
+    // Existing installs: the end-of-event log email must be sent at most once
+    // (see EventSchedulerJob::endEvents). Guarded migration, runs every boot.
+    $eventCols = array_column($pdo->query("PRAGMA table_info(events)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+    if (!in_array('log_sent', $eventCols, true)) {
+        $pdo->exec('ALTER TABLE events ADD COLUMN log_sent INTEGER NOT NULL DEFAULT 0');
     }
 
     if (!in_array('event_invites', $tables, true)) {

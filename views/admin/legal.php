@@ -135,7 +135,7 @@
     var b = document.createElement('button');
     b.type = 'button';
     b.className = 'rt-btn';
-    b.textContent = label;
+    b.innerHTML = label;
     b.title = title || label;
     return b;
   }
@@ -193,7 +193,7 @@
     var g4 = group();
     var ul = btn('• List', 'Bulleted list'); ul.dataset.a = 'bulletList'; ul.dataset.cmd = 'bulletList'; g4.appendChild(ul);
     var ol = btn('1. List', 'Numbered list'); ol.dataset.a = 'orderedList'; ol.dataset.cmd = 'orderedList'; g4.appendChild(ol);
-    var task = btn('☑ Tasks', 'Task list'); task.dataset.a = 'taskList'; task.dataset.cmd = 'taskList'; g4.appendChild(task);
+    var task = btn(window.icon('check-circle', 'w-4 h-4') + ' Tasks', 'Task list'); task.dataset.a = 'taskList'; task.dataset.cmd = 'taskList'; g4.appendChild(task);
     bar.appendChild(g4);
 
     var g5 = group();
@@ -212,9 +212,9 @@
     bar.appendChild(g6);
 
     var g7 = group();
-    var link = btn('🔗', 'Add/edit link'); link.dataset.a = 'link'; g7.appendChild(link);
-    var unlink = btn('🔓', 'Remove link'); unlink.dataset.a = 'unlink'; g7.appendChild(unlink);
-    var img = btn('🖼', 'Insert image'); img.dataset.a = 'image'; g7.appendChild(img);
+    var link = btn(window.icon('link','w-4 h-4'), 'Add/edit link'); link.dataset.a = 'link'; g7.appendChild(link);
+    var unlink = btn(window.icon('unlink','w-4 h-4') || '🔓', 'Remove link'); unlink.dataset.a = 'unlink'; g7.appendChild(unlink);
+    var img = btn(window.icon('image','w-4 h-4'), 'Insert image'); img.dataset.a = 'image'; g7.appendChild(img);
     bar.appendChild(g7);
 
     var g8 = group();
@@ -223,11 +223,11 @@
     var tdelrow = btn('−↕', 'Delete row'); tdelrow.dataset.a = 'tableDeleteRow'; g8.appendChild(tdelrow);
     var tcol = btn('+↔', 'Add column'); tcol.dataset.a = 'tableAddCol'; g8.appendChild(tcol);
     var tdelcol = btn('−↔', 'Delete column'); tdelcol.dataset.a = 'tableDeleteCol'; g8.appendChild(tdelcol);
-    var tdel = btn('🗑', 'Delete table'); tdel.dataset.a = 'tableDelete'; g8.appendChild(tdel);
+    var tdel = btn(window.icon('trash','w-4 h-4'), 'Delete table'); tdel.dataset.a = 'tableDelete'; g8.appendChild(tdel);
     bar.appendChild(g8);
 
     var g9 = group();
-    var clear = btn('✖', 'Clear formatting'); clear.dataset.a = 'clear'; g9.appendChild(clear);
+    var clear = btn(window.icon('x','w-4 h-4'), 'Clear formatting'); clear.dataset.a = 'clear'; g9.appendChild(clear);
     bar.appendChild(g9);
   }
 

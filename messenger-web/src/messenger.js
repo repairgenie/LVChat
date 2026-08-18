@@ -20,6 +20,26 @@
 'use strict'
 
 const $ = (sel) => document.querySelector(sel)
+
+/* Fill every static header/composer icon button from the shared SVG set
+ * (icons.js is loaded before this script; window.icon renders an <svg>). */
+function setStaticIcons () {
+  const map = {
+    'menu-btn': 'menu',
+    'view-mode-btn': 'layout',
+    'theme-toggle': 'moon',
+    'logout-btn': 'log-out',
+    'btn-emoji': 'smile',
+    'btn-image': 'image',
+    'url-collapse': 'chevron-down'
+  }
+  for (const [id, name] of Object.entries(map)) {
+    const el = document.getElementById(id)
+    if (el && window.icon) el.innerHTML = window.icon(name, 'w-4 h-4')
+  }
+  const themeToggle = document.getElementById('theme-toggle')
+  if (themeToggle && window.icon) themeToggle.innerHTML = window.icon(document.body.classList.contains('theme-light') ? 'sun' : 'moon', 'w-4 h-4')
+}
 const SYSTEM_KINDS = ['join', 'part', 'quit', 'kick', 'ban', 'topic', 'mode', 'nick', 'system', 'notice']
 
 const state = {
@@ -224,6 +244,7 @@ async function boot () {
   $('#login-target').hidden = false
 
   await Promise.all([applyTheme(), applyViewMode()])
+  setStaticIcons()
   initSidebarResize()
 
   // Resume an existing session if the messenger API is reachable. Never let a
@@ -1260,12 +1281,12 @@ function renderGroup (g) {
     const ren = document.createElement('button')
     ren.className = 'icon-btn'
     ren.title = 'Rename group'
-    ren.textContent = '✎'
+    ren.innerHTML = window.icon ? window.icon('edit', 'w-3.5 h-3.5') : '✎'
     ren.addEventListener('click', (e) => { e.stopPropagation(); renameGroup(g) })
     const del = document.createElement('button')
     del.className = 'icon-btn'
     del.title = 'Delete group'
-    del.textContent = '✕'
+    del.innerHTML = window.icon ? window.icon('x', 'w-3.5 h-3.5') : '✕'
     del.addEventListener('click', (e) => { e.stopPropagation(); deleteGroup(g) })
     actions.append(ren, del)
   }
@@ -3270,10 +3291,10 @@ function updateViewModeButton () {
   if (!btn) return
   btn.hidden = isMobile() // phones have no layout choice
   if (state.viewMode === 'compact') {
-    btn.textContent = '▦'
+    btn.innerHTML = window.icon ? window.icon('layout', 'w-4 h-4') : '▦'
     btn.title = 'Switch to Advanced view'
   } else {
-    btn.textContent = '◧'
+    btn.innerHTML = window.icon ? window.icon('grid', 'w-4 h-4') : '◧'
     btn.title = 'Switch to Compact view'
   }
 }
@@ -3531,6 +3552,8 @@ async function toggleTheme () {
   const next = isLight ? 'dark' : 'light'
   document.body.classList.remove('theme-light', 'theme-dark')
   document.body.classList.add('theme-' + next)
+  const btn = $('#theme-toggle')
+  if (btn && window.icon) btn.innerHTML = window.icon(isLight ? 'moon' : 'sun', 'w-4 h-4')
   await window.msg.prefsSet('theme', next)
 }
 

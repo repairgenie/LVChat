@@ -23,6 +23,13 @@ License: Apache-2.0 — https://github.com/livekit/client-sdk-js/blob/main/LICEN
 Build-time dependency used to generate `public/assets/css/app.css`.
 License: MIT — https://github.com/tailwindlabs/tailwindcss/blob/master/LICENSE
 
+### Inter font (Rasmus Andersson) — SIL Open Font License 1.1
+Bundled as the app's UI typeface: `public/assets/fonts/InterVariable*.woff2`,
+`messenger-web/src/fonts/`, `lvchat-messenger/renderer/fonts/` and
+`desktop/src/renderer/fonts/`.
+License: SIL OFL 1.1 — https://github.com/rsms/inter/blob/master/LICENSE.txt
+Copyright (c) 2016-2024 The Inter Project Authors
+
 ### esbuild — MIT License
 Build-time bundler for the tiptap entry. License: MIT —
 https://github.com/evanw/esbuild/blob/master/LICENSE.md

@@ -307,10 +307,24 @@
     return html;
   }
 
+  function avatarGradient(name) {
+    const palettes = [
+      ['#f59e0b', '#ef4444'], ['#ec4899', '#8b5cf6'], ['#3b82f6', '#06b6d4'],
+      ['#10b981', '#84cc16'], ['#f97316', '#f43f5e'], ['#6366f1', '#a855f7'],
+      ['#14b8a6', '#3b82f6'], ['#eab308', '#f97316'], ['#ef4444', '#f97316'],
+      ['#8b5cf6', '#ec4899']
+    ];
+    let h = 0;
+    const s = String(name || '?').toLowerCase();
+    for (let i = 0; i < s.length; i++) h += s.charCodeAt(i);
+    const p = palettes[h % palettes.length];
+    return 'background:linear-gradient(135deg,' + p[0] + ',' + p[1] + ')';
+  }
+
   function avatarHtml(m, cls) {
     if (m.avatar) return `<img src="${esc(m.avatar)}" alt="${esc(m.username || '')}" loading="lazy" class="${cls} object-cover">`;
     const initial = (m.username || '?').charAt(0).toUpperCase();
-    return `<div class="${cls} bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600 shrink-0">${esc(initial)}</div>`;
+    return `<div style="${avatarGradient(m.username)}" class="${cls} flex items-center justify-center text-sm font-bold text-white border border-black/20 shrink-0">${esc(initial)}</div>`;
   }
 
   function msgReactionsHtml(m) {
@@ -337,7 +351,7 @@
       return `<div class="msg group px-4 py-0.5 flex gap-4 hover:bg-white/[0.03]" data-id="${m.id}" data-kind="action" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
         <div class="w-10 shrink-0"></div>
         <div class="text-sm ${contentColor}"${roleStyle}><span class="italic">* <span class="font-medium ${nameColor}"${roleStyle}>${esc(m.username)}</span>${guestTag} ${linkify(m.content)}</span></div>
-        <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5" title="More">⋮</button>
+        <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white self-start mt-0.5 ml-auto p-0.5" title="More">${window.icon('more-h', 'w-3.5 h-3.5')}</button>
       </div>`;
     }
     const sym = SYMBOL[m.level || 'normal'] || '';
@@ -352,16 +366,18 @@
           <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${msgContentHtml(m)}</div>
           ${msgReactionsHtml(m)}
         </div>
-        <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-0.5" title="More">⋮</button>
+        <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white self-start mt-0.5 p-0.5" title="More">${window.icon('more-h', 'w-3.5 h-3.5')}</button>
       </div>`;
     }
     let actions = '';
     const mine = String(m.sender_id) === String(MY_ID) || (m.username && m.username.toLowerCase() === MY_NICK);
+    actions = '<button type="button" class="msg-react-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Add a reaction">' + window.icon('smile', 'w-4 h-4') + '</button>'
+      + '<button type="button" class="msg-reply-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Reply">' + window.icon('reply', 'w-4 h-4') + '</button>';
     if (CAN_ADMIN || mine) {
-      actions = '<button class="msg-edit text-[12px] opacity-60 hover:opacity-100" title="Edit">✏️</button>'
-        + '<button class="msg-del text-[12px] opacity-60 hover:opacity-100 hover:text-red-400" title="Delete">🗑</button>';
+      actions += '<button type="button" class="msg-edit p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Edit">' + window.icon('edit', 'w-4 h-4') + '</button>'
+        + '<button type="button" class="msg-del p-1.5 rounded-md text-discord-400 hover:text-red-400 hover:bg-discord-700" title="Delete">' + window.icon('trash', 'w-4 h-4') + '</button>';
     }
-    return `<div class="msg group px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
+    return `<div class="msg group relative px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
       <div class="w-10 h-10 shrink-0">${avatarHtml(m, 'w-10 h-10 rounded-full')}</div>
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 h-[22px]">
@@ -373,8 +389,8 @@
         <div class="msg-content text-[15px] leading-[1.4] ${contentColor} break-words"${roleStyle}>${msgContentHtml(m)}</div>
         ${msgReactionsHtml(m)}
       </div>
-      <div class="actions ml-auto opacity-0 group-hover:opacity-100 flex gap-1 pt-0.5">${actions}</div>
-      <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white text-xs px-1.5 py-0.5 self-start mt-1" title="More">⋮</button>
+      <div class="msg-actions absolute right-4 -top-3 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 rounded-lg border border-discord-700 bg-discord-850 shadow-lg px-1 py-0.5 transition-opacity z-10">${actions}</div>
+      <button type="button" class="msg-ctx-btn md:hidden text-discord-400 hover:text-white self-start mt-1 p-0.5" title="More">${window.icon('more-h', 'w-3.5 h-3.5')}</button>
     </div>`;
   }
 
@@ -392,6 +408,8 @@
     // System messages carry a data-id too so a trailing join/topic/part isn't
     // re-appended by the first poll after the initial render.
     if (m.id && msgsEl.querySelector('.msg[data-id="' + m.id + '"], .msg-system[data-id="' + m.id + '"]')) return;
+    // Someone actually sent a message — stop showing their typing indicator.
+    if (m.kind === 'message' && String(m.sender_id || 0) !== String(MY_ID)) applyTyping([]);
     const date = String(m.created_at || '').slice(0, 10);
     let html = '';
     if (date && date !== lastDate) {
@@ -404,6 +422,10 @@
     const last = msgsEl.lastElementChild;
     if (last) last.insertAdjacentHTML('afterend', html);
     else msgsEl.insertAdjacentHTML('beforeend', html);
+    const appended = msgsEl.lastElementChild;
+    if (appended && appended.classList.contains('msg')) {
+      appended.classList.add('msg-enter');
+    }
     lastMsg = m.kind === 'message' ? m : null;
     if (parseInt(m.id, 10) > lastId) lastId = parseInt(m.id, 10);
     maybeScroll();
@@ -422,6 +444,31 @@
       const el = msgsEl.lastElementChild;
       if (el) el.querySelectorAll('pre code').forEach((block) => { try { hljs.highlightElement(block); } catch (e) {} });
     }
+  }
+
+  // Optimistic message render (pending send): same pipeline as appendMsg but
+  // tagged with data-pending so the author's copy is swapped for the server's
+  // when /api/send answers.
+  function appendPendingMsg(m, tmpId) {
+    if (!msgsEl) return;
+    const date = String(m.created_at || '').slice(0, 10);
+    let html = '';
+    if (date && date !== lastDate) {
+      html += dividerHtml(date);
+      lastDate = date;
+      lastMsg = null;
+    }
+    html += msgHtml(m, shouldGroup(lastMsg, m));
+    const last = msgsEl.lastElementChild;
+    if (last) last.insertAdjacentHTML('afterend', html);
+    else msgsEl.insertAdjacentHTML('beforeend', html);
+    const node = msgsEl.querySelector('.msg:last-of-type');
+    if (node) {
+      node.setAttribute('data-pending', tmpId);
+      node.classList.add('msg-pending-sent');
+    }
+    lastMsg = m.kind === 'message' ? m : null;
+    maybeScroll();
   }
 
   // ── Stick-to-bottom ─────────────────────────────────────────────────────────
@@ -525,7 +572,69 @@
         react(btn, emoji.trim());
       });
     });
+    // Hover action bar: reply chip + quick-reaction popover.
+    msgsEl.querySelectorAll('.msg-reply-btn').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const msg = btn.closest('.msg');
+        if (!msg) return;
+        const author = msg.dataset.author || '';
+        const excerpt = (msg.querySelector('.msg-content') ? msg.querySelector('.msg-content').textContent : '').trim().slice(0, 80);
+        setPendingReply(msg.dataset.id, author, excerpt);
+      });
+    });
+    msgsEl.querySelectorAll('.msg-react-btn').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msg = btn.closest('.msg');
+        if (!msg) return;
+        openReactPopover(btn, msg);
+      });
+    });
   }
+
+  // Quick-reaction popover: a small grid of emoji that reacts to the message
+  // in one click (clicking elsewhere or the same button again closes it).
+  let reactPopover = null;
+  function closeReactPopover() {
+    if (reactPopover) { reactPopover.remove(); reactPopover = null; }
+  }
+  function toggleReactPopover(btn, msg) {
+    if (reactPopover && reactPopover.dataset.msgId === String(msg.dataset.id)) { closeReactPopover(); return; }
+    closeReactPopover();
+    const pop = document.createElement('div');
+    pop.className = 'fixed z-[115] card shadow-2xl p-1.5 grid grid-cols-8 gap-0.5 rounded-xl';
+    pop.dataset.msgId = String(msg.dataset.id);
+    const quick = ['👍', '😂', '❤️', '🎉', '😮', '😢', '🔥', '🙏', '👀', '💯', '🚀', '👏'];
+    const grid = quick.concat(EMOJIS.filter((e) => quick.indexOf(e) === -1)).slice(0, 64);
+    pop.innerHTML = grid.map((e) => '<button type="button" class="react-pop-emoji p-1 rounded-md text-[18px] leading-none hover:bg-discord-700" data-emoji="' + e + '">' + e + '</button>').join('');
+    pop.querySelectorAll('.react-pop-emoji').forEach((eb) => {
+      eb.addEventListener('click', () => {
+        const emoji = eb.dataset.emoji;
+        post('/api/message/reaction', { id: msg.dataset.id, emoji }, (j) => {
+          if (j.reactions) renderReactions(msg, j.reactions);
+        });
+        closeReactPopover();
+      });
+    });
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect();
+    const top = r.bottom + 6;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8));
+    pop.style.top = Math.min(top, window.innerHeight - pop.offsetHeight - 8) + 'px';
+    pop.style.left = left + 'px';
+    reactPopover = pop;
+  }
+  function openReactPopover(btn, msg) {
+    toggleReactPopover(btn, msg);
+  }
+  document.addEventListener('click', (e) => {
+    if (reactPopover && !e.target.closest('.react-pop-emoji') && !e.target.closest('.msg-react-btn')) closeReactPopover();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeReactPopover(); });
 
   function renderReactions(msgEl, reactions) {
     if (!msgEl) return;
@@ -564,6 +673,10 @@
     }
     if (u.action === 'reaction' && u.reactions) {
       renderReactions(el, { rows: u.reactions });
+      return;
+    }
+    if (u.action === 'pin' || u.action === 'unpin') {
+      refreshPins();
     }
   }
 
@@ -673,7 +786,7 @@
   function enqueueSend(payload) {
     sendQueue.push({ at: Date.now(), payload });
     persistQueue();
-    showReply('📡 Offline — message queued. It will be delivered when you reconnect.');
+    showReply('Offline — message queued. It will be delivered when you reconnect.');
   }
   function appendQueuedSent(item, j) {
     // Only render a flushed message into the view it was sent to (the user may
@@ -702,7 +815,7 @@
         sendQueue.shift();
         persistQueue();
         if (j.error) {
-          showReply('⚠ A queued offline message could not be delivered: ' + j.error);
+          showReply('A queued offline message could not be delivered: ' + j.error);
           flushSendQueue();
           return;
         }
@@ -924,6 +1037,7 @@
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
     if (j.msg_update) applyMsgUpdate(j.msg_update);
+    if (j.typing) applyTyping(j.typing);
   }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
@@ -946,7 +1060,203 @@
       });
   }
 
-  // ── Direct messages: live sidebar + arrival toast ─────────────────────────
+  // ── "X is typing…" indicator (poll-driven, deduped by name) ────────────────
+  const typingInd = document.getElementById('typing-ind');
+  const typingLabel = document.getElementById('typing-label');
+  let lastTypingSig = '';
+  function applyTyping(names) {
+    if (!typingInd || !typingLabel) return;
+    const list = (names || []).filter((n) => String(n || '').toLowerCase() !== MY_NICK);
+    const sig = list.join(',');
+    if (sig === lastTypingSig) return;
+    lastTypingSig = sig;
+    if (!list.length) {
+      typingInd.classList.add('hidden');
+      return;
+    }
+    const who = list.length === 1 ? list[0] : list.length === 2 ? list.join(' and ') : list[0] + ' and ' + (list.length - 1) + ' others';
+    typingLabel.textContent = who + (list.length === 1 ? ' is typing…' : ' are typing…');
+    typingInd.classList.remove('hidden');
+  }
+  // Throttled heartbeat: at most one POST every 4s per open conversation.
+  let typingSentAt = 0;
+  function maybeSendTyping() {
+    if ((!CHANNEL && !DM) || !input || !input.value.trim()) return;
+    const now = Date.now();
+    if (now - typingSentAt < 4000) return;
+    typingSentAt = now;
+    const payload = CHANNEL ? { channel: CHANNEL } : { dm: DM };
+    post('/api/typing', payload, () => {});
+  }
+  if (input) input.addEventListener('input', maybeSendTyping);
+
+  // ── Pinned messages bar (channels only) ───────────────────────────────────
+  const pinnedBar = document.getElementById('pinned-bar');
+  const pinnedCount = document.getElementById('pinned-count');
+  const pinnedLabel = document.getElementById('pinned-label');
+  const pinnedLatest = document.getElementById('pinned-latest');
+  const pinsPop = document.getElementById('pins-pop');
+  let pinnedCache = [];
+  function refreshPins() {
+    if (!CHANNEL || !pinnedBar) return;
+    fetch('/api/channel/pins?channel=' + encodeURIComponent(CHANNEL))
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.ok) return;
+        pinnedCache = j.pins || [];
+        renderPins();
+      })
+      .catch(() => {});
+  }
+  function renderPins() {
+    if (!pinnedBar) return;
+    const n = pinnedCache.length;
+    if (!n) { pinnedBar.classList.add('hidden'); return; }
+    pinnedBar.classList.remove('hidden');
+    if (pinnedCount) pinnedCount.textContent = String(n);
+    if (pinnedLabel) pinnedLabel.textContent = n === 1 ? 'pinned message' : 'pinned messages';
+    if (pinnedLatest) {
+      const last = pinnedCache[0];
+      pinnedLatest.textContent = last ? (last.username || 'someone') + ': ' + String(last.content || '').replace(/\s+/g, ' ').slice(0, 60) : '';
+    }
+    if (pinsPop) {
+      pinsPop.innerHTML = '';
+      pinnedCache.forEach((p) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'w-full text-left px-3 py-2 rounded-lg hover:bg-discord-750 transition-colors';
+        row.innerHTML = '<span class="flex items-baseline gap-2 min-w-0">'
+          + '<span class="text-blurple font-semibold text-xs shrink-0">' + esc(p.username || '?') + '</span>'
+          + '<span class="text-[10px] text-discord-500 shrink-0">' + esc(String(p.message_at || '').slice(5, 16)) + '</span></span>'
+          + '<span class="block text-xs text-discord-300 mt-0.5 truncate">' + esc(String(p.content || '').replace(/\s+/g, ' ')) + '</span>';
+        row.dataset.pinId = String(p.message_id);
+        row.title = 'Jump to this message';
+        pinsPop.appendChild(row);
+      });
+      pinsPop.querySelectorAll('[data-pin-id]').forEach((b) => {
+        b.addEventListener('click', () => {
+          pinsPop.classList.add('hidden');
+          const id = parseInt(b.dataset.pinId, 10);
+          const el = msgsEl.querySelector('.msg[data-id="' + id + '"]');
+          if (el) {
+            el.scrollIntoView({ block: 'center' });
+            el.classList.add('reply-highlight');
+            setTimeout(() => el.classList.remove('reply-highlight'), 2200);
+          } else {
+            // Not rendered yet — jump to it like a reply link would.
+            const link = document.createElement('a');
+            link.dataset.replyScroll = String(id);
+            link.href = '#msg-' + id;
+            link.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          }
+        });
+      });
+    }
+  }
+  const pinnedBarBtn = document.getElementById('pinned-bar-btn');
+  if (pinnedBarBtn && pinsPop) {
+    pinnedBarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pinsPop.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+      if (pinsPop && !e.target.closest('#pinned-bar')) pinsPop.classList.add('hidden');
+    });
+  }
+  if (CHANNEL) refreshPins();
+  // The header overflow menu's pin entry opens the pins popup (if any exist).
+  const pinBtnM = document.getElementById('pin-btn-m');
+  if (pinBtnM) pinBtnM.addEventListener('click', () => {
+    refreshPins();
+    if (pinnedCache.length && pinsPop) pinsPop.classList.toggle('hidden');
+    else if (!pinnedCache.length) showReply('No pinned messages in this channel.');
+  });
+  // msg_update('pin')/('unpin') from the gateway refreshes the count live
+  // (applyMsgUpdate below calls refreshPins() for those actions).
+
+  // ── Quick switcher (Ctrl+K / ⌘K) ──────────────────────────────────────────
+  const switcherModal = document.getElementById('switcher-modal');
+  const switcherInput = document.getElementById('switcher-input');
+  const switcherList = document.getElementById('switcher-list');
+  let swIndex = 0;
+  let swItems = [];
+  function buildSwitcherItems(term) {
+    const t = term.toLowerCase();
+    const rows = [];
+    Object.keys(CHANNEL_SLUGS).forEach((name) => {
+      if (!t || String(name).toLowerCase().includes(t)) {
+        rows.push({ kind: 'channel', name: String(name), slug: CHANNEL_SLUGS[name], icon: 'hash', sub: '#' + String(name) });
+      }
+    });
+    rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    ALL_USERS.forEach((u) => {
+      if (!t || String(u.u).toLowerCase().includes(t)) {
+        rows.push({ kind: 'dm', name: u.u, icon: 'user', sub: '@' + u.u, online: !!u.on });
+      }
+    });
+    return rows.slice(0, 24);
+  }
+  function renderSwitcher() {
+    if (!switcherList) return;
+    swItems = buildSwitcherItems(switcherInput.value.trim());
+    swIndex = 0;
+    if (!swItems.length) {
+      switcherList.innerHTML = '<div class="px-3 py-6 text-center text-xs text-discord-500">No matches — try a message search in the header.</div>';
+      return;
+    }
+    switcherList.innerHTML = swItems.map((it, i) => {
+      const on = i === 0 ? 'bg-blurple/15 text-white' : 'text-discord-300';
+      return '<button type="button" data-sw="' + i + '" class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors ' + on + '">'
+        + '<span class="text-discord-400 shrink-0">' + window.icon(it.icon, 'w-4 h-4') + '</span>'
+        + '<span class="font-medium truncate min-w-0">' + esc(it.name) + '</span>'
+        + (it.online ? '<span class="w-2 h-2 rounded-full bg-green-500 shrink-0" title="Online"></span>' : '')
+        + '<span class="ml-auto text-[10px] text-discord-500 truncate shrink-0">' + it.sub + '</span></button>';
+    }).join('');
+    switcherList.querySelectorAll('[data-sw]').forEach((b) => b.addEventListener('click', () => pickSwitcher(parseInt(b.dataset.sw, 10))));
+  }
+  function pickSwitcher(i) {
+    const it = swItems[i];
+    if (!it) return;
+    closeSwitcher();
+    if (it.kind === 'channel') window.location = '/app?channel=' + encodeURIComponent(it.slug);
+    else if (it.kind === 'dm') window.location = '/app?dm=' + encodeURIComponent(it.name);
+  }
+  function highlightSw() {
+    if (!switcherList) return;
+    switcherList.querySelectorAll('[data-sw]').forEach((b, i) => {
+      b.classList.toggle('bg-blurple/15', i === swIndex);
+      b.classList.toggle('text-white', i === swIndex);
+      b.classList.toggle('text-discord-300', i !== swIndex);
+    });
+    const el = switcherList.querySelector('[data-sw="' + swIndex + '"]');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+  function openSwitcher() {
+    if (!switcherModal || !switcherInput) return;
+    switcherModal.classList.remove('hidden');
+    switcherInput.value = '';
+    renderSwitcher();
+    setTimeout(() => { try { switcherInput.focus(); } catch (e) {} }, 30);
+  }
+  function closeSwitcher() { if (switcherModal) switcherModal.classList.add('hidden'); }
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (switcherModal && switcherModal.classList.contains('hidden')) openSwitcher();
+      else closeSwitcher();
+      return;
+    }
+    if (!switcherModal || switcherModal.classList.contains('hidden')) return;
+    if (e.key === 'Escape') { closeSwitcher(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); swIndex = (swIndex + 1) % Math.max(swItems.length, 1); highlightSw(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); swIndex = (swIndex - 1 + Math.max(swItems.length, 1)) % Math.max(swItems.length, 1); highlightSw(); }
+    if (e.key === 'Enter') { e.preventDefault(); pickSwitcher(swIndex); }
+  });
+  if (switcherInput) switcherInput.addEventListener('input', renderSwitcher);
+  if (switcherModal) {
+    switcherModal.querySelectorAll('[data-switcher-close]').forEach((el) => el.addEventListener('click', closeSwitcher));
+  }
+
   const dmSection = document.getElementById('dm-section');
   let dmSig = '';
   let dmSeen = {};
@@ -1279,13 +1589,16 @@
     let open = stored === null ? defaultOpen : stored === '1';
     if (!open) {
       section.classList.add('hidden');
-      if (arrow) arrow.textContent = '▸';
     }
+    const setArrow = (o) => {
+      if (arrow) arrow.innerHTML = o ? window.icon('chevron-down', 'w-3 h-3') : window.icon('chevron-right', 'w-3 h-3');
+    };
+    setArrow(open);
     toggle.addEventListener('click', () => {
       open = !open;
       localStorage.setItem(storageKey, open ? '1' : '0');
       section.classList.toggle('hidden', !open);
-      if (arrow) arrow.textContent = open ? '▾' : '▸';
+      setArrow(open);
     });
   }
 
@@ -1299,22 +1612,20 @@
   const channelInvitesCount = document.getElementById('channel-invites-count');
   let channelInvitesSig = '';
   let channelInvitesOpen = localStorage.getItem('lvc.channelInvitesOpen') === '1';
+  const setInvitesArrow = (o) => {
+    if (channelInvitesArrow) channelInvitesArrow.innerHTML = o ? window.icon('chevron-down', 'w-3 h-3') : window.icon('chevron-right', 'w-3 h-3');
+  };
 
   if (channelInvitesToggle && channelInvitesSection) {
+    setInvitesArrow(channelInvitesOpen);
     if (channelInvitesOpen) {
       channelInvitesSection.classList.remove('hidden');
-      if (channelInvitesArrow) channelInvitesArrow.textContent = '▾';
     }
     channelInvitesToggle.addEventListener('click', () => {
       channelInvitesOpen = !channelInvitesOpen;
       localStorage.setItem('lvc.channelInvitesOpen', channelInvitesOpen ? '1' : '0');
-      if (channelInvitesOpen) {
-        channelInvitesSection.classList.remove('hidden');
-        if (channelInvitesArrow) channelInvitesArrow.textContent = '▾';
-      } else {
-        channelInvitesSection.classList.add('hidden');
-        if (channelInvitesArrow) channelInvitesArrow.textContent = '▸';
-      }
+      setInvitesArrow(channelInvitesOpen);
+      channelInvitesSection.classList.toggle('hidden', !channelInvitesOpen);
     });
   }
 
@@ -1570,7 +1881,7 @@
   function subscribePushFromButton() {
     // The button's pointerdown already started the flow via auto-prompt.
     if (pushAutoPrompted) return;
-    subscribePush().then((ok) => { if (ok) { showReply('🔔 Push notifications enabled.'); renderPushRow(); } });
+    subscribePush().then((ok) => { if (ok) { showReply('Push notifications enabled.'); renderPushRow(); } });
   }
   if (pushEnable) pushEnable.addEventListener('click', subscribePushFromButton);
   // Default behaviour is ON: the first click/keystroke/tap anywhere in the chat
@@ -1581,7 +1892,7 @@
     if (!pushSupported || pushAutoPrompted || PUSH_ALL_OFF) return;
     if (Notification.permission !== 'default') return;
     pushAutoPrompted = true;
-    subscribePush().then((ok) => { if (ok) { showReply('🔔 Push notifications enabled.'); renderPushRow(); } });
+    subscribePush().then((ok) => { if (ok) { showReply('Push notifications enabled.'); renderPushRow(); } });
   }
   ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
     document.addEventListener(ev, maybeAutoEnablePush, { once: true, passive: true });
@@ -1609,7 +1920,24 @@
       const payload = DM
         ? { recipient: DM, content: text }
         : { channel: CHANNEL, content: text, reply_to: pendingReplyId || '' };
+      // Optimistic send: show the message instantly, then reconcile it with
+      // the server's copy. On success the pending node is swapped for the
+      // real one; on failure it's removed and the text is queued offline.
+      const tmpId = 'pending-' + Date.now();
+      const tmp = {
+        id: 0,
+        kind: 'message',
+        is_pm: DM ? 1 : 0,
+        username: MY_NICK,
+        sender_id: MY_ID,
+        level: MY_LEVEL,
+        content: text,
+        created_at: new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
+      };
+      appendPendingMsg(tmp, tmpId);
       post('/api/send', payload, (j) => {
+        const tmpEl = msgsEl ? msgsEl.querySelector('.msg[data-pending="' + tmpId + '"]') : null;
+        if (tmpEl) tmpEl.remove();
         if (j.message) {
           if (j.blocked) {
             // Let the message flash for a moment, then remove it and show the ChanServ notice.
@@ -1625,6 +1953,8 @@
         }
         clearPendingReply();
       }, () => {
+        const tmpEl = msgsEl ? msgsEl.querySelector('.msg[data-pending="' + tmpId + '"]') : null;
+        if (tmpEl) tmpEl.remove();
         clearPendingReply();
         enqueueSend(payload);
       });
@@ -1763,11 +2093,80 @@
     input.focus();
   }
   function hideAutocomplete() { ac.classList.add('hidden'); acMode = null; }
+  // Colon shorthand: ":smile" → the emoji picker's autocomplete. The map is a
+  // curated common set; unknown words fall back to a substring match of the
+  // emoji set's *names* isn't possible (we carry no names), so unmatched
+  // shortcodes simply hide the box — matches WhatsApp/Discord behaviour.
+  const EMOJI_SHORT = {
+    smile: '😀', grinning: '😀', smiley: '😃', happy: '😄', joy: '😂', laugh: '😂', lol: '😂',
+    grin: '😁', sweat_smile: '😅', rofl: '🤣', wow: '😮', shock: '😱', scream: '😱',
+    thinking: '🤔', hmm: '🤔', shrug: '🤷', eyes: '👀', wink: '😉', blush: '😊',
+    smile_blush: '☺️', hug: '🤗', heart_eyes: '😍', inlove: '🥰', kiss: '😘',
+    cry: '😢', sob: '😭', angry: '😠', rage: '😡', devil: '😈', angel: '😇',
+    cool: '😎', sunglasses: '😎', nerd: '🤓', party: '🥳', tired: '😩', sleepy: '😴',
+    sick: '🤒', mask: '😷', ghost: '👻', skull: '💀', alien: '👽', robot: '🤖',
+    heart: '❤️', broken_heart: '💔', fire: '🔥', star: '⭐', boom: '💥', sparkles: '✨',
+    rainbow: '🌈', sun: '☀️', moon: '🌙', zap: '⚡', thumbsup: '👍', ok: '👌',
+    clap: '👏', pray: '🙏', muscle: '💪', flex: '💪', pointing: '👉', wave: '👋',
+    ok_hand: '👌', victory: '✌️', peace: '✌️', metal: '🤘',
+    check: '✅', x_: '❌', warning: '⚠️', question: '❓', exclamation: '❗',
+    dollar: '💵', money: '💰', gift: '🎁', tada: '🎉', confetti: '🎊', balloon: '🎈',
+    trophy: '🏆', medal: '🥇', crown: '👑', star2: '🌟', comet: '☄️',
+    rocket: '🚀', plane: '✈️', car: '🚗', bike: '🚲', bus: '🚌',
+    phone: '📱', computer: '💻', keyboard: '⌨️', camera: '📷', video_camera: '📹', music: '🎵',
+    headphone: '🎧', game: '🎮', dice: '🎲', pushpin: '📌', email: '📧', bell: '🔔',
+    shopping: '🛒', book: '📖', pencil: '✏️', scissors: '✂️', lock: '🔒', key: '🔑',
+    globe: '🌍', map: '🗺', compass: '🧭', bomb: '💣', gun: '🔫',
+    dog: '🐶', cat: '🐱', mouse: '🐭', rabbit: '🐰', bear: '🐻', panda: '🐼', tiger: '🐯',
+    lion: '🦁', bird: '🐦', owl: '🦉', penguin: '🐧', whale: '🐳', fish: '🐟',
+    beetle: '🐞', bee: '🐝', butterfly: '🦋', turtle: '🐢', snake: '🐍', dragon: '🐉',
+    cherry: '🍒', apple: '🍎', banana: '🍌', grapes: '🍇', watermelon: '🍉', lemon: '🍋',
+    peach: '🍑', cake: '🎂', cookie: '🍪', donut: '🍩', pizza: '🍕', burger: '🍔',
+    fries: '🍟', taco: '🌮', sushi: '🍣', ramen: '🍜', coffee: '☕', tea: '🍵',
+    beer: '🍺', cheers: '🥂', wine: '🍷', martini: '🍸', cocktail: '🍹',
+    house: '🏠', building: '🏢', castle: '🏰', temple: '🏯', church: '⛪',
+    night: '🌃', city: '🏙', beach: '🏖', mountain: '⛰', volcano: '🌋',
+    clock: '🕐', hourglass: '⏳', calendar: '📅', dagger: '🗡', shield: '🛡',
+    flag: '🚩', fist: '👊', hand: '✋', raised_hand: '👐', middle_finger: '🖕',
+  };
+  function showEmojiAutocomplete(query) {
+    const q = query.toLowerCase();
+    const names = Object.keys(EMOJI_SHORT).filter((n) => n.startsWith(q)).slice(0, 12);
+    if (names.length === 0) { hideAutocomplete(); return; }
+    acMode = 'emoji';
+    mentionAcIndex = 0;
+    ac.innerHTML = names.map((n, i) =>
+      `<button type="button" data-ac="${i}" data-emoji="${EMOJI_SHORT[n]}" class="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${i === 0 ? 'bg-blurple/20 text-white' : 'text-discord-300'} hover:bg-blurple/20">
+        <span class="text-base leading-none">${EMOJI_SHORT[n]}</span>
+        <span class="text-xs font-mono text-discord-400">:${n}:</span>
+      </button>`).join('');
+    ac.classList.remove('hidden');
+    ac.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      insertEmojiShort(EMOJI_SHORT[names[parseInt(b.dataset.ac, 10)]]);
+    }));
+  }
+  function insertEmojiShort(emoji) {
+    const v = input.value;
+    const sel = input.selectionStart;
+    const before = v.slice(0, sel);
+    const m = before.match(/(^|\s):([A-Za-z0-9_+\-]*)$/);
+    if (m && emoji) {
+      const start = sel - m[2].length - 1;
+      input.value = v.slice(0, start) + emoji + v.slice(sel);
+      const pos = start + emoji.length;
+      input.setSelectionRange(pos, pos);
+      autosizeInput();
+    }
+    hideAutocomplete();
+    input.focus();
+  }
   if (input) input.addEventListener('input', () => {
     const v = input.value;
     const sel = input.selectionStart;
     const m = v.slice(0, sel).match(/(?:^|\s)@([^\s]*)$/);
     if (m) { showMentionAutocomplete(m[1]); return; }
+    const em = v.slice(0, sel).match(/(^|\s):([A-Za-z0-9_+\-]*)$/);
+    if (em && em[2].length >= 1) { showEmojiAutocomplete(em[2]); return; }
     const slash = v.indexOf('/');
     if (slash === 0) showAutocomplete(v.slice(1).split(/\s/)[0].toLowerCase());
     else hideAutocomplete();
@@ -2002,16 +2401,23 @@
       fd.append('ajax', '1');
       if (DM) fd.append('dm', DM); else fd.append('channel', CHANNEL);
       fd.append('file', file);
-      uploadBtn.textContent = '⏳';
+      uploadBtn.disabled = true;
+      uploadBtn.style.opacity = '0.6';
       fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-CSRF': CSRF } })
         .then((r) => r.json().catch(() => ({ error: 'Server error' })))
         .then((j) => {
-          uploadBtn.textContent = '📎';
+          uploadBtn.disabled = false;
+          uploadBtn.style.opacity = '';
           uploadFile.value = '';
+          clearAttachPreview();
           if (j.error) { uiAlert(j.error); return; }
           if (j.message) appendMsg(j.message);
         })
-        .catch(() => { uploadBtn.textContent = '📎'; uiAlert('Upload failed.'); });
+        .catch(() => {
+          uploadBtn.disabled = false;
+          uploadBtn.style.opacity = '';
+          uiAlert('Upload failed.');
+        });
     });
     // Drag & drop an image onto the timeline.
     document.addEventListener('dragover', (e) => { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') !== -1) e.preventDefault(); });
@@ -2042,6 +2448,41 @@
         }
       }
     });
+  }
+
+  // ── Attachment preview strip (selected image → thumbnail with remove) ──────
+  const attachPreview = document.getElementById('attach-preview');
+  let attachPreviewCleanup = null;
+  function clearAttachPreview() {
+    if (!attachPreview) return;
+    attachPreview.innerHTML = '';
+    attachPreview.classList.add('hidden');
+    if (attachPreviewCleanup) { URL.revokeObjectURL(attachPreviewCleanup); attachPreviewCleanup = null; }
+  }
+  function showAttachPreview(file) {
+    if (!attachPreview || !uploadFile) return;
+    clearAttachPreview();
+    const url = URL.createObjectURL(file);
+    attachPreviewCleanup = url;
+    const wrap = document.createElement('div');
+    wrap.className = 'flex items-center gap-2 rounded-lg border border-discord-600 bg-discord-850 p-1.5 pr-2 max-w-xs';
+    wrap.innerHTML = '<img src="' + url + '" alt="" class="w-9 h-9 rounded-md object-cover shrink-0">'
+      + '<span class="min-w-0 flex-1"><span class="block text-xs text-discord-200 truncate">' + esc(file.name || 'image') + '</span>'
+      + '<span class="block text-[10px] text-discord-500">' + (file.size ? Math.round(file.size / 1024) + ' KB' : '') + '</span></span>'
+      + '<button type="button" class="text-discord-400 hover:text-white p-1 shrink-0" title="Remove attachment">' + window.icon('x', 'w-3.5 h-3.5') + '</button>';
+    wrap.querySelector('button').addEventListener('click', () => {
+      clearAttachPreview();
+      if (uploadFile) uploadFile.value = '';
+    });
+    attachPreview.appendChild(wrap);
+    attachPreview.classList.remove('hidden');
+  }
+  if (uploadFile) {
+    const trackUploadFile = () => {
+      const f = uploadFile.files && uploadFile.files[0];
+      if (f) showAttachPreview(f); else clearAttachPreview();
+    };
+    document.addEventListener('change', (e) => { if (e.target === uploadFile) trackUploadFile(); }, true);
   }
 
   // ── Image lightbox ─────────────────────────────────────────────────────────
@@ -2180,12 +2621,11 @@
       const cur = muteBtn.dataset.mode || 'all';
       const next = order[(order.indexOf(cur) + 1) % order.length];
       post('/api/channel/notify', { channel: CHANNEL, mode: next }, (j) => {
-        if (j.mode) {
-          muteBtn.dataset.mode = j.mode;
-          if (j.mode === 'muted') { muteBtn.textContent = '🔕 Muted'; muteBtn.title = 'Unmute channel'; }
-          else if (j.mode === 'mentions') { muteBtn.textContent = '🔔 Mentions'; muteBtn.title = 'Notification mode: mentions only'; }
-          else { muteBtn.textContent = '🔔'; muteBtn.title = 'Mute channel'; }
-        }
+if (j.mode) {
+            muteBtn.dataset.mode = j.mode;
+            muteBtn.innerHTML = j.mode === 'muted' ? window.icon('bell-off', 'w-3.5 h-3.5') : j.mode === 'mentions' ? window.icon('bell-ring', 'w-3.5 h-3.5') : window.icon('bell', 'w-3.5 h-3.5');
+            muteBtn.title = j.mode === 'muted' ? 'Unmute channel' : j.mode === 'mentions' ? 'Notification mode: mentions only' : 'Mute channel';
+          }
       });
     });
   }
@@ -2505,6 +2945,18 @@
       items.push({ label: 'Reply', onClick: () => { setPendingReply(id, author, content.slice(0, 80)); if (!CHANNEL) { input.value = '@' + author + ' '; } } });
     }
     if (content) items.push({ label: 'Copy text', onClick: () => copyText(content) });
+    // Pin / unpin — channels only; ops and admins (the API enforces it).
+    const isChannelMsg = el.dataset.isPm !== '1' && CHANNEL;
+    if (isChannelMsg && (CAN_OP || CAN_ADMIN)) {
+      const isPinned = (pinnedCache || []).some((p) => String(p.message_id) === String(id));
+      items.push({
+        label: isPinned ? 'Unpin message' : 'Pin message',
+        onClick: () => post(isPinned ? '/api/message/unpin' : '/api/message/pin', { id }, (j) => {
+          if (j.pins) { pinnedCache = j.pins || []; renderPins(); }
+          refreshPins();
+        }),
+      });
+    }
     const kind = el.dataset.kind || '';
     if (kind === 'message' || kind === 'image' || kind === 'gif') {
       items.push({ label: 'Report message', onClick: () => openReport(id, el.dataset.isPm === '1', contentHtml) });
@@ -3012,9 +3464,16 @@
   // ── Theme toggle (light/dark, sticky per browser + per account) ────────────
   const themeBtn = document.getElementById('theme-toggle');
   function setThemeIcon() {
-    if (!themeBtn) return;
-    themeBtn.textContent = document.documentElement.classList.contains('light') ? '☀️' : '🌙';
-    themeBtn.title = document.documentElement.classList.contains('light') ? 'Switch to dark mode' : 'Switch to light mode';
+    const light = document.documentElement.classList.contains('light');
+    if (themeBtn) {
+      themeBtn.innerHTML = light ? window.icon('sun', 'w-4 h-4') : window.icon('moon', 'w-4 h-4');
+      themeBtn.title = light ? 'Switch to dark mode' : 'Switch to light mode';
+    }
+    const hdr = document.getElementById('header-theme-toggle');
+    if (hdr) {
+      const label = hdr.querySelector('span');
+      if (label) label.textContent = light ? 'Light mode' : 'Dark mode';
+    }
   }
   // The admin kill-switch hides the theme controls for everyone — they are
   // forced onto the server theme.
@@ -3219,7 +3678,8 @@
     const syncMuteM = () => {
       const m = muteBtn && muteBtn.dataset.mode;
       if (m) muteBtnM.dataset.mode = m;
-      muteBtnM.textContent = m === 'muted' ? '🔕 Unmute' : m === 'mentions' ? '🔔 Mentions only' : '🔕 Mute';
+      const icon = m === 'muted' ? window.icon('bell-off', 'w-4 h-4') : m === 'mentions' ? window.icon('bell-ring', 'w-4 h-4') : window.icon('bell', 'w-4 h-4');
+      muteBtnM.innerHTML = icon + (m === 'muted' ? ' Unmute' : m === 'mentions' ? ' Mentions only' : ' Mute');
     };
     syncMuteM();
     muteBtnM.addEventListener('click', () => {
@@ -3448,6 +3908,20 @@
       installModal.classList.add('hidden');
     } else if (downloadModal && !downloadModal.classList.contains('hidden')) {
       downloadModal.classList.add('hidden');
+    } else {
+      // Close whichever modal-like overlay is open (browse/create/report/URL/
+      // bg/embed/join/settings). Each is a #*-modal whose id is listed here.
+      const modalIds = ['browse-modal', 'create-channel-modal', 'report-modal', 'chan-bg-modal', 'embed-modal', 'join-modal', 'chan-settings-modal', 'install-unsupported-modal'];
+      for (const id of modalIds) {
+        const el = document.getElementById(id);
+        if (el && !el.classList.contains('hidden')) {
+          el.classList.add('hidden');
+          // Modals that animate on open get a CSS animation-driven entry; no
+          // extra bookkeeping needed since the card handles its own state.
+          break;
+        }
+      }
+      closeReactPopover();
     }
   });
 

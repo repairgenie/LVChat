@@ -81,6 +81,13 @@ nod to IRC rather than an implementation of it.
   live search and trending; the API key is set under **Admin → Settings** and all
   search/trending calls are proxied through this server so the key never reaches browsers.
   Posted GIFs render inline and stay searchable by their title in chat history
+- **Pinned messages** — operators and admins pin/unpin any channel message (right-click → **Pin message**);
+  a pinned bar above the composer shows the count and a jumpable list (header menu → **Pinned messages**)
+- **Typing indicators** — "X is typing…" with animated dots above the composer in channels and DMs,
+  polled server-side so they work over polling, SSE and WebSocket alike
+- **Quick switcher** — **Ctrl+K / ⌘K** jumps to any channel or DM from a fuzzy overlay
+- **Emoji shortcodes** — type `:smile:`-style codes for autocompleted emoji insertion, and hover any
+  message for a one-shot reaction popover
 - **Slash commands** — full parser + Discord-style autocomplete for the entire IRC-style command set (see `/help`)
 - **Shareable channel links** — `/c/gaming` links that land a logged-out friend on login/register
   and bounce them back into the channel; logged-in users with the link are auto-joined

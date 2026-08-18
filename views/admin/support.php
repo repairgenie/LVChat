@@ -159,7 +159,7 @@
 (function () {
   var toggle = document.getElementById('new-ticket-toggle');
   var form = document.getElementById('new-ticket-form');
-  if (toggle && form) toggle.addEventListener('click', function () { var h = form.classList.toggle('hidden'); toggle.textContent = (h ? '＋ Open a ticket' : '✕ Cancel'); });
+  if (toggle && form) toggle.addEventListener('click', function () { var h = form.classList.toggle('hidden'); toggle.textContent = (h ? '＋ Open a ticket' : 'Cancel'); });
 
   var bundle = window.TiptapBundle;
   if (!bundle) {

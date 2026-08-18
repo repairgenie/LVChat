@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '37';
+    private const SCHEMA_VERSION = '38';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -135,6 +135,14 @@ final class Database
         if (!in_array('channel_notify', $tables, true)) {
             $pdo->exec('CREATE TABLE channel_notify (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL DEFAULT "all", UNIQUE (channel_id, user_id))');
             $pdo->exec('CREATE INDEX idx_channel_notify_user ON channel_notify(user_id)');
+        }
+        // Typing indicators + pinned messages (schema v38).
+        if (!in_array('typing_indicators', $tables, true)) {
+            $pdo->exec('CREATE TABLE typing_indicators (channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE, actor_type TEXT NOT NULL DEFAULT "user", actor_id INTEGER NOT NULL, actor_name TEXT NOT NULL DEFAULT "", updated_at TEXT NOT NULL DEFAULT (datetime("now")), PRIMARY KEY (channel_id, actor_type, actor_id))');
+        }
+        if (!in_array('pinned_messages', $tables, true)) {
+            $pdo->exec('CREATE TABLE pinned_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, pinned_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")), UNIQUE (message_id))');
+            $pdo->exec('CREATE INDEX idx_pinned_messages_channel ON pinned_messages(channel_id, id)');
         }
         // Sound alerts + per-user sound preferences/overrides (schema v13).
         if (!in_array('sound_alerts', $tables, true)) {

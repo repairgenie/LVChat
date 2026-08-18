@@ -60,14 +60,15 @@ function admin_nav(string $active, array $user): void {
     $visible = $isAdmin || ($isStaff && in_array('staff', $entry['roles'], true));
     $items[$k] = [$entry['url'], $entry['label'], $visible];
   }
-  echo '<div class="flex flex-wrap gap-1 mb-6 bg-discord-850 border border-discord-700 rounded-lg p-1">';
+  echo '<div class="sticky top-0 z-30 -mx-2 px-2 py-2 mb-6 bg-discord-900/90 backdrop-blur-sm border border-discord-700 rounded-xl shadow-lg">';
+  echo '<div class="flex flex-wrap gap-1">';
   foreach ($items as $k => [$href, $label, $visible]) {
     if (!$visible) {
       continue;
     }
-    $on = $active === $k ? 'bg-discord-700 text-white' : 'text-discord-300 hover:bg-discord-750';
-    echo '<a href="' . h($href) . '" class="px-3 py-1.5 rounded-md text-sm font-medium ' . $on . '">' . h($label) . '</a>';
+    $on = $active === $k ? 'bg-blurple/20 text-white ring-1 ring-blurple/40 border-blurple/40' : 'text-discord-300 hover:bg-discord-750 hover:text-white';
+    echo '<a href="' . h($href) . '" class="px-3 py-1.5 rounded-md text-sm font-medium border border-transparent transition-colors ' . $on . '">' . h($label) . '</a>';
   }
-  echo '</div>';
+  echo '</div></div>';
 }
 admin_nav($active, is_array($user) ? $user : []);

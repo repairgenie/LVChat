@@ -19,4 +19,6 @@
 
  // Compiled Tailwind CSS. No CDN, no server-side build — the file ships with the app.
 // Regenerate locally with `npm run build` whenever views change. Cache-busted by mtime. ?>
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/assets/fonts/InterVariable.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/assets/fonts/InterVariable-Italic.woff2">
 <link rel="stylesheet" href="/assets/css/app.css?v=<?= (int) @filemtime(ROOT . '/public/assets/css/app.css') ?>">

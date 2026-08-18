@@ -110,6 +110,12 @@ final class EventSchedulerJob
     /**
      * End events that have exceeded their duration or been running > 24h.
      * Generates the chat log, emails it to the founder, cleans up the channel.
+     *
+     * Idempotency: the event is marked 'ended' BEFORE the fallible log-email
+     * and cleanup steps, and the email is gated by the once-only log_sent flag.
+     * If anything throws mid-tick, the next tick can never re-select the same
+     * event — so the founder is never emailed the same log twice, and an
+     * already-deleted channel never produces a second (empty) log email.
      */
     private static function endEvents(): void
     {
@@ -121,39 +127,55 @@ final class EventSchedulerJob
         );
         foreach ($events as $e) {
             $event = $e; // alias for readability
-            $channelId = $event['channel_id'] ? (int) $event['channel_id'] : null;
-            $channelSlug = $channelId
-                ? (string) Database::scalar('SELECT slug FROM channels WHERE id = ?', [$channelId])
-                : null;
-            $channelName = $channelId
-                ? (string) Database::scalar('SELECT name FROM channels WHERE id = ?', [$channelId])
-                : $event['title'];
+            $eventId = (int) $event['id'];
+            $channelId = (int) ($event['channel_id'] ?? 0);
 
-            // Generate and email the chat log before cleanup.
-            if ($channelId && $channelSlug) {
-                $founder = Database::row('SELECT * FROM users WHERE id = ?', [(int) $event['founder_id']]);
-                if ($founder && Mailer::configured()) {
-                    $logPath = EventLogService::buildLogZip(
-                        $event,
-                        $channelName,
-                        $channelSlug
-                    );
-                    if ($logPath) {
-                        EventLogService::emailLog($event, $founder, $logPath);
-                        @unlink($logPath);
+            // Mark ended FIRST. Even if the email or cleanup below fails, this
+            // event no longer matches the query — no repeat emails next tick.
+            Database::query(
+                "UPDATE events SET status = 'ended', ended_at = datetime('now') WHERE id = ? AND status = 'active'",
+                [$eventId]
+            );
+
+            // Generate and email the chat log exactly once (log_sent guard),
+            // and only while the channel row still has its real identity — a
+            // soft-deleted channel (deleted-…) has no recoverable name or log
+            // rows, so a second email would only contain the placeholder.
+            if ($channelId > 0 && (int) ($event['log_sent'] ?? 0) === 0) {
+                $ch = Database::row('SELECT name, slug, forbidden FROM channels WHERE id = ?', [$channelId]);
+                if ($ch
+                    && strncmp((string) $ch['name'], 'deleted-', 8) !== 0
+                    && (int) $ch['forbidden'] === 0
+                ) {
+                    $founder = Database::row('SELECT * FROM users WHERE id = ?', [(int) $event['founder_id']]);
+                    if ($founder && Mailer::configured()) {
+                        try {
+                            $logPath = EventLogService::buildLogZip($event, (string) $ch['name'], (string) $ch['slug']);
+                            if ($logPath) {
+                                EventLogService::emailLog($event, $founder, $logPath);
+                                @unlink($logPath);
+                            }
+                        } catch (\Throwable $emailErr) {
+                            // Never let an email failure wedge the event back
+                            // into 'active' (which would re-email it next tick).
+                            error_log('[EventSchedulerJob] endEvents email failed: ' . $emailErr->getMessage());
+                        }
                     }
                 }
+                // At-most-once: whether the email sent or failed, never retry.
+                Database::query('UPDATE events SET log_sent = 1 WHERE id = ?', [$eventId]);
             }
 
-            // Kick everyone and delete the channel.
-            if ($channelId) {
-                EventController::cleanupEventChannel($channelId);
+            // Kick everyone and delete the channel. Failure here no longer
+            // resurrects the event — it is already marked ended / log_sent.
+            if ($channelId > 0) {
+                try {
+                    EventController::cleanupEventChannel($channelId);
+                } catch (\Throwable $cleanupErr) {
+                    error_log('[EventSchedulerJob] endEvents cleanup failed: ' . $cleanupErr->getMessage());
+                    log_audit('event_end_cleanup_fail', $event['title'], $cleanupErr->getMessage());
+                }
             }
-
-            Database::query(
-                "UPDATE events SET status = 'ended', ended_at = datetime('now') WHERE id = ?",
-                [(int) $event['id']]
-            );
             log_audit('event_end', $event['title'], 'duration ended');
         }
     }

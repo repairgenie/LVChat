@@ -19,6 +19,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Bundled Inter variable font (SIL OFL 1.1 — see THIRD_PARTY_NOTICES.md).
+   The app ships the woff2s under public/assets/fonts/ — no CDN, PWA-friendly. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/InterVariable.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/InterVariable-Italic.woff2") format("woff2-variations");
+}
+
 @layer base {
   /* Dark is the default; html.light overrides the palette. Values are the
      red/green/blue triplets used by rgb(var(--x) / <alpha-value>). */
@@ -39,7 +56,7 @@
     --c-d-950: 17 18 20;
     --c-sidebar: 43 45 49;
     --c-sidebar-hover: 55 58 63;
-    --font-sans: "gg sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   }
   html { color-scheme: dark; }
   html.light {
@@ -66,10 +83,12 @@
 }
 
 @layer utilities {
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: rgb(var(--c-d-600)) transparent; }
   .scrollbar-thin::-webkit-scrollbar { width: 8px; }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(var(--c-d-600)); border-radius: 4px; }
   html.light .scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(var(--c-d-500)); }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .icon, svg[class*="lvc-icon"] { flex: none; display: inline-block; vertical-align: middle; }
 }
 
 @layer components {
@@ -155,6 +174,43 @@ html.light .bg-red-500 .text-white { color: #fff; }
   background: rgb(var(--c-blurple) / .12);
   box-shadow: inset 2px 0 0 0 rgb(var(--c-blurple) / .6);
   transition: background .4s ease;
+}
+
+/* New messages fade/slide in (poll or optimistic send). */
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.msg-enter { animation: msg-in .18s ease-out; }
+
+/* Optimistically-sent message while the server round-trip is in flight. */
+.msg-pending-sent { opacity: .55; }
+.msg-pending-sent .actions, .msg-pending-sent .msg-actions { display: none; }
+
+/* "X is typing…" dots bounce. */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+.typing-dot { animation: typing-bounce 1.2s ease-in-out infinite; }
+.typing-dot:nth-child(2) { animation-delay: .15s; }
+.typing-dot:nth-child(3) { animation-delay: .3s; }
+
+/* Modal entry animation for every *-modal wrapper (card fades in + lifts). */
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+[id$="-modal"]:not(.hidden) > .relative.card { animation: modal-in .18s ease-out; }
+
+/* Auth pages: branded gradient accent across the top of the card. */
+.auth-card { position: relative; overflow: hidden; }
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgb(var(--c-blurple)), #a855f7, #ec4899);
 }
 
 /* Channel URL pane: embedded web page shown above the chat (channels only). */
