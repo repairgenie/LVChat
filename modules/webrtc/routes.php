@@ -31,12 +31,20 @@ return static function (Router $router): void {
     $router->post('/api/webrtc/voice/leave', [VoiceController::class, 'leave']);
     $router->post('/api/webrtc/voice/channel-voice', [VoiceController::class, 'channelVoice']);
 
-    // One-on-one calls.
+    // One-on-one calls (growable into group calls via /invite).
     $router->post('/api/webrtc/call/initiate', [CallController::class, 'initiate']);
+    $router->post('/api/webrtc/call/invite', [CallController::class, 'invite']);
     $router->post('/api/webrtc/call/accept', [CallController::class, 'accept']);
     $router->post('/api/webrtc/call/decline', [CallController::class, 'decline']);
     $router->post('/api/webrtc/call/join', [CallController::class, 'join']);
     $router->post('/api/webrtc/call/end', [CallController::class, 'end']);
+
+    // Host controls: kick/mute/lock + waiting-room admit/deny.
+    $router->post('/api/webrtc/moderate', [ModerationController::class, 'moderate']);
+
+    // Recording (LiveKit egress).
+    $router->post('/api/webrtc/record', [RecordingController::class, 'record']);
+    $router->get('/api/webrtc/recordings/{id}', [RecordingController::class, 'download']);
 
     // Events (replaces legacy #mtg meeting rooms).
     $router->post('/api/events/create', [EventController::class, 'create']);

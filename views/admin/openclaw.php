@@ -17,12 +17,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'OpenClaw Bots'; $active = 'openclaw'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">OpenClaw Bots</h1>
-  <p class="text-sm text-discord-400">Manage AI bots that connect to LVChat via the OpenClaw API. Assign bots to channels and grant PM access.</p>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
+ $title = 'OpenClaw Bots'; $active = 'openclaw';
+$pageSubtitle = 'Manage AI bots that connect to LVChat via the OpenClaw API. Assign bots to channels and grant PM access.';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <?php if (!empty($_SESSION['openclaw_api_key'])): ?>
 <div class="card p-5 mb-5 border border-green-500/40">
@@ -54,7 +53,7 @@
 </div>
 
 <?php if (!$bots): ?>
-<div class="card p-5 text-discord-500 text-center">No OpenClaw bots configured yet.</div>
+<div class="empty-state">No OpenClaw bots configured yet.</div>
 <?php else: ?>
 <?php foreach ($bots as $bot): ?>
 <div class="card p-5 mb-4">

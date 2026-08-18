@@ -17,12 +17,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Invites'; $active = 'invites'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Invites</h1>
-  <p class="text-sm text-discord-400">Email people a link that lets them create an account</p>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
+ $title = 'Invites'; $active = 'invites';
+$pageSubtitle = 'Email people a link that lets them create an account.';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <?php if ($lastLink): ?>
 <div class="card p-5 mb-5 border border-green-500/40">
@@ -56,24 +55,18 @@
 </div>
 
 <div class="card overflow-x-auto">
-  <table class="w-full text-sm">
+  <table class="data-table">
     <thead>
-      <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-        <th class="px-4 py-2">Email</th>
-        <th class="px-4 py-2">Status</th>
-        <th class="px-4 py-2">Invited by</th>
-        <th class="px-4 py-2">Expires</th>
-        <th class="px-4 py-2 text-right">Actions</th>
-      </tr>
+      <tr><th>Email</th><th>Status</th><th>Invited by</th><th>Expires</th><th class="text-right">Actions</th></tr>
     </thead>
     <tbody>
-      <?php if (!$invites): ?><tr><td class="px-4 py-3 text-discord-500" colspan="5">No invites yet.</td></tr><?php endif; ?>
+      <?php if (!$invites): ?><tr><td class="text-discord-500" colspan="5">No invites yet.</td></tr><?php endif; ?>
       <?php foreach ($invites as $i): ?>
-      <tr class="border-b border-discord-800">
-        <td class="px-4 py-2 text-discord-200"><?= h($i['email']) ?>
+      <tr>
+        <td class="text-discord-200"><?= h($i['email']) ?>
           <?php if (!empty($i['message'])): ?><span class="block text-xs text-discord-500">"<?= h($i['message']) ?>"</span><?php endif; ?>
         </td>
-        <td class="px-4 py-2">
+        <td>
           <?php if (!empty($i['used_at'])): ?>
           <span class="text-green-400">used by <?= h($i['used_by_name'] ?? '?') ?></span>
           <?php elseif (strtotime((string) $i['expires_at'] . ' UTC') < time()): ?>
@@ -82,9 +75,9 @@
           <span class="text-blurple">pending</span>
           <?php endif; ?>
         </td>
-        <td class="px-4 py-2 text-discord-400"><?= h($i['invited_by_name'] ?? '—') ?></td>
-        <td class="px-4 py-2 text-discord-400"><?= h(date('M j Y', strtotime($i['expires_at'] . ' UTC'))) ?></td>
-        <td class="px-4 py-2 text-right whitespace-nowrap">
+        <td class="text-discord-400"><?= h($i['invited_by_name'] ?? '—') ?></td>
+        <td class="text-discord-400"><?= h(date('M j Y', strtotime($i['expires_at'] . ' UTC'))) ?></td>
+        <td class="text-right whitespace-nowrap">
           <?php if (empty($i['used_at']) && strtotime((string) $i['expires_at'] . ' UTC') >= time()): ?>
           <button class="btn-ghost text-xs !py-1" onclick="promptCopy('Invite link', '<?= h(InviteService::link((string) $i['token'])) ?>')">Copy link</button>
           <form method="post" action="/admin/action" class="inline">

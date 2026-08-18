@@ -447,6 +447,12 @@ npm test               # e2e tests against a local mock LVChat server
 npm run dist:linux     # or dist:win / dist:mac — packages an installer
 ```
 
+The desktop client's chat window is the same web app, so every unified
+notification preference (masters, quiet hours, keywords, previews, per-channel
+modes) applies to it too; alert decisions are made once, in the page, and the
+desktop bridge simply forwards them to OS notifications with per-conversation
+coalescing, an app badge, and click-to-message deep links.
+
 The web app itself works fully in a normal browser and nothing on the server
 depends on the desktop client.
 
@@ -498,3 +504,52 @@ depends on the desktop client.
 Backups: `deploy.sh` snapshots `data/chat.db` automatically on each run; for a
 full backup, `sqlite3 data/chat.db ".backup '/backup/chat.db'"` while the server
 is running (safe in WAL mode) or copy the files at quiet times.
+
+## 11. Voice, video & meetings (WebRTC / LiveKit) — optional
+
+Voice is a **module** (`modules/webrtc`), delivered by a self-hosted **LiveKit**
+SFU. The PHP app is only the control plane — auth, room mapping, the capacity
+gate, host moderation, waiting rooms, and recording. Media flows browser →
+LiveKit directly. The full design and API are in `docs/webrtc-implementation.md`
+and `docs/protocol/voice.md`.
+
+### 11.1 One-time setup (shared-hosting friendly)
+
+1. **Install the LiveKit binary** somewhere on the site user's PATH:
+   ```bash
+   curl -sSL https://get.livekit.io | bash          # → /usr/local/bin/livekit-server
+   ```
+   (or drop a static release under `~/.local/bin/livekit-server`).
+2. **Admin → Voice → Generate & autoconfigure keys**: writes
+   `data/livekit/livekit.yaml`, starts `livekit-server` as the site user via
+   `nohup`, records the pid, and enables voice. No root, no systemd, no `/etc`.
+3. **Firewall** (media + signaling):
+   - UDP **7880** (RTC mux), TCP **7881** (RTC TCP fallback)
+   - UDP **50000–50200** (ICE range — must be open for P2P + TURN)
+   - TCP **7880** (signaling/WebSocket + the Twirp admin API + `/health`)
+   - coturn, if used: UDP/TCP **3478**, UDP **5349**
+4. **TLS**: serve `wss://` — LiveKit's own `https_port` with the site's
+   Let's Encrypt cert, or reverse-proxy `/` + `/rtc` through the existing nginx.
+   Set **LiveKit URL** to the `wss://` URL.
+5. **Restart on reboot**: re-run the autoconfigure button or add a cron
+   `@reboot` entry for the site user.
+
+`bin/deploy.sh` now reports/restarts a managed LiveKit daemon when voice is
+enabled.
+
+### 11.2 Recording (optional)
+
+Install the `livekit-egress` binary + a Redis, add an `egress:` block to
+`data/livekit/livekit.yaml`, then tick "Allow meeting recording" in Admin →
+Voice. Without egress, the in-call Record button degrades to a friendly
+"not available" — nothing else changes. Files land under `data/recordings/`
+(default; configurable), download-protected by the app.
+
+### 11.3 Capacity guidance
+
+`voice_max_users` (default 50, up to 200) is the hard global ceiling — enforced
+by the app join gate *and* stamped into every LiveKit room as `max_participants`.
+`voice_talker_cap` (default 8) bounds each listener's downlink to the top-N
+active speakers. Moderate quality ≈ 51 kbit/s per talking user; the worst case
+for 200 users on a 100 Mbit/s host is comfortable with the talker cap in place
+(see `docs/webrtc-implementation.md` §3 for the numbers).

@@ -1,12 +1,24 @@
 # LVChat — WebRTC Voice Integration (LiveKit)
 
-**Status:** Implemented as the **`webrtc` module** (`modules/webrtc/`, see its README). §7A/§9 below describe the original cross-app plan; the server side now ships as a self-contained module (module-owned schema, routes, admin page, assets). Shipped client work: web app voice + video (camera/screen share) + meetings in `assets/js/voice.js`; desktop via the served `/app` page (e2e covers the contract); messenger (Electron) and messenger-web vendor `livekit-client` + a server-gated `voice.js`. Client-repo integration points are documented in `modules/webrtc/README.md` and remain as listed here.
+**Status:** Implemented as the **`webrtc` module** (`modules/webrtc/`, see its README). §7A/§9 below describe the original cross-app plan; the server side now ships as a self-contained module (module-owned schema, routes, admin page, assets). **Overhaul (1.1.0)** adds: server-side moderation via LiveKit's admin API (kick / track mute / mute-all / room lock), a Zoom-style waiting room for channels and events (admit/deny with token handoff via the status poll), group calls (host invites into any active call), LiveKit egress recording with authenticated downloads, Slack/Teams-style host roster UI, connection-quality dots, emoji reactions + raise-hand over the data channel, deafen/minimize/layout controls, audio-processing settings, ring tones, per-actor rate limits, missed-call Web Push, call logging to `chat_logs`, a cron cleanup job, and one canonical voice client shared by all four surfaces via a small `LVCVoiceHost` adapter. See `modules/webrtc/README.md`, `docs/protocol/voice.md`, and the module's `schema.php` for the current API and data model; the older endpoints there predate some of these changes (e.g. group calls add `/api/webrtc/call/invite`).
 **Target app:** LVChat (PHP 8.1+ / SQLite / Workerman) at `chat.lasvegasbestinternet.com`
-**Scope:** Audio calling for **one-on-one DMs** (ring/accept/decline), **per-channel voice**, **video** (camera + screen sharing), and **meeting rooms** (`#mtg-XXXXXX` — private, keyed, invite-only, online-only invites), delivered to all four clients: web app, desktop, messenger, and messenger-web — backed by a self-hosted **LiveKit** SFU with the LVChat server as the control plane (auth, room mapping, capacity).
+**Scope (as implemented in 1.1.0):** audio calling for **one-on-one and group DMs** (ring/accept/decline + host invites), **per-channel voice**, **video** (camera + screen sharing), host **moderation**, **waiting rooms**, **recording**, and **meeting rooms** (`#evt-<32hex>` events — public/private, invite-code keyed, scheduled, email-invited), delivered to all four clients: web app, desktop, messenger, and messenger-web — backed by a self-hosted **LiveKit** SFU with the LVChat server as the control plane (auth, room mapping, capacity).
 
 > **Supersedes `docs/mumble-implementation.md`.** The Mumble plan's browser path was itself WebRTC: mumble-web connects to **mumble-web-proxy** (a Rust bridge that must be compiled from source, is AGPL-3.0, ~75★/41 commits, and whose WebRTC extension "has not yet been stabilized") so it can reach Murmur. LiveKit removes that proxy entirely — the browser speaks native WebRTC to a single, actively-maintained, Apache-2.0 daemon.
 
 ---
+
+> **How to read this document.** §§1–4 (design rationale, capacity math, LiveKit
+> deployment, coturn/TURN) are still accurate and describe the shipped
+> architecture. §§5–10 were the **original pre-1.1.0 plan**; the shipped
+> implementation diverges from them (routes moved under `/api/webrtc/*`, `#mtg`
+> rooms were replaced by `#evt-*` events, moderation/waiting room/recording/rate
+> limits/group calls were added). The **current** server surface is documented
+> in [`modules/webrtc/README.md`](../modules/webrtc/README.md) and
+> [`docs/protocol/voice.md`](protocol/voice.md); `modules/webrtc/schema.php`
+> holds the authoritative table definitions. §5.2/§5.3's "insert into
+> `AdminController::settings()`" instructions, §9's file-by-file list and §10's
+> open questions are historical — §10 now carries a resolution table.
 
 ## 1. TL;DR
 
@@ -15,8 +27,8 @@
   - Admin sets `voice_max_users` (global concurrent voice cap) and `voice_talker_cap` (max simultaneous talkers each listener hears). The app **gates joins** against the cap (rejects with a friendly error when full) and sets the room `max_participants` on LiveKit — no daemon restart needed (unlike Murmur's `users=` ini).
   - Admin sets a per-client audio bitrate (`voice_bitrate`) — the Opus equivalent of the old Mumble bandwidth control.
 - **Auth is per-user, not a shared password:** the PHP server mints short-TTL **LiveKit access tokens (JWT)** at join time, mirroring the existing `ws_tickets` one-time handshake pattern. No credential ever reaches the browser except the in-memory, single-use join payload.
-- **One voice engine, four surfaces:** every client calls the same `/api/voice/*` and `/api/call/*` endpoints and drives the official **`livekit-client`** JS SDK. The web app and messenger-web run it in a bundled build; desktop and messenger (Chromium/Electron) run it natively. The cap is enforced in exactly one place — the PHP join gate — so every client obeys it and none can bypass it.
-- **Features:** one-on-one DM **calls** (ring / accept / decline / end, 20 s ring timeout → "no answer"), **voice-enabled channels** (a `voice_enabled` flag per channel, settable by ops+ in the Channel Settings modal; a voice button appears in the channel header when enabled and the user has access), **video** (camera + screen sharing with per-user device selection, camera/mic test tools, and background blur / custom-image replacement via lazily-loaded MediaPipe selfie-segmentation).
+- **One voice engine, four surfaces:** every client calls the same `/api/webrtc/voice/*` and `/api/webrtc/call/*` endpoints (plus `/api/webrtc/moderate`, `/api/webrtc/record`) and runs the **same canonical `voice.js`** against the official **`livekit-client`** JS SDK. The cap is enforced in exactly one place — the PHP join gate — so every client obeys it and none can bypass it.
+- **Features:** one-on-one & **group** DM **calls** (ring / accept / decline / end, 20 s ring timeout → "no answer", host `/call/invite`), **voice-enabled channels** (a `voice_enabled` flag per channel, settable by ops+ in the Channel Settings modal; a voice button appears in the channel header when enabled and the user has access), **video** (camera + screen sharing with per-user device selection, camera/mic test tools, and background blur / custom-image replacement via lazily-loaded MediaPipe selfie-segmentation), **waiting rooms** (Zoom-style lobby with admit/deny), **host moderation** (kick / mute / mute-all / lock), and **recording** (LiveKit egress, authenticated downloads).
 - Target: up to **200 concurrent voice users**, worst case with the active-speaker cap — see §3. Recommended host: 100 Mbit/s unmetered, 2–4 vCPU, 2 GB RAM.
 
 ---
@@ -27,8 +39,8 @@
 ┌─────────────┐   HTTPS/WSS   ┌──────────────────────────────────┐
 │  Browser    │ ◀───────────▶ │  LVChat PHP app                  │
 │  (web app)  │               │  - auth (sessions/CSRF/bearer)   │
-└──────┬──────┘               │  - /api/voice/* (join gate)      │
-       │                      │  - /api/call/* (ring/accept/end) │
+└──────┬──────┘               │  - /api/webrtc/voice/* (join gate) │
+       │                      │  - /api/webrtc/call/* (ring/accept/end) │
 ┌──────┴───────────┐           │  - mints LiveKit JWTs (§6.4)    │
 │  Messenger Web  │ ◀─────────└───────────────┬──────────────────┘
 │  (PWA, bundler) │         WSS/session       │ REST/WS (admin)
@@ -44,7 +56,7 @@
                                     coturn (TURN relay for NAT traversal)
 ```
 
-**One engine, four surfaces:** the web app, messenger-web, desktop, and messenger all call the same `/api/voice/*` / `/api/call/*` endpoints and all render the same custom LVChat voice UI (join/leave, mute, participant list, ringing state) driven by `livekit-client`. The cap is enforced in exactly one place: the PHP `VoiceController` join gate. Full per-client plan in §7A.
+**One engine, four surfaces:** the web app, messenger-web, desktop, and messenger all call the same `/api/webrtc/voice|call|moderate|record/*` endpoints and all run the same canonical LVChat voice UI (join/leave, mute, roster, waiting-room lobby, host controls, calling) driven by `livekit-client`. The cap is enforced in exactly one place: the PHP `VoiceController` join gate. The original per-client plan is §7A below (historical).
 
 **Signaling reuse:** ring/accept/decline events ride the existing realtime layer — the Workerman gateway (`Realtime::dm`/`bell` fan-out) when WebSocket mode is on, else SSE/poll + the existing notification bell/push pipeline. LiveKit only carries the audio + room state.
 
@@ -141,7 +153,7 @@ WantedBy=multi-user.target
 
 ---
 
-## 5. Admin settings integration
+## 5. Admin settings integration *(historical plan — implemented as the module-owned **Admin → Voice** page, `modules/webrtc/views/admin/voice.php`; see `modules/webrtc/README.md`)*
 
 ### 5.1 New `server_config` keys (read via existing `config_get()` / `config_set()` in `src/Helpers.php`)
 
@@ -201,7 +213,7 @@ Keep all fields in the same `<form method="post" action="/admin/action">` — no
 
 ---
 
-## 6. Voice session & call management (app side)
+## 6. Voice session & call management (app side) *(historical plan — shipped as `VoiceController` + `CallController` + `ModerationController` + `RecordingController`; see `docs/protocol/voice.md`)*
 
 ### 6.1 New tables
 
@@ -277,7 +289,7 @@ If preferred, the community PHP SDK (`agence104/livekit-server-sdk-php`) can be 
 
 ---
 
-## 7. Client integration
+## 7. Client integration *(historical plan — superseded by the canonical shared client + `LVCVoiceHost` adapter; see `modules/webrtc/README.md` → Clients)*
 
 ### 7.1 The engine: `livekit-client` (official JS SDK)
 
@@ -306,7 +318,7 @@ Shared UX rules in §7A.7. The join payload stays in-memory only (never `localSt
 
 ---
 
-## 7A. Cross-app implementation plan (web + desktop + messenger + messenger-web)
+## 7A. Cross-app implementation plan (web + desktop + messenger + messenger-web) *(historical plan — delivered in a simpler form: one canonical voice client per shell)*
 
 > **The golden rule: the voice engine and the join gate live 100% on the server.**
 > Every client just calls `/api/voice/join` (or the call endpoints) and connects with `livekit-client` to the URL/token the server returns. The `voice_max_users` cap is enforced server-side in one place — no client ever re-implements capacity logic, and no client can bypass it.
@@ -375,7 +387,7 @@ POST /api/call/end      {call_id}        → 200 {ok:true}
 
 ---
 
-## 8. Deploy & ops
+## 8. Deploy & ops *(implemented — see `docs/installation.md` §11 and the `deploy.sh` LiveKit section)*
 
 - **`bin/deploy.sh`:** add a LiveKit section (mirror the ws gateway handling): detect the `livekit` unit, restart on deploy if `voice_enabled=1`, verify UDP ports are reachable, surface "LiveKit down" non-fatally (the app degrades to text-only). TURN/coturn is a co-install; document it in `docs/installation.md`.
 - **Monitoring:** LiveKit exposes an HTTP `/health` on the admin port — reuse the health-check style of `bin/ws-server.php` and surface it in the admin overview + the voice status panel. Also monitor the ICE UDP range.
@@ -384,7 +396,7 @@ POST /api/call/end      {call_id}        → 200 {ok:true}
 
 ---
 
-## 9. File-by-file change list (for the coding agent)
+## 9. File-by-file change list (for the coding agent) *(historical — shipped files listed in `modules/webrtc/README.md`)*
 
 ### Server (one implementation, all clients)
 
@@ -440,18 +452,20 @@ POST /api/call/end      {call_id}        → 200 {ok:true}
 
 ---
 
-## 10. Open questions for the coding agent (resolve before/while implementing)
+## 10. Open questions *(all resolved as of 1.1.0 — kept for the record)*
 
-1. **LiveKit version pin** — which `livekit-server` release + matching `livekit-client` JS SDK to ship. Unlike mumble-web/proxy there's no protocol-stability concern (WebRTC is standardized), but pin versions anyway for reproducibility. Confirm the `maxParticipants` JWT grant name in the pinned release.
-2. **`livekit_url` scheme in production** — serve `wss://` via the site's nginx (reuse the `deploy.sh` TLS staging) vs. LiveKit's own TLS vs. reverse proxy. Drives the `livekit_url` default and §4.4 firewall list.
-3. **Talker-cap enforcement depth** — enforce at the client (selective subscription, simplest) vs. server-side (LiveKit room config / a subscription policy). Client-side is the MVP; server-side is the "no one can bypass it" hard bound. Recommend client-side first, document the bypass caveat.
-4. **`voice_max_users` ceiling + the all-talking worst case** — confirm 200 is the concurrent-connection target (it is, per George) *and* that the active-speaker cap is acceptable product behavior. If "every listener must hear all 200 voices at once" is ever required, that's the one case that needs a mixing MCU or a custom LiveKit mixer participant (§3.3) — recommend keeping the cap.
-5. **Messenger no-bundler SDK include** — `lvchat-messenger` is vanilla JS with no bundler; confirm the pinned `livekit-client` ships a usable prebuilt UMD/ESM file for a plain `<script>` include (the one client-specific integration wrinkle). If not, copy a built `dist/` file into the repo like the committed `public/assets/css/app.css` pattern.
-6. **Stale-session cleanup trigger** — cron vs. opportunistic cleanup inside `status`/`join` (recommend the latter, matches app conventions).
-7. **LiveKit room cleanup** — when the last participant leaves a channel room, should the room be destroyed (recommend yes, via the last-leaver or the `/leave` handler) so `max_participants` changes apply on the next join? LiveKit auto-reclaims empty rooms; verify at implementation time.
-8. **Call authorization** — can *any* user call *any* user, or only friends / not-blocked / same-role? Recommend: no block either direction (mirror DM gate), allow non-friends for parity with `/msg`.
-9. **Call logging & recording** — the app's append-only `chat_logs` records messages; should call metadata (who called whom, duration, outcome) be logged to `chat_logs`/`audit_log`? Recommend yes for moderation parity; LiveKit recording is a separate feature and **out of scope** for MVP.
-10. **Rate limits** — mirror the `login_attempts` throttle for `/api/call/initiate` (spam-ring protection) and reuse the 12-per-5s send counter or a dedicated cap for `/api/voice/join`.
+| # | Question | Resolution |
+|---|---|---|
+| 1 | LiveKit version pin + `maxParticipants` JWT grant | **Resolved** — `livekit-client` vendored (see `modules/webrtc/assets/vendor/`); `maxParticipants` confirmed in `docs/protocol/voice.md`. |
+| 2 | `livekit_url` scheme in production (wss) | **Resolved** — `docs/installation.md` §11.1 step 4 (LiveKit `https_port` or nginx reverse proxy). |
+| 3 | Talker-cap enforcement depth | **Client-side** (selective subscription); server returns the cap. Documented as a known limit — server-side permission flips are a follow-up. |
+| 4 | `voice_max_users` ceiling (200) + all-talking worst case | **Resolved** — 200 max / 50 default; talker cap kept. |
+| 5 | Messenger no-bundler SDK include | **Resolved** — UMD vendored into `lvchat-messenger/renderer/vendor/` + `messenger-web/src/vendor/` (byte-identical to the module's). |
+| 6 | Stale-session cleanup trigger | **Resolved** — opportunistic in-status prune + `VoiceCleanupJob` (cron, every minute). |
+| 7 | LiveKit room cleanup (empty rooms) | **Resolved** — kicked/empty rooms force-deleted; room flags purged by `VoiceCleanupJob`. |
+| 8 | Call authorization | **Resolved** — anyone can call anyone (mirrors `/msg`); blocked/muted callers silently fail. Guests may call. |
+| 9 | Call logging & recording | **Resolved** — call outcomes + duration → `chat_logs`; egress recording shipped (host-toggled, authenticated downloads). |
+| 10 | Rate limits | **Resolved** — `rate_limits` buckets (`voice-join` 12/min, `call-initiate` 6/min, `call-invite` 20/min, `voice-moderate` 120/min, `event-create` 10/hr, `event-invite` 30/hr). |
 
 ---
 

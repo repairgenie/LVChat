@@ -17,36 +17,42 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Analytics'; $active = 'analytics'; ?>
-<?php require ROOT . '/views/admin/_charts.php'; ?>
+ $title = 'Analytics'; $active = 'analytics';
+$pageActions = '<div class="flex items-center gap-1 bg-discord-850 border border-discord-700 rounded-lg p-1 text-sm">
+    ' . implode('', array_map(function ($r) use ($range) {
+        return '<a href="/admin/analytics?range=' . $r . '" class="px-3 py-1 rounded-md '
+            . ($range === $r ? 'bg-discord-700 text-white' : 'text-discord-300 hover:bg-discord-750 hover:text-white') . '">'
+            . ($r === 'all' ? 'All time' : $r . 'd') . '</a>';
+    }, AnalyticsService::ranges())) . '
+  </div>';
+require ROOT . '/views/admin/_charts.php';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
-<div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-  <h1 class="text-2xl font-bold text-white">Analytics</h1>
-  <div class="flex items-center gap-1 bg-discord-850 border border-discord-700 rounded-lg p-1 text-sm">
-    <?php foreach (AnalyticsService::ranges() as $r): ?>
-    <a href="/admin/analytics?range=<?= $r ?>" class="px-3 py-1 rounded-md <?= $range === $r ? 'bg-discord-700 text-white' : 'text-discord-300 hover:bg-discord-750' ?>"><?= $r === 'all' ? 'All time' : $r . 'd' ?></a>
-    <?php endforeach; ?>
-  </div>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
-
-<div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4 mb-4">
+<div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4 mb-6">
   <?php
   $kpiCards = [
-    'Total users' => [$kpis['total_users'], ''],
-    'Online now' => [$kpis['online_now'], 'last 30s'],
-    'Peak online' => [$kpis['peak_online'], 'all-time record'],
-    'Messages' => [$kpis['messages'], 'channels + DMs, range'],
-    'Private messages' => [$kpis['pms'], 'range'],
-    'Censor hits' => [$kpis['censor_hits'], 'bad-word triggers, range'],
-    'Open reports' => [$kpis['open_reports'], 'unresolved'],
+    ['Total users', $kpis['total_users'], 'users', 'blurple'],
+    ['Online now', $kpis['online_now'], 'zap', 'green', 'last 30s'],
+    ['Peak online', $kpis['peak_online'], 'arrow-up', 'amber', 'all-time record'],
+    ['Messages', $kpis['messages'], 'message-square', 'purple', 'channels + DMs, range'],
+    ['Private messages', $kpis['pms'], 'mail', 'pink', 'range'],
+    ['Censor hits', $kpis['censor_hits'], 'alert', 'red', 'bad-word triggers, range'],
+    ['Open reports', $kpis['open_reports'], 'flag', 'amber', 'unresolved'],
   ];
-  foreach ($kpiCards as $label => [$val, $sub]):
+  $statTint = ['blurple' => '', 'green' => 'green', 'amber' => 'amber', 'purple' => 'purple', 'pink' => 'pink', 'red' => 'red'];
+  foreach ($kpiCards as $kpiCard):
+    [$label, $val, $iconName, $tint] = $kpiCard;
+    $sub = $kpiCard[4] ?? '';
   ?>
-  <div class="card p-3">
-    <div class="text-2xl font-bold text-white"><?= (int) $val ?></div>
-    <div class="text-xs text-discord-400 mt-1"><?= h($label) ?></div>
-    <?php if ($sub): ?><div class="text-[10px] text-discord-500"><?= h($sub) ?></div><?php endif; ?>
+  <div class="stat-card">
+    <div class="stat-icon <?= $statTint[$tint] ?>"><?= icon($iconName, 'w-5 h-5') ?></div>
+    <div class="min-w-0">
+      <div class="stat-value"><?= (int) $val ?></div>
+      <div class="stat-label"><?= h($label) ?></div>
+      <?php if ($sub): ?><div class="text-[10px] text-discord-500"><?= h($sub) ?></div><?php endif; ?>
+    </div>
   </div>
   <?php endforeach; ?>
 </div>
@@ -63,7 +69,7 @@ $reportLabels = ['open' => 'Open', 'investigated' => 'Investigated', 'resolved' 
 
 function analytics_card(string $title, string $subtitle, string $body): void
 {
-    echo '<div class="card p-4">';
+    echo '<div class="card p-5">';
     echo '<div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">';
     echo '<h2 class="font-semibold text-white text-sm">' . h($title) . '</h2>';
     if ($subtitle !== '') {
@@ -75,7 +81,7 @@ function analytics_card(string $title, string $subtitle, string $body): void
 }
 ?>
 
-<h2 class="text-sm font-semibold text-discord-300 uppercase tracking-wide mb-3">Activity</h2>
+<div class="admin-section-title"><?= icon('zap', 'w-4 h-4') ?>Activity</div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
   <?php
   analytics_card('Messages per day', $rangeLabel, chart_line($messagesDaily, ['color' => '#5865f2']));
@@ -91,29 +97,22 @@ function analytics_card(string $title, string $subtitle, string $body): void
 </div>
 
 <div class="card overflow-x-auto mb-8">
-  <div class="px-4 py-3 border-b border-discord-700 text-sm font-semibold text-white">Least active accounts</div>
-  <table class="w-full text-sm">
+  <div class="px-5 py-3.5 border-b border-discord-700 text-sm font-semibold text-white">Least active accounts</div>
+  <table class="data-table">
     <thead>
-      <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-        <th class="px-4 py-2">User</th>
-        <th class="px-4 py-2">Messages</th>
-        <th class="px-4 py-2">PMs</th>
-        <th class="px-4 py-2">Registered</th>
-        <th class="px-4 py-2">Last seen</th>
-        <th class="px-4 py-2">Status</th>
-      </tr>
+      <tr><th>User</th><th>Messages</th><th>PMs</th><th>Registered</th><th>Last seen</th><th>Status</th></tr>
     </thead>
     <tbody>
       <?php foreach ($leastActive as $u): ?>
-      <tr class="border-b border-discord-800">
-        <td class="px-4 py-2">
+      <tr>
+        <td>
           <a href="/admin/users/<?= (int) $u['id'] ?>" class="font-medium text-white hover:underline"><?= h($u['username']) ?></a>
         </td>
-        <td class="px-4 py-2"><?= (int) $u['messages'] ?></td>
-        <td class="px-4 py-2"><?= (int) $u['pms'] ?></td>
-        <td class="px-4 py-2 text-discord-400"><?= h(gmdate('Y-m-d', strtotime($u['registered_at'] . ' UTC'))) ?></td>
-        <td class="px-4 py-2 text-discord-400"><?= $u['last_seen'] ? h(relative_time($u['last_seen'])) : '<span class="text-discord-500">never</span>' ?></td>
-        <td class="px-4 py-2">
+        <td><?= (int) $u['messages'] ?></td>
+        <td><?= (int) $u['pms'] ?></td>
+        <td class="text-discord-400"><?= h(gmdate('Y-m-d', strtotime($u['registered_at'] . ' UTC'))) ?></td>
+        <td class="text-discord-400"><?= $u['last_seen'] ? h(relative_time($u['last_seen'])) : '<span class="text-discord-500">never</span>' ?></td>
+        <td>
           <?php if ((int) $u['banned']): ?>
           <span class="px-1.5 py-0.5 rounded text-[11px] bg-red-500/20 text-red-300">banned</span>
           <?php elseif ($u['status'] === 'suspended'): ?>
@@ -125,13 +124,13 @@ function analytics_card(string $title, string $subtitle, string $body): void
       </tr>
       <?php endforeach; ?>
       <?php if (!$leastActive): ?>
-      <tr><td colspan="6" class="px-4 py-4 text-discord-500">No accounts yet.</td></tr>
+      <tr><td colspan="6" class="py-4 text-discord-500">No accounts yet.</td></tr>
       <?php endif; ?>
     </tbody>
   </table>
 </div>
 
-<h2 class="text-sm font-semibold text-discord-300 uppercase tracking-wide mb-3">Moderation</h2>
+<div class="admin-section-title"><?= icon('shield', 'w-4 h-4') ?>Moderation</div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
   <?php
   $mix = [];
@@ -158,7 +157,7 @@ function analytics_card(string $title, string $subtitle, string $body): void
   ?>
 </div>
 
-<h2 class="text-sm font-semibold text-discord-300 uppercase tracking-wide mb-3">Health &amp; operations</h2>
+<div class="admin-section-title"><?= icon('heart', 'w-4 h-4') ?>Health &amp; operations</div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
   <?php
   analytics_card('Audit events per day', $rangeLabel, chart_line($auditDaily, ['color' => '#14b8a6']));

@@ -153,18 +153,10 @@ final class PushController
     {
         $user = self::requireUser();
         Csrf::verify();
-        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [(int) $user['id']]);
-        if (!$subs) {
+        $ok = PushService::sendTest($user);
+        if (!$ok) {
             json_out(['error' => 'No push subscription on this browser — enable push first.'], 400);
         }
-        $payload = [
-            'type' => 'test',
-            'title' => 'LVChat',
-            'body' => 'Test notification — alerts are working.',
-            'tag' => 'test:' . time(),
-            'data' => ['type' => 'test'],
-        ];
-        self::sendAll($subs, $payload, 'normal');
         json_out(['ok' => true]);
     }
 

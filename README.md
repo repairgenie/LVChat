@@ -25,6 +25,7 @@ nod to IRC rather than an implementation of it.
 - **Admin tools** — see every user's IP, ban by nick or IP/CIDR with duration and reason (kline/gline/zline/shun), manage the bad-word filter (censor to `****` or block the whole message with a ChanServ notice) via **Admin → Bad words**, per-channel `+C` flag, and a clickable mode bar with tooltips above each channel
 - **Admin presence** — operators' messages and nicks render in red throughout the chat and member lists
 - **Private messages** — `/msg`, notices, ignore list, unread badges, read receipts,
+- **Voice & Video (LiveKit)** — one-on-one and **group calls** (ring/accept/decline + host invites), **channel voice** huddles, camera + screen sharing with background effects, Zoom-style **waiting rooms**, host **moderation** (mute/kick/lock), **recording** (egress), quality dots, reactions/raise hand, deafen/layouts — and scheduled **meeting events** (`#evt-*`, private/public, email invites). Shared canonical client across the web app, desktop, and both Messenger clients; see `docs/protocol/voice.md`
   and messaging yourself (an IRC tradition kept alive)
 - **Context menus** — right-click any message, user, or channel for actions (copy, edit,
   delete, report, message, profile, whois, ignore, kick, ban, share link, leave, channel info)
@@ -59,7 +60,7 @@ nod to IRC rather than an implementation of it.
   on the built-in openssl/curl) for channel messages, DMs, and channel invites,
   delivered even when the chat is in the background or closed. Per-channel
   muting (the 🔔 button), per-user muting (mutes someone across push, the bell,
-  sounds, and DM toasts — distinct from blocking), and per-context off-switches
+  sounds, and in-app toasts — distinct from blocking), and per-context off-switches
   (channel messages / DMs / invites) all live in your profile. **On by default**:
   the first click/keystroke in the chat asks for the browser's permission and
   subscribes automatically (respecting a previous "deny" or an all-off choice),
@@ -564,9 +565,9 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **1280 automated assertions** in three layers:
+Runs **1385 automated assertions** in three layers:
 
-- **`tests/smoke.php`** (673) — every slash command and service against a scratch DB:
+- **`tests/smoke.php`** (695) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
   MemoServ/HostServ/OperServ commands, private/keyed/staff channels, bans, mentions,
   share links, guests, webhooks, account invites + SMTP, age verification, the
@@ -587,7 +588,7 @@ Runs **1280 automated assertions** in three layers:
   status + feature gating, and the client policy — offline, grace (first-check
   window, no-repeat-dial, last-known-good) and strict — against an unreachable
   license URL.
-- **`tests/http_test.php`** (588) — full HTTP end-to-end: spins up the built-in server
+- **`tests/http_test.php`** (671) — full HTTP end-to-end: spins up the built-in server
   and drives registration, CSRF enforcement, channel CRUD, send/poll/command APIs,
   private messages (including image attachments), admin pages & actions (including invites,
   manual user creation, user deletion and SMTP settings), private/keyed/staff channel flows,
@@ -609,8 +610,8 @@ Runs **1280 automated assertions** in three layers:
   check, pin-to-upstream, gated downloads), **sound alerts**, and the **WebRTC
   voice module** (`modules/webrtc`, exercised via a symlinked fixture): admin
   config + write-only secret, LiveKit JWT join/leave, talker-cap enforcement,
-  one-on-one calls (initiate/accept/decline/end) and invite-only meeting rooms
-  (`#mtg-XXXXXX`).
+  1:1 and group calls (initiate/invite/accept/decline/end), host moderation
+  (kick/mute/lock + waiting-room admit), egress recording, and meeting events.
   It also drives the **module system over HTTP** against a throwaway copy of the
   fixture modules: the Admin → Modules page (state badges including
   `disabled (.disabled)`, boot warnings, license save/clear, enable/disable
@@ -770,8 +771,8 @@ bin/ws-server.php   Workerman realtime gateway (WebSocket + internal push endpoi
 bin/make-icons.php  regenerate the PWA icon set (public/assets/pwa/*.png)
 bin/check-updates.php  CLI update check against the configured feed (cron-friendly)
 bin/test.sh      run the full automated test suite
-tests/smoke.php  673 command/service assertions
-tests/http_test.php  588 HTTP assertions
+tests/smoke.php  695 command/service assertions
+tests/http_test.php  671 HTTP assertions
 tests/ws_test.php   WebSocket gateway integration test (spawns the daemon)
 composer.json    Workerman dependency for the realtime gateway (vendor/ is server-side)
 schema.sql       SQLite schema (applied on boot)
@@ -782,6 +783,8 @@ update-server/   the update feed web app (versions + download links + electron f
 modules/         installed modules (each `<id>/` + optional `<id>.disabled/`) — see docs/modules.md
 docs/saas.md     SaaS module: plan metering, feature gating, Stripe/PayPal/BTCPay billing, platform fee
 docs/protocol/   wire-level specs, incl. the license key algorithm + validation protocol (licensing.md)
+docs/protocol/voice.md  the WebRTC voice/calls/meetings contract (`/api/webrtc/*`, LiveKit JWT, rate limits)
+modules/webrtc/  the WebRTC voice module (calls, channel voice, moderation, waiting rooms, recording, events)
 ```
 
 The **PWA layer** ships as committed files — `public/sw.js` (service worker),

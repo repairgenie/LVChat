@@ -74,6 +74,91 @@ return static function (PDO $pdo): void {
         $pdo->exec('ALTER TABLE channels ADD COLUMN voice_enabled INTEGER NOT NULL DEFAULT 0');
     }
 
+    // Per-channel waiting room (Zoom-style lobby before entering voice).
+    if (!in_array('voice_waiting_room', $channels, true)) {
+        $pdo->exec('ALTER TABLE channels ADD COLUMN voice_waiting_room INTEGER NOT NULL DEFAULT 0');
+    }
+
+    // Voice sessions gain waiting-room + admission-mint state.
+    $vsCols = array_column($pdo->query("PRAGMA table_info('voice_sessions')")->fetchAll(PDO::FETCH_ASSOC), 'name');
+    if (!in_array('waiting', $vsCols, true)) {
+        $pdo->exec('ALTER TABLE voice_sessions ADD COLUMN waiting INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!in_array('mint', $vsCols, true)) {
+        $pdo->exec('ALTER TABLE voice_sessions ADD COLUMN mint TEXT');
+    }
+
+    // Per-room lock + waiting-room state (join gate + host controls).
+    if (!in_array('voice_room_flags', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE voice_room_flags (
+              room TEXT PRIMARY KEY,
+              locked INTEGER NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"
+        );
+    }
+
+    // Finished calls are pushed once ("missed call" nudges) then purged.
+    $callCols = array_column($pdo->query("PRAGMA table_info('call_sessions')")->fetchAll(PDO::FETCH_ASSOC), 'name');
+    if (!in_array('missed_pushed', $callCols, true)) {
+        $pdo->exec('ALTER TABLE call_sessions ADD COLUMN missed_pushed INTEGER NOT NULL DEFAULT 0');
+    }
+
+    // Group call label (1:1 calls leave it null).
+    if (!in_array('title', $callCols, true)) {
+        $pdo->exec("ALTER TABLE call_sessions ADD COLUMN title TEXT");
+    }
+
+    // Per-actor rate-limit buckets for voice/call/event spam guards.
+    if (!in_array('rate_limits', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE rate_limits (
+              bucket TEXT PRIMARY KEY,
+              hits INTEGER NOT NULL DEFAULT 1,
+              window_start INTEGER NOT NULL
+            )"
+        );
+    }
+
+    // Call recordings (LiveKit egress). One row per started recording.
+    if (!in_array('recordings', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE recordings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              room TEXT NOT NULL,
+              kind TEXT NOT NULL DEFAULT 'call',          -- 'call' | 'channel' | 'event'
+              egress_id TEXT,
+              filename TEXT,
+              size_bytes INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'starting',    -- starting|active|stopped|missing
+              started_by_user_id INTEGER REFERENCES users(id),
+              started_at TEXT NOT NULL DEFAULT (datetime('now')),
+              stopped_at TEXT
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_recordings_room ON recordings(room)');
+    }
+
+    // Group call members: a call can grow beyond 1:1 (Discord-style invites).
+    if (!in_array('call_participants', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE call_participants (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              call_id INTEGER NOT NULL REFERENCES call_sessions(id) ON DELETE CASCADE,
+              user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+              guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
+              status TEXT NOT NULL DEFAULT 'invited',     -- invited|joined|declined|left
+              role TEXT NOT NULL DEFAULT 'member',        -- host|member
+              invited_at TEXT NOT NULL DEFAULT (datetime('now')),
+              joined_at TEXT,
+              UNIQUE(call_id, user_id, guest_id)
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_call_participants_call ON call_participants(call_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_call_participants_actor ON call_participants(user_id, guest_id, status)');
+    }
+
     // ── Events system (replaces legacy #mtg meeting rooms) ──────────────
 
     if (!in_array('events', $tables, true)) {
@@ -108,6 +193,11 @@ return static function (PDO $pdo): void {
     $eventCols = array_column($pdo->query("PRAGMA table_info(events)")->fetchAll(PDO::FETCH_ASSOC), 'name');
     if (!in_array('log_sent', $eventCols, true)) {
         $pdo->exec('ALTER TABLE events ADD COLUMN log_sent INTEGER NOT NULL DEFAULT 0');
+    }
+
+    // Zoom-style waiting room flag for event meetings (host admits attendees).
+    if (!in_array('waiting_room', $eventCols, true)) {
+        $pdo->exec('ALTER TABLE events ADD COLUMN waiting_room INTEGER NOT NULL DEFAULT 0');
     }
 
     if (!in_array('event_invites', $tables, true)) {

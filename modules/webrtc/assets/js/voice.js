@@ -42,47 +42,28 @@
   var POLL_MS = 2000;
   var PREFS_KEY = 'lvchat.voice.prefs';
   // Self-hosted MediaPipe selfie-segmentation, lazy-loaded (see vendor/).
+  // Hosts whose assets live elsewhere (messenger renderers) override via HOST.
   var BG_BASE = '/modules/webrtc/assets/vendor/selfie-segmentation/';
 
-  var ICON_CALL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
-  var ICON_HANGUP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(135deg)"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
+  /* ── Host adapter ──────────────────────────────────────────────────────
+   * The same voice client runs on every surface (web app, desktop, Electron
+   * messenger, messenger-web PWA). Each shell may pre-define window.LVCVoiceHost
+   * to override the default transport + DOM bindings:
+   *   api(path, data)      → Promise<parsed JSON body like {ok, error, ...}>
+   *                           (default: fetch + cookie/CSRF — the web app)
+   *   currentChannel()     → active channel slug (default: body data attrs)
+   *   currentDm()          → active DM nick (default: body data attrs)
+   *   headerEl()           → element the dropdown + pill mount into
+   *   openChannel(slug)    → navigate to a channel (default: openChannel()/URL)
+   *   bootGate()           → true when this page should run voice at all
+   * Without a host, the defaults assume the web app chat page. */
+  var HOST = (typeof window !== 'undefined' && window.LVCVoiceHost) || {};
+  if (HOST && typeof HOST.bgBase === 'string' && HOST.bgBase !== '') {
+    BG_BASE = HOST.bgBase;
+  }
 
-  var state = {
-    enabled: false,
-    active: 0,
-    max: 0,
-    full: false,
-    talkerCap: 8,
-    channels: {},        // slug -> { voice_enabled }
-    session: null,       // { room, kind }
-    calls: { incoming: [], outgoing: [], active: null, recent: [] },
-    room: null,          // livekit Room
-    inVoice: false,
-    connecting: false,
-    pendingJoin: null,
-    pendingCall: null,
-    pendingCallAt: 0,    // ms when the outgoing call was initiated (race guard)
-    evt: null,            // { id, slug, title, invite_code, invite_url, status } for the current event
-    ringSeconds: 20,     // server ring timeout (call_ring_seconds)
-    ringStarted: {},     // call_id -> ms when its ring was first seen
-    ringShown: null,     // { call_id, peer } of the current incoming ring
-    ringDismissed: null, // call_id the user accepted/declined (not "missed")
-    prefs: null,         // { mic, cam, speaker, bg, blur, image }
-    devices: { audioinput: [], videoinput: [], audiooutput: [] },
-    camTest: null,       // active camera-test stream
-    micTest: null,       // active mic-test analyser state
-    settingsOpen: false,
-    bgProc: null,        // active LiveKit video processor for bg effects
-    bgProcKey: '',       // JSON key of the effect the processor was built for
-  };
-
-  var els = {};          // { btn, settingsBtn, mtgBtn, pane, ring, pill, videos, toast, st* }
-  var tiles = {};        // trackSid -> { el, kind, label }
-
-  function $ (id) { return document.getElementById(id) }
-
-  /* ── API ─────────────────────────────────────────────────────────────── */
-  function api(path, data) {
+  function hostApi(path, data) {
+    if (typeof HOST.api === 'function') return HOST.api(path, data);
     var csrf = document.body ? document.body.dataset.csrf || '' : '';
     var opts = { method: data ? 'POST' : 'GET', credentials: 'include' };
     if (data) {
@@ -102,6 +83,88 @@
     });
   }
 
+  function hostCurrentChannel() {
+    if (typeof HOST.currentChannel === 'function') return HOST.currentChannel() || '';
+    return document.body ? document.body.dataset.channel || '' : '';
+  }
+
+  function hostCurrentDm() {
+    if (typeof HOST.currentDm === 'function') return HOST.currentDm() || '';
+    return document.body ? document.body.dataset.dm || '' : '';
+  }
+
+  function hostHeaderEl() {
+    if (typeof HOST.headerEl === 'function') {
+      var el = HOST.headerEl();
+      if (el) return el;
+    }
+    return document.querySelector('header .relative.ml-auto.flex.items-center.gap-2');
+  }
+
+  function hostOpenChannel(slug) {
+    if (typeof HOST.openChannel === 'function') { HOST.openChannel(slug); return; }
+    try {
+      if (typeof openChannel === 'function') openChannel(slug);
+      else window.location.href = '/app?channel=' + encodeURIComponent(slug);
+    } catch (e) {}
+  }
+
+  function hostBootGate() {
+    if (typeof HOST.bootGate === 'function') return !!HOST.bootGate();
+    return !!(document.body && document.body.classList.contains('chat-app'));
+  }
+
+  var ICON_CALL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
+  var ICON_HANGUP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(135deg)"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
+
+  var state = {
+    enabled: false,
+    active: 0,
+    max: 0,
+    full: false,
+    talkerCap: 8,
+    channels: {},        // slug -> { voice_enabled }
+    session: null,       // { room, kind, waiting, can_moderate, locked, roster, mint }
+    calls: { incoming: [], outgoing: [], active: null, recent: [] },
+    room: null,          // livekit Room
+    inVoice: false,
+    connecting: false,
+    waitingRoom: false,  // in the lobby until the host admits us
+    pendingJoin: null,
+    pendingCall: null,
+    pendingCallAt: 0,    // ms when the outgoing call was initiated (race guard)
+    evt: null,            // { id, slug, title, invite_code, invite_url, status } for the current event
+    ringSeconds: 20,     // server ring timeout (call_ring_seconds)
+    ringStarted: {},     // call_id -> ms when its ring was first seen
+    ringShown: null,     // { call_id, peer } of the current incoming ring
+    ringDismissed: null, // call_id the user accepted/declined (not "missed")
+    prefs: null,         // { mic, cam, speaker, bg, blur, image, ns, agc, echo, screenAudio }
+    devices: { audioinput: [], videoinput: [], audiooutput: [] },
+    camTest: null,       // active camera-test stream
+    micTest: null,       // active mic-test analyser state
+    settingsOpen: false,
+    bgProc: null,        // active LiveKit video processor for bg effects
+    bgProcKey: '',       // JSON key of the effect the processor was built for
+    deafened: false,     // mute everyone else's audio (Discord-style)
+    layout: 'auto',      // 'auto' | 'speaker' | 'gallery'
+    minimized: false,    // float the pane as a small pill
+    quality: {},         // identity -> 'good' | 'fair' | 'poor'
+    hands: {},           // identity -> raised hand?
+    reactions: [],       // transient floating emoji: { emoji, name, at }
+    ringAudio: null,     // synthesized ring tone element
+    recording: { enabled: false, active: null },  // egress recording state
+  };
+
+  var els = {};          // { btn, settingsBtn, mtgBtn, pane, ring, pill, videos, toast, st* }
+  var tiles = {};        // trackSid -> { el, kind, label }
+
+  function $ (id) { return document.getElementById(id) }
+
+  /* ── API ─────────────────────────────────────────────────────────────── */
+  function api(path, data) {
+    return hostApi(path, data);
+  }
+
   /* ── Status poll ─────────────────────────────────────────────────────── */
   function pollStatus() {
     return api('/api/webrtc/voice/status').then(function (j) {
@@ -118,13 +181,46 @@
       state.channels = {};
       (j.channels || []).forEach(function (c) { state.channels[c.slug] = c.voice_enabled; });
       state.session = j.session || null;
+      state.recording = j.recording || { enabled: false, active: null };
       state.calls = j.calls || { incoming: [], outgoing: [], active: null, recent: [] };
       state.recent = state.calls.recent || [];
       state.ringSeconds = j.ring_seconds || state.ringSeconds || 20;
       state.inVoice = !!(state.session && state.room && state.room.state === 'connected');
       render();
       handleCallTransitions();
+      handleSessionTransitions();
     });
+  }
+
+  /* ── Session transitions: waiting-room + admission + host changes ────── */
+  var lastWaiting = false;
+  function handleSessionTransitions() {
+    var sess = state.session;
+    var waiting = !!(sess && sess.waiting);
+    if (waiting !== lastWaiting) {
+      lastWaiting = waiting;
+      if (waiting) {
+        state.waitingRoom = true;
+        stopRing();
+        toast('You are in the waiting room — the host will let you in shortly.');
+      }
+    }
+    // Admission: the host admitted us → connect with the freshly minted token.
+    if (sess && sess.mint && !state.room && !state.connecting) {
+      var mint = sess.mint;
+      state.waitingRoom = false;
+      lastWaiting = false;
+      state.inVoice = true;
+      connectLivekit(mint.url, mint.token, mint.room);
+      return;
+    }
+    // Waiting-room session vanished → denied or the host closed the door.
+    if (state.waitingRoom && !sess) {
+      state.waitingRoom = false;
+      lastWaiting = false;
+      toast('The host declined your request to join.');
+      render();
+    }
   }
 
   /* ── LiveKit ────────────────────────────────────────────────────────── */
@@ -159,9 +255,38 @@
         var idx = order.indexOf(p);
         p.setSubscribed(sharing || idx === -1 || idx < cap);
       });
+      // Speaking rings on tiles.
+      Object.keys(tiles).forEach(function (sid) {
+        tiles[sid].el.classList.remove('speaking');
+      });
+      (speakers || []).forEach(function (sp) {
+        if (!sp || !sp.participant) return;
+        var pid = sp.participant.identity;
+        sp.participant.trackPublications.forEach(function (pub) {
+          if (pub.track && pub.track.kind === 'video' && tiles[pub.track.sid]) {
+            tiles[pub.track.sid].el.classList.add('speaking');
+          }
+        });
+      });
     });
-    room.on(Event.TrackSubscribed, function (track) { attachTrack(track); });
+    room.on(Event.TrackSubscribed, function (track) { attachTrack(track, track.participant); });
     room.on(Event.TrackUnsubscribed, function (track) { detachTrack(track); });
+    // Participant joined → watch quality + attributes (raise hand).
+    if (Event.ParticipantConnected) {
+      room.on(Event.ParticipantConnected, function (p) { watchParticipant(p); });
+    }
+    room.remoteParticipants.forEach(function (p) { watchParticipant(p); });
+    // Floating emoji reactions via the data channel (reliable).
+    if (Event.DataReceived) {
+      room.on(Event.DataReceived, function (payload, participant) {
+        try {
+          var msg = JSON.parse(new TextDecoder().decode(payload));
+          if (msg && msg.type === 'reaction' && msg.emoji) {
+            addReaction(msg.emoji, participant ? participant.name || participant.identity : 'Someone');
+          }
+        } catch (e) {}
+      });
+    }
     room.on(Event.TrackMuted, function (track) {
       if (track.kind === 'video' && tiles[track.sid]) tiles[track.sid].el.classList.add('muted');
     });
@@ -172,7 +297,12 @@
       state.room = null;
       state.inVoice = false;
       state.connecting = false;
+      state.waitingRoom = false;
+      lastWaiting = false;
+      state.quality = {};
+      state.hands = {};
       clearTiles();
+      stopRing();
       render();
     });
     room.on(Event.Connected, function () {
@@ -184,6 +314,8 @@
 
     room.connect(url, token, {}).then(function () {
       log('connected', roomName);
+      // Toggle deafen state back on after reconnect.
+      if (state.deafened) setDeafen(true);
     }).catch(function (err) {
       state.room = null;
       state.connecting = false;
@@ -192,20 +324,71 @@
     });
   }
 
-  function attachTrack(track) {
+  /* Track a participant's connection quality + raise-hand attribute. */
+  function watchParticipant(p) {
+    if (!p) return;
+    var PE = lk().ParticipantEvent || {};
+    if (PE.ConnectionQualityChanged) {
+      p.on(PE.ConnectionQualityChanged, function (q) {
+        state.quality[p.identity] = String(q || '').toLowerCase();
+        renderRoster();
+      });
+    }
+    if (PE.AttributesChanged) {
+      p.on(PE.AttributesChanged, function (attrs) {
+        state.hands[p.identity] = attrs && attrs.hand === '1';
+        renderRoster();
+      });
+    }
+    if (PE.TrackPublished) {
+      p.on(PE.TrackPublished, function () { setTimeout(attachLocalVideos, 150); });
+    }
+  }
+
+  function addReaction(emoji, name) {
+    state.reactions.push({ emoji: emoji, name: name, at: Date.now() });
+    if (state.reactions.length > 12) state.reactions.shift();
+    renderReactions();
+    setTimeout(renderReactions, 4000);
+  }
+
+  function sendReaction(emoji) {
+    var room = state.room;
+    if (!room || !room.localParticipant || !room.localParticipant.publishData) return;
+    try {
+      var payload = new TextEncoder().encode(JSON.stringify({ type: 'reaction', emoji: emoji }));
+      room.localParticipant.publishData(payload, { reliable: true });
+      addReaction(emoji, 'You');
+      toast('Reaction sent.');
+    } catch (e) {}
+  }
+
+  function toggleHand() {
+    var room = state.room;
+    if (!room || !room.localParticipant) return;
+    var on = !(state.hands[room.localParticipant.identity] === true);
+    state.hands[room.localParticipant.identity] = on;
+    try { room.localParticipant.setAttributes({ hand: on ? '1' : '0' }); } catch (e) {}
+    renderRoster();
+  }
+
+  function attachTrack(track, participant) {
     if (!track || tiles[track.sid]) return;
     var el = document.createElement('div');
     el.className = 'lvcvoice-tile';
     el.dataset.track = track.sid;
+    var name = participant ? (participant.name || participant.identity || '') : '';
     if (track.kind === 'video') {
       var video = document.createElement('video');
       video.autoplay = true;
       video.playsInline = true;
       track.attach(video);
       el.appendChild(video);
+      if (name) el.setAttribute('data-label', track.source === 'screen_share' ? name + ' (screen)' : name);
     } else {
       var audio = document.createElement('audio');
       audio.autoplay = true;
+      audio.volume = state.deafened ? 0 : 1;
       track.attach(audio);
       document.body.appendChild(audio);
       tiles[track.sid] = { el: audio, kind: 'audio' };
@@ -288,14 +471,39 @@
     var room = state.room;
     if (!room) return;
     var on = !room.localParticipant.isScreenShareEnabled();
-    room.localParticipant.setScreenShareEnabled(on).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
+    var opts = {};
+    if (on && state.prefs && state.prefs.screenAudio) {
+      opts.audio = true; // capture the system audio tab (Google Meet-style)
+    }
+    room.localParticipant.setScreenShareEnabled(on, opts).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
     setTimeout(attachLocalVideos, 400);
+  }
+
+  /* Deafen: mute all remote audio locally (Discord-style). */
+  function setDeafen(on) {
+    state.deafened = !!on;
+    Object.keys(tiles).forEach(function (sid) {
+      if (tiles[sid].kind === 'audio') tiles[sid].el.volume = state.deafened ? 0 : 1;
+    });
+    render();
+  }
+  function toggleDeafen() { setDeafen(!state.deafened); }
+
+  /* Layout: 'auto' (active speaker spotlight) vs 'gallery' (grid). */
+  function setLayout(mode) {
+    state.layout = mode;
+    if (els.pane) els.pane.classList.toggle('gallery', mode === 'gallery');
+    if (els.pane) els.pane.classList.toggle('speaker', mode === 'speaker');
+    render();
   }
 
   /* ── Device settings, camera/mic test & background effects ──────────── */
 
   function defaultPrefs() {
-    return { mic: '', cam: '', speaker: '', bg: 'none', blur: 8, image: '' };
+    return {
+      mic: '', cam: '', speaker: '', bg: 'none', blur: 8, image: '',
+      echoc: true, ns: true, agc: true, screenAudio: false
+    };
   }
 
   function loadPrefs() {
@@ -312,12 +520,19 @@
   }
 
   /* Apply saved devices to the connected LiveKit room: enable the mic with the
-   * chosen input, and route audio output to the chosen speaker. */
+   * chosen input, route audio output to the chosen speaker, and enforce the
+   * browser-side audio processing prefs (echo cancellation / noise suppression
+   * / auto gain — Discord-style per-preference toggles). */
   function applyDevicePrefs() {
     var room = state.room;
     if (!room) return;
     var micOpts = {};
     if (state.prefs && state.prefs.mic) micOpts.deviceId = state.prefs.mic;
+    if (state.prefs) {
+      micOpts.echoCancellation = state.prefs.echoc !== false;
+      micOpts.noiseSuppression = state.prefs.ns !== false;
+      micOpts.autoGainControl = state.prefs.agc !== false;
+    }
     room.localParticipant.setMicrophoneEnabled(true, micOpts).catch(function (e) { toast(String(e && e.message || e)); });
     if (state.prefs && state.prefs.speaker && typeof room.setSinkId === 'function') {
       room.setSinkId(state.prefs.speaker).catch(function () { /* unsupported device */ });
@@ -836,21 +1051,27 @@
 
   /* ── Actions ────────────────────────────────────────────────────────── */
   function currentChannel() {
-    return document.body ? document.body.dataset.channel || '' : '';
+    return hostCurrentChannel();
   }
   function currentDm() {
-    return document.body ? document.body.dataset.dm || '' : '';
+    return hostCurrentDm();
   }
 
   function toggleVoice() {
     var slug = currentChannel();
     if (!slug || state.connecting) return;
     if (state.inVoice) { leaveVoice(); return; }
+    if (state.waitingRoom) return;
     if (state.full) return;
     state.pendingJoin = { channel: slug };
     render();
     api('/api/webrtc/voice/join', { channel: slug }).then(function (j) {
       state.pendingJoin = null;
+      if (j.ok && j.waiting) {
+        state.waitingRoom = true;
+        render();
+        return;
+      }
       if (j.ok) {
         state.inVoice = true;
         connectLivekit(j.url, j.token, j.room);
@@ -862,9 +1083,13 @@
   }
 
   function leaveVoice() {
+    stopRing();
     if (state.room) { try { state.room.disconnect(); } catch (e) {} }
     state.room = null;
     state.inVoice = false;
+    state.connecting = false;
+    state.waitingRoom = false;
+    lastWaiting = false;
     state.pendingJoin = null;
     clearTiles();
     api('/api/webrtc/voice/leave', {}).then(render);
@@ -908,9 +1133,12 @@
     var call = state.calls.active || state.calls.outgoing[0] || null;
     if (call) api('/api/webrtc/call/end', { call_id: call.call_id });
     state.pendingCall = null;
+    stopRing();
     if (state.room) { try { state.room.disconnect(); } catch (e) {} }
     state.room = null;
     state.inVoice = false;
+    state.waitingRoom = false;
+    lastWaiting = false;
     clearTiles();
     render();
   }
@@ -962,7 +1190,7 @@
 
   /* ── Events ──────────────────────────────────────────────────────────── */
   function isEventChannel(slug) {
-    return /^#?evt-[0-9a-f]{6}$/i.test(slug || '');
+    return /^#?evt-[0-9a-f]{32}$/i.test(slug || '');
   }
 
   function eventModalOpen() {
@@ -975,6 +1203,7 @@
     els.evtModal.classList.remove('hidden');
     var slug = currentChannel();
     renderEvent(slug && isEventChannel(slug) ? slug : '');
+    refreshEventsList();
   }
 
   function closeEventModal() {
@@ -986,6 +1215,7 @@
     if (!title) { toast('Please enter a title.'); return; }
     var desc = (els.evtDesc && els.evtDesc.value || '').trim();
     var isPublic = els.evtPublic && els.evtPublic.checked;
+    var waitingRoom = els.evtWaiting && els.evtWaiting.checked;
     var eventType = (els.evtType && els.evtType.value) || 'webrtc';
     var streamUrl = (els.evtStreamUrl && els.evtStreamUrl.value || '').trim();
     var scheduledAt = (els.evtSchedule && els.evtSchedule.value || '').trim();
@@ -995,6 +1225,7 @@
       title: title,
       description: desc,
       is_public: isPublic ? 1 : 0,
+      waiting_room: waitingRoom ? 1 : 0,
       event_type: eventType,
       stream_url: streamUrl,
       scheduled_at: scheduledAt,
@@ -1005,13 +1236,59 @@
       if (!j.ok) { toast(j.error || 'Could not create event.'); return; }
       state.evt = { id: j.id, slug: j.slug, title: title, invite_code: j.invite_code, invite_url: j.invite_url, status: j.status };
       renderEventView();
+      refreshEventsList();
       if (j.slug) {
-        try {
-          if (typeof openChannel === 'function') openChannel(j.slug);
-          else window.location.href = '/app?channel=' + encodeURIComponent(j.slug);
-        } catch (e) {}
+        hostOpenChannel(j.slug);
       }
     });
+  }
+
+  /* ── My events list (founder: list + cancel + copy link) ─────────────── */
+  function refreshEventsList() {
+    if (!els.evtList) return;
+    els.evtList.innerHTML = '<div class="pane-meta">Loading…</div>';
+    api('/api/events/list').then(function (j) {
+      if (!j.ok || !j.events) { els.evtList.innerHTML = ''; return; }
+      var active = (j.events || []).filter(function (e) { return e.status === 'active' || e.status === 'scheduled'; });
+      if (!active.length) { els.evtList.innerHTML = '<div class="pane-meta">No events yet.</div>'; return; }
+      var html = active.map(function (e) {
+        var url = e.invite_code ? '/e/' + e.invite_code : (e.channel_slug ? '/event/' + e.channel_slug : '');
+        var when = e.scheduled_at
+          ? '<span class="pane-meta">' + escapeHtml(e.scheduled_at.replace('T', ' ').slice(0, 16)) + ' UTC</span>'
+          : '<span class="pane-meta">' + (e.status === 'active' ? 'Live now' : '') + '</span>';
+        return '<div class="evt-list-row">' +
+          '<span class="evt-list-title">' + escapeHtml(e.title) +
+          ' <span class="pane-meta">[' + escapeHtml(e.status) + ']</span></span>' +
+          when +
+          '<span class="evt-list-actions">' +
+          (url ? '<button type="button" class="lvcvoice-btn-ghost evt-list-copy" data-url="' + escapeHtml(url) + '">Link</button>' : '') +
+          '<button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger evt-list-cancel" data-id="' + (e.id || 0) + '">Cancel</button>' +
+          '</span></div>';
+      }).join('');
+      els.evtList.innerHTML = '<div class="evt-list">' + html + '</div>';
+      els.evtList.querySelectorAll('.evt-list-copy').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var url = b.dataset.url || '';
+          if (!url) return;
+          var abs = window.location.origin + url;
+          var done = function () { toast('Invite link copied.'); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(abs).then(done, function () { toast('Copy: ' + abs); });
+          } else {
+            toast('Invite: ' + abs);
+          }
+        });
+      });
+      els.evtList.querySelectorAll('.evt-list-cancel').forEach(function (b) {
+        b.addEventListener('click', function () {
+          api('/api/events/cancel', { event_id: b.dataset.id }).then(function (j) {
+            toast(j.ok ? 'Event cancelled.' : (j.error || 'Could not cancel event.'));
+            refreshEventsList();
+            pollStatus();
+          });
+        });
+      });
+    }).catch(function () { els.evtList.innerHTML = ''; });
   }
 
   function sendEventInvites() {
@@ -1084,7 +1361,7 @@
   /* ── DOM ────────────────────────────────────────────────────────────── */
   function ensureEls() {
     if (els.dropdown) return;
-    var header = document.querySelector('header .relative.ml-auto.flex.items-center.gap-2');
+    var header = hostHeaderEl();
     if (!header) return;
 
     var dd = document.createElement('div');
@@ -1173,24 +1450,217 @@
     el.innerHTML =
       '<div class="pane-head"><span class="pane-title">Voice</span>' +
       '<span class="pane-head-actions">' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-layout" title="Layout: auto / speaker / gallery">⬒</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-min" title="Minimize">–</button>' +
       '<button type="button" class="lvcvoice-btn-ghost pane-settings" title="Voice &amp; video settings">⚙</button>' +
       '<button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger pane-leave">Leave</button>' +
       '</span></div>' +
       '<div class="pane-body">' +
       '<div id="lvcvoice-videos" class="lvcvoice-videos"></div>' +
+      '<div class="pane-waiting hidden"><div class="pane-waiting-card">' +
+      '<div class="pane-waiting-title">Waiting room</div>' +
+      '<div class="pane-meta">The host has been notified. You can join as soon as they let you in.</div>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-waiting-leave">Leave waiting room</button>' +
+      '</div></div>' +
+      '<div class="pane-reactions hidden"></div>' +
+      '<div class="pane-reaction-bursts"></div>' +
+      '<div class="pane-roster"></div>' +
+      '<div class="pane-invite hidden">' +
+      '<div class="pane-invite-row"><input class="input text-xs pane-invite-input" placeholder="Nicks to invite (comma sep.)">' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-invite-btn">Invite</button></div>' +
+      '<div class="pane-meta pane-invite-result"></div>' +
+      '</div>' +
       '<div class="pane-row"><span class="pane-meta pane-status">Connected to the voice room.</span></div>' +
       '<div class="pane-controls">' +
       '<button type="button" class="lvcvoice-btn-ghost pane-mute" data-act="mute">Mute</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-deafen" data-act="deafen">Deafen</button>' +
       '<button type="button" class="lvcvoice-btn-ghost pane-cam" data-act="cam">Camera</button>' +
       '<button type="button" class="lvcvoice-btn-ghost pane-share" data-act="share">Share</button>' +
-      '</div></div>';
-    el.querySelector('.pane-leave').addEventListener('click', leaveVoice);
+      '<button type="button" class="lvcvoice-btn-ghost pane-hand" data-act="hand">✋ Hand</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-react" data-act="react">😀</button>' +
+      '</div>' +
+      '<div class="pane-mod hidden">' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-muteall" data-act="muteall">Mute all</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-unmuteall" data-act="unmuteall">Unmute all</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-lock" data-act="lock">Lock room</button>' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-record" data-act="record" title="Record this meeting (LiveKit egress)">⏺ Record</button>' +
+      '</div>' +
+      '<label class="pane-shareaudio-label hidden"><input type="checkbox" class="pane-shareaudio"> Share screen with system audio</label>' +
+      '</div>';
+    el.querySelector('.pane-leave').addEventListener('click', function () { leaveVoice(); });
+    el.querySelector('.pane-waiting-leave').addEventListener('click', function () { leaveVoice(); });
     el.querySelector('.pane-settings').addEventListener('click', openSettings);
     el.querySelector('.pane-mute').addEventListener('click', toggleMute);
+    el.querySelector('.pane-deafen').addEventListener('click', toggleDeafen);
     el.querySelector('.pane-cam').addEventListener('click', toggleCamera);
     el.querySelector('.pane-share').addEventListener('click', toggleScreenShare);
+    el.querySelector('.pane-hand').addEventListener('click', toggleHand);
+    el.querySelector('.pane-react').addEventListener('click', function () { toggleReactionStrip(); });
+    el.querySelector('.pane-layout').addEventListener('click', cycleLayout);
+    el.querySelector('.pane-min').addEventListener('click', toggleMinimize);
+    el.querySelector('.pane-muteall').addEventListener('click', function () { moderate('mute_all'); });
+    el.querySelector('.pane-unmuteall').addEventListener('click', function () { moderate('unmute_all'); });
+    el.querySelector('.pane-lock').addEventListener('click', function () { moderate(state.session && state.session.locked ? 'unlock' : 'lock'); });
+    el.querySelector('.pane-record').addEventListener('click', function () {
+      var sess = state.session;
+      if (!sess || !sess.room) return;
+      var recording = state.recording || { enabled: false, active: null };
+      if (recording.active && recording.active.room === sess.room) {
+        record('stop');
+      } else {
+        record('start');
+      }
+    });
+    el.querySelector('.pane-shareaudio').addEventListener('change', function (e) {
+      state.prefs.screenAudio = !!e.target.checked;
+      savePrefs();
+    });
+    el.querySelector('.pane-invite-btn').addEventListener('click', function () {
+      var input = el.querySelector('.pane-invite-input');
+      var result = el.querySelector('.pane-invite-result');
+      var users = (input && input.value || '').trim();
+      var call = state.calls.active;
+      if (!call || !users) return;
+      api('/api/webrtc/call/invite', { call_id: call.call_id, users: users }).then(function (j) {
+        input.value = '';
+        if (!j.ok) { result.textContent = j.error || 'Could not invite.'; return; }
+        var parts = [];
+        if (j.added && j.added.length) parts.push('Added: ' + j.added.join(', '));
+        if (j.busy && j.busy.length) parts.push('Busy: ' + j.busy.join(', '));
+        if (j.unknown && j.unknown.length) parts.push('Unknown: ' + j.unknown.join(', '));
+        result.textContent = parts.join(' · ') || 'Invites sent.';
+      });
+    });
+    // Reaction strip (emoji burst).
+    ['👍', '❤️', '🎉', '👏', '😮', '😂'].forEach(function (em) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lvcvoice-btn-ghost pane-reac-btn';
+      b.textContent = em;
+      b.addEventListener('click', function () { sendReaction(em); });
+      el.querySelector('.pane-reactions').appendChild(b);
+    });
     els.videos = el.querySelector('#lvcvoice-videos');
+    els.pane = el;
+    els.paneRoster = el.querySelector('.pane-roster');
+    els.paneWait = el.querySelector('.pane-waiting');
+    els.paneReactions = el.querySelector('.pane-reactions');
+    els.paneBursts = el.querySelector('.pane-reaction-bursts');
+    els.paneMod = el.querySelector('.pane-mod');
+    els.paneShareAudioLabel = el.querySelector('.pane-shareaudio-label');
+    els.paneShareAudio = el.querySelector('.pane-shareaudio');
     return el;
+  }
+
+  function cycleLayout() {
+    var next = state.layout === 'auto' ? 'speaker' : (state.layout === 'speaker' ? 'gallery' : 'auto');
+    setLayout(next);
+    toast('Layout: ' + next);
+  }
+
+  function toggleMinimize() {
+    state.minimized = !state.minimized;
+    if (els.pane) els.pane.classList.toggle('minimized', state.minimized);
+    render();
+  }
+
+  function toggleReactionStrip() {
+    if (!els.paneReactions) return;
+    els.paneReactions.classList.toggle('hidden');
+  }
+
+  /* Server-side moderation (host controls) via the /api/webrtc/moderate gate. */
+  function moderate(action, identity) {
+    var sess = state.session;
+    if (!sess || !sess.room) return Promise.resolve();
+    var params = { room: sess.room, action: action };
+    if (identity) params.identity = identity;
+    return api('/api/webrtc/moderate', params).then(function (j) {
+      if (j.ok) {
+        toast(ACTION_LABELS[action] || 'Done.');
+        pollStatus();
+      } else {
+        toast(j.error || 'Moderation action failed.');
+      }
+      return j;
+    });
+  }
+  var ACTION_LABELS = {
+    kick: 'Participant removed.', mute: 'Participant muted.', unmute: 'Participant unmuted.',
+    mute_all: 'Everyone is muted.', unmute_all: 'Everyone is unmuted.', lock: 'Room locked.',
+    unlock: 'Room unlocked.', admit: 'Let them in.', deny: 'Request declined.'
+  };
+
+  /* Recording (LiveKit egress): start/stop for hosts. */
+  function record(action) {
+    var sess = state.session;
+    if (!sess || !sess.room) return Promise.resolve();
+    return api('/api/webrtc/record', { room: sess.room, action: action }).then(function (j) {
+      if (j.ok) {
+        toast(action === 'start' ? 'Recording started.' : 'Recording stopped.');
+        pollStatus();
+      } else {
+        toast(j.error || 'Could not ' + action + ' the recording.');
+      }
+      return j;
+    });
+  }
+
+  /* Roster render: participant list with mute/kick for moderators + waiting queue. */
+  function renderRoster() {
+    if (!els.paneRoster) return;
+    var sess = state.session;
+    if (!sess || !sess.roster || !sess.roster.length) {
+      els.paneRoster.innerHTML = '<div class="pane-meta">Nobody else is in the room.</div>';
+      return;
+    }
+    var canMod = !!sess.can_moderate;
+    var html = '';
+    (sess.roster || []).forEach(function (r) {
+      var qual = state.quality[r.identity];
+      var qdot = qual ? '<span class="lvcvoice-q q-' + qual + '" title="Connection: ' + qual + '"></span>' : '';
+      var hand = state.hands[r.identity] ? '<span class="lvcvoice-hand" title="Raised hand">✋</span>' : '';
+      var actions = '';
+      if (canMod && !r.me && (state.room && state.room.state === 'connected')) {
+        actions += '<button type="button" class="lvcvoice-btn-ghost roster-mute" data-id="' + r.identity + '">Mute</button>';
+        actions += '<button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger roster-kick" data-id="' + r.identity + '">Kick</button>';
+      }
+      var waiting = r.waiting ? ' <span class="pane-meta">(waiting)</span>' : '';
+      var wButtons = '';
+      if (canMod && r.waiting) {
+        wButtons = '<button type="button" class="lvcvoice-btn-ghost roster-admit" data-id="' + r.identity + '">Admit</button>' +
+          '<button type="button" class="lvcvoice-btn-ghost lvcvoice-btn-danger roster-deny" data-id="' + r.identity + '">Deny</button>';
+      }
+      html += '<div class="pane-roster-row">' + qdot + hand +
+        '<span class="pane-roster-name">' + escapeHtml(r.name) + waiting + (r.me ? ' (you)' : '') + '</span>' +
+        '<span class="pane-roster-actions">' + actions + wButtons + '</span></div>';
+    });
+    els.paneRoster.innerHTML = html || '<div class="pane-meta">Nobody else is in the room.</div>';
+    els.paneRoster.querySelectorAll('.roster-kick').forEach(function (b) {
+      b.addEventListener('click', function () { moderate('kick', b.dataset.id); });
+    });
+    els.paneRoster.querySelectorAll('.roster-mute').forEach(function (b) {
+      b.addEventListener('click', function () { moderate('mute', b.dataset.id); });
+    });
+    els.paneRoster.querySelectorAll('.roster-admit').forEach(function (b) {
+      b.addEventListener('click', function () { moderate('admit', b.dataset.id); });
+    });
+    els.paneRoster.querySelectorAll('.roster-deny').forEach(function (b) {
+      b.addEventListener('click', function () { moderate('deny', b.dataset.id); });
+    });
+  }
+
+  function renderReactions() {
+    if (!els.paneBursts || !state.reactions.length) return;
+    var max = Date.now() - 6000;
+    state.reactions = state.reactions.filter(function (r) { return r.at >= max; });
+    if (!state.reactions.length) {
+      els.paneBursts.innerHTML = '';
+      return;
+    }
+    els.paneBursts.innerHTML = state.reactions.slice(-6).map(function (r) {
+      return '<span class="pane-reaction" title="' + escapeHtml(r.name) + '">' + r.emoji + '</span>';
+    }).join('');
   }
 
   function buildRing() {
@@ -1208,12 +1678,15 @@
     el.querySelector('.ring-accept').addEventListener('click', function () {
       if (currentRingId != null) { state.ringDismissed = currentRingId; acceptCall(currentRingId); }
       el.classList.add('hidden');
+      stopRing();
     });
     el.querySelector('.ring-decline').addEventListener('click', function () {
       if (currentRingId != null) { state.ringDismissed = currentRingId; declineCall(currentRingId); }
       el.classList.add('hidden');
+      stopRing();
     });
     el._currentRingId = function (v) { if (arguments.length) currentRingId = v; return currentRingId; };
+    el._ringVisible = function (vis) { if (arguments.length) { if (vis) playRing(); else stopRing(); } return vis; };
     return el;
   }
 
@@ -1247,6 +1720,10 @@
       '<label style="display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer">' +
       '<input type="checkbox" id="lvcvoice-evt-public"> <span class="text-xs text-discord-300">Public</span>' +
       '</label></div>' +
+      '<div><label class="label">Waiting room</label>' +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer">' +
+      '<input type="checkbox" id="lvcvoice-evt-waiting"> <span class="text-xs text-discord-300">Lobby</span>' +
+      '</label></div>' +
       '</div>' +
       '<div id="lvcvoice-evt-stream-row" style="margin-bottom:12px;display:none">' +
       '<label class="label">Stream URL</label>' +
@@ -1274,6 +1751,12 @@
       '</div>' +
       '</div>' +
 
+      // ── My events (founder list / cancel / links) ──
+      '<div style="margin-top:16px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px">' +
+      '<div class="st-label">My events</div>' +
+      '<div id="lvcvoice-evt-list"></div>' +
+      '</div>' +
+
       '</div></div>';
 
     el.addEventListener('click', function (e) { if (e.target === el) closeEventModal(); });
@@ -1299,12 +1782,14 @@
     els.evtDesc = el.querySelector('#lvcvoice-evt-desc');
     els.evtType = el.querySelector('#lvcvoice-evt-type');
     els.evtPublic = el.querySelector('#lvcvoice-evt-public');
+    els.evtWaiting = el.querySelector('#lvcvoice-evt-waiting');
     els.evtStreamUrl = el.querySelector('#lvcvoice-evt-stream-url');
     els.evtSchedule = el.querySelector('#lvcvoice-evt-schedule');
     els.evtDuration = el.querySelector('#lvcvoice-evt-duration');
     els.evtInviteUrl = el.querySelector('#lvcvoice-evt-invite-url');
     els.evtInviteEmails = el.querySelector('#lvcvoice-evt-invite-emails');
     els.evtInviteResult = el.querySelector('#lvcvoice-evt-invite-result');
+    els.evtList = el.querySelector('#lvcvoice-evt-list');
     return el;
   }
 
@@ -1312,6 +1797,45 @@
     var room = state.room;
     if (!room) return;
     room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled());
+  }
+
+  /* ── Ring tone (synthesized, like the messenger web) ─────────────────── */
+  function ringToneDataUrl() {
+    var rate = 22050, dur = 2.0, n = Math.round(dur * rate);
+    var buf = new ArrayBuffer(44 + n * 2);
+    var dv = new DataView(buf);
+    var str = function (o, s) { for (var i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
+    str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    str(36, 'data'); dv.setUint32(40, n * 2, true);
+    for (var i = 0; i < n; i++) {
+      var t = i / rate;
+      var freq = (Math.floor(t * 2) % 2 === 0) ? 440 : 480;
+      var env = (t < 0.05) ? t / 0.05 : ((dur - t) < 0.15) ? (dur - t) / 0.15 : 1.0;
+      var v = Math.sin(2 * Math.PI * freq * t) * env * 0.4;
+      var val = Math.round(Math.max(-1, Math.min(1, v)) * 32767) & 0xFFFF;
+      dv.setInt16(44 + i * 2, val, true);
+    }
+    var bytes = new Uint8Array(buf);
+    var bin = '';
+    for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+
+  function playRing() {
+    try {
+      if (!state.ringAudio) {
+        state.ringAudio = new Audio(ringToneDataUrl());
+        state.ringAudio.loop = true;
+      }
+      state.ringAudio.currentTime = 0;
+      state.ringAudio.play().catch(function () {});
+    } catch (e) { /* audio unavailable */ }
+  }
+
+  function stopRing() {
+    try { if (state.ringAudio) { state.ringAudio.pause(); state.ringAudio.currentTime = 0; } } catch (e) {}
   }
 
   function onMainClick() {
@@ -1402,20 +1926,55 @@
 
     // Voice pane.
     if (els.pane) {
-      var inRoomVoice = state.inVoice && slug && !dm;
-      els.pane.classList.toggle('hidden', !inRoomVoice);
-      if (inRoomVoice) {
-        els.pane.querySelector('.pane-title').textContent = 'Voice — #' + slug;
+      var inCallLive = !!(state.calls.active && state.inVoice && state.room && state.room.state === 'connected');
+      var inRoomVoice = state.inVoice && slug && !dm && !inCallLive;
+      var inWaiting = state.waitingRoom && !state.inVoice && slug && !dm;
+      els.pane.classList.toggle('hidden', !inRoomVoice && !inWaiting && !inCallLive);
+      if (inRoomVoice || inWaiting || inCallLive) {
+        els.pane.querySelector('.pane-title').textContent = inCallLive
+          ? 'In call with ' + state.calls.active.peer
+          : (inWaiting ? 'Voice — waiting room' : 'Voice — #' + slug);
+        if (els.paneWait) els.paneWait.classList.toggle('hidden', !inWaiting);
         var room = state.room;
         var muted = room && !room.localParticipant.isMicrophoneEnabled();
         var camOn = room && room.localParticipant.isCameraEnabled();
         var shareOn = room && room.localParticipant.isScreenShareEnabled();
         els.pane.querySelector('.pane-mute').textContent = muted ? 'Unmute' : 'Mute';
+        els.pane.querySelector('.pane-mute').classList.toggle('active', !!muted);
+        els.pane.querySelector('.pane-deafen').textContent = state.deafened ? 'Undeafen' : 'Deafen';
+        els.pane.querySelector('.pane-deafen').classList.toggle('active', !!state.deafened);
         els.pane.querySelector('.pane-cam').textContent = camOn ? 'Camera off' : 'Camera';
         els.pane.querySelector('.pane-share').textContent = shareOn ? 'Stop share' : 'Share';
+        els.pane.querySelector('.pane-hand').textContent = state.hands[myIdentity()] ? '✋ Lower' : '✋ Hand';
+        var sess = state.session;
+        if (els.paneMod) els.paneMod.classList.toggle('hidden', !(sess && sess.can_moderate));
+        var inviteRow = els.pane && els.pane.querySelector('.pane-invite');
+        if (inviteRow) inviteRow.classList.toggle('hidden', !(inCallLive && sess && sess.can_moderate && sess.room && sess.room.indexOf('call_') === 0));
+        // Record button: hosts only + recording must be enabled; toggles state.
+        if (sess && sess.can_moderate && (state.recording || {}).enabled) {
+          var recBtn = els.paneMod && els.paneMod.querySelector('.pane-record');
+          if (recBtn) {
+            var recOn = (state.recording && state.recording.active && state.recording.active.room === sess.room);
+            recBtn.classList.toggle('hidden', false);
+            recBtn.textContent = recOn ? '⏹ Stop recording' : '⏺ Record';
+            recBtn.classList.toggle('recording', !!recOn);
+          }
+        } else if (els.paneMod) {
+          var recBtn2 = els.paneMod && els.paneMod.querySelector('.pane-record');
+          if (recBtn2) recBtn2.classList.toggle('hidden', true);
+        }
+        if (els.paneShareAudioLabel) {
+          els.paneShareAudioLabel.classList.toggle('hidden', !state.inVoice || !!shareOn);
+        }
+        if (els.paneShareAudio) els.paneShareAudio.checked = !!(state.prefs && state.prefs.screenAudio);
+        var lockBtn = els.paneMod && els.paneMod.querySelector('.pane-lock');
+        if (lockBtn) lockBtn.textContent = (sess && sess.locked) ? 'Unlock room' : 'Lock room';
         els.pane.querySelector('.pane-status').textContent = state.calls.active
           ? 'In a 1:1 call with ' + state.calls.active.peer
-          : 'Connected to the channel voice room.';
+          : (inWaiting ? 'The host will let you in shortly.' : 'Connected to the channel voice room.');
+        // Roster only for connected participants (not while waiting).
+        if (state.room && state.room.state === 'connected') renderRoster();
+        else if (els.paneRoster) els.paneRoster.innerHTML = '';
       }
     }
 
@@ -1424,14 +1983,16 @@
     if (els.ring) {
       if (incoming && state.enabled && state.ringDismissed !== incoming.call_id) {
         els.ring.classList.remove('hidden');
-        els.ring.querySelector('.ring-sub').textContent = incoming.peer + ' is calling… (' + ringRemaining(incoming) + 's)';
         els.ring._currentRingId(incoming.call_id);
+        els.ring._ringVisible(true);
+        els.ring.querySelector('.ring-sub').textContent = incoming.peer + ' is calling… (' + ringRemaining(incoming) + 's)';
         if (!state.ringShown || state.ringShown.call_id !== incoming.call_id) {
           state.ringShown = { call_id: incoming.call_id, peer: incoming.peer };
         }
       } else {
         els.ring.classList.add('hidden');
         els.ring._currentRingId(null);
+        els.ring._ringVisible(false);
         // A ring that vanished without accept/decline was missed (server-side
         // timeout); the caller side gets its own "no answer" toast.
         if (state.ringShown && state.ringDismissed !== state.ringShown.call_id) {
@@ -1454,6 +2015,7 @@
   function voiceLabel() {
     if (state.connecting) return 'Connecting…';
     if (state.inVoice) return 'In voice — Leave';
+    if (state.waitingRoom) return 'In waiting room';
     if (state.full) return 'Voice full (' + state.active + '/' + state.max + ')';
     return 'Voice';
   }
@@ -1462,6 +2024,11 @@
     if (state.calls.active) return 'In call';
     if (state.calls.outgoing[0]) return 'Ringing…';
     return 'Call';
+  }
+
+  /* The local participant's LiveKit identity (for roster/hand lookups). */
+  function myIdentity() {
+    return state.room && state.room.localParticipant ? state.room.localParticipant.identity : '';
   }
 
   /* Seconds left before the server fails an unanswered call (cosmetic — the
@@ -1480,10 +2047,21 @@
   }
 
   /* ── Boot ───────────────────────────────────────────────────────────── */
+  /* M toggles the mic while in voice (Discord-style shortcut; ignored while
+   * typing in a text field). */
+  function onKeydown(e) {
+    var tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target && e.target.isContentEditable) return;
+    if (e.key === 'm' || e.key === 'M') {
+      if (state.inVoice && !state.connecting) toggleMute();
+    }
+  }
+
   function boot() {
-    if (!document.body || !document.body.classList.contains('chat-app')) return;
+    if (!hostBootGate()) return;
     loadPrefs();
     ensureEls();
+    document.addEventListener('keydown', onKeydown);
     pollStatus();
     setInterval(pollStatus, POLL_MS);
   }

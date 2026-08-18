@@ -169,6 +169,7 @@ function build (opts) {
     './config.js',
     './voice.css',
     './voice.js',
+    './voice-host.js',
     './fonts/InterVariable.woff2',
     './fonts/InterVariable-Italic.woff2',
     './vendor/livekit-client.umd.js',
@@ -188,6 +189,7 @@ function build (opts) {
     path.join(SRC, 'sw.template.js'),
     path.join(SRC, 'voice.css'),
     path.join(SRC, 'voice.js'),
+    path.join(SRC, 'voice-host.js'),
     path.join(SRC, 'vendor', 'livekit-client.umd.js'),
     path.join(SRC, 'vendor', 'selfie-segmentation', 'selfie_segmentation.js')
   ])
@@ -197,7 +199,7 @@ function build (opts) {
   write(path.join(OUT, 'sw.js'), sw)
 
   // Static assets.
-  for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'icons.js', 'web-bridge.js', 'voice.css', 'voice.js', 'offline.html']) {
+  for (const f of ['index.html', 'messenger.html', 'messenger.css', 'messenger.js', 'api.js', 'emoji.js', 'icons.js', 'web-bridge.js', 'voice.css', 'voice.js', 'voice-host.js', 'offline.html']) {
     copy(path.join(SRC, f), path.join(OUT, f))
   }
   fs.mkdirSync(path.join(OUT, 'fonts'), { recursive: true })

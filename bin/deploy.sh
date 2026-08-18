@@ -514,3 +514,36 @@ if [ "$RT" = "ws" ]; then
 else
     echo "realtime mode: $RT (gateway not required)"
 fi
+
+# ── WebRTC voice (LiveKit) ────────────────────────────────────────────────
+# Optional (module): report the managed LiveKit daemon's status and restart it
+# when voice is enabled and a managed pid exists. Media servers can't be fully
+# provisioned from a deploy script (ports, UDP, TURN), so this only surfaces
+# health and restarts the same user-space binary Admin → Voice manages.
+echo "== LiveKit (optional) =="
+LK_ENABLED=$(php -r 'require "src/bootstrap.php"; echo config_get("voice_enabled", "0");' 2>/dev/null || echo 0)
+if [ "$LK_ENABLED" = "1" ]; then
+    LK_PID=$(cat "$ROOT/data/livekit/livekit.pid" 2>/dev/null || echo 0)
+    if [ -n "$LK_PID" ] && [ "$LK_PID" != "0" ] && [ -d "/proc/$LK_PID" ]; then
+        echo "LiveKit: managed process running (pid $LK_PID)."
+        # Restart so the freshly uploaded module picks up (config reads at boot
+        # only; runtime knobs like caps need no restart).
+        if [ "$(id -un)" = "$(stat -c %U "$ROOT" 2>/dev/null || echo '')" ] || [ "$(id -u)" = "0" ]; then
+            kill -TERM "$LK_PID" 2>/dev/null || true
+            sleep 1
+            SITE_USER="$(stat -c %U "$ROOT")"
+            if [ "$(id -u)" = "0" ]; then
+                su -s /bin/sh "$SITE_USER" -c "nohup livekit-server --config '$ROOT/data/livekit/livekit.yaml' >> '$ROOT/data/livekit/livekit.log' 2>&1 & echo \$! > '$ROOT/data/livekit/livekit.pid'" >/dev/null 2>&1 && echo "LiveKit: restarted as $SITE_USER." || echo "LiveKit: restart failed — re-run Admin → Voice → autoconfigure."
+            else
+                nohup livekit-server --config "$ROOT/data/livekit/livekit.yaml" >> "$ROOT/data/livekit/livekit.log" 2>&1 & echo $! > "$ROOT/data/livekit/livekit.pid"
+                echo "LiveKit: restarted."
+            fi
+        else
+            echo "LiveKit: running (pid $LK_PID) — restart manually after uploads."
+        fi
+    else
+        echo "LiveKit: not running — click 'Generate & autoconfigure keys' in Admin → Voice."
+    fi
+else
+    echo "LiveKit: voice disabled (Admin → Voice to enable + autoconfigure)."
+fi

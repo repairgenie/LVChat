@@ -73,6 +73,24 @@ CommandRegistry::register('deoper', [
     },
 ]);
 
+CommandRegistry::register('os', [
+    'group' => 'OperServ',
+    'desc' => 'Alias: prefix an OperServ command, e.g. /os kline *!*@1.2.3.4 1h spam',
+    'usage' => '/os <command> [args]',
+    'run' => function (array $args, array $user, ?array $channel) {
+        $sub = array_shift($args);
+        if (!$sub) {
+            return ['replies' => ['Usage: /os <command> [args]']];
+        }
+        if (!CommandRegistry::get($sub)) {
+            return ['replies' => ["Unknown OperServ command: $sub"]];
+        }
+        // Re-enter the parser so the TARGET command's gates (server_admin,
+        // netadmin) are enforced — never call its handler directly.
+        return CommandParser::run('/' . $sub . ($args ? ' ' . implode(' ', $args) : ''), $user, $channel);
+    },
+]);
+
 foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline' => 'z-line (severe) ban', 'shun' => 'mute (cannot speak)'] as $kind => $desc) {
     CommandRegistry::register($kind, [
         'group' => 'OperServ',
@@ -594,6 +612,7 @@ CommandRegistry::register('serverstats', [
     'group' => 'OperServ',
     'desc' => 'Show server statistics.',
     'usage' => '/serverstats',
+    'server_admin' => true,
     'run' => function (array $args, array $user, ?array $channel) {
         $stats = [
             'Users' => Database::scalar('SELECT COUNT(*) FROM users'),

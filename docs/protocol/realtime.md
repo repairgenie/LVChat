@@ -134,7 +134,8 @@ Server frames are the **poll payload shape** plus two transport-specific keys:
 ```json
 { "messages": [ { /* channel or PM message */ } ] }
 { "notify_count": 3 }
-{ "msg_update": { "action": "edit"|"delete"|"reaction", "message_id": 1042,
+{ "alerts": [ { /* new unread notification (delta) — same shape as the poll */ } ] }
+{ "msg_update": { "action": "edit"|"delete"|"reaction"|"pin"|"unpin", "message_id": 1042,
                   "content": "…", "reactions": [ {"emoji":"👍","count":2} ] } }
 { "reconnect": true }
 ```
@@ -143,7 +144,8 @@ Server frames are the **poll payload shape** plus two transport-specific keys:
 |---|---|
 | `messages` | Exactly one new message (channel or DM), routed to subscribers of that channel/DM. Same bytes the writer's `/api/send` returned. |
 | `notify_count` | A user's bell count changed (all their tabs refresh it). |
-| `msg_update` | A channel message was edited / deleted / reacted. The client patches the message element in view. |
+| `alerts` | New unread notifications (the unified alert delta). Each surface consumes the identical payload it would get from `/api/poll` — toasts, sounds and OS alerts stay consistent across the web app, desktop bridge and Messenger. |
+| `msg_update` | A channel message was edited / deleted / reacted / pinned / unpinned. The client patches the message element in view; `pin`/`unpin` also refreshes the pinned bar. |
 | `reconnect` | Admin-forced reconnect: every tab reloads to pick up a new gateway config. |
 | `pong` | Reply to a client `ping` (client ignores it). |
 

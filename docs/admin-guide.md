@@ -38,7 +38,8 @@ The dashboard has **two tiers**: **staff** (admins *and* users with the `staff`
 role) see **Overview, Moderation, Reports, Support**; **admins** additionally
 see **Users, Channels, Bans, Spam filters, Bad words, Roles, O-lines,
 Operclasses, MOTD, Sounds, Chat logs, Webhooks, Invites, Terms & Privacy,
-Settings**. A **🛡 Admin dashboard** link also appears at the top of the
+Settings**. The **webrtc** module adds **Voice (LiveKit)** to the admin tier
+(§2.17.1). A **🛡 Admin dashboard** link also appears at the top of the
 sidebar in the chat app for admins.
 
 > Staff can also open any user's **moderation history** page
@@ -397,6 +398,31 @@ stored one.
 > managed exclusively via **O-lines**. Settings writes appear in the audit log
 > (`settings_save`).
 
+### 2.17.1 Voice (LiveKit) — `Admin → Voice` (module page)
+
+The **webrtc** module adds its own admin page (**Admin → Voice (LiveKit)**) —
+it is *not* part of the core Settings page. It owns every `voice_*`/`livekit_*`
+setting and the LiveKit daemon lifecycle:
+
+| Control | Meaning |
+|---|---|
+| **Enable voice** | Master switch — hides all voice/call UI when off |
+| **LiveKit URL** | Where clients connect (`ws://127.0.0.1:7880` dev; `wss://…` in production). Also the base for LiveKit's `/health` + Twirp admin API |
+| **API key / secret** | The shared HMAC pair used to mint join tokens. **Write-only** — the secret is never echoed back |
+| **Generate & autoconfigure keys** | Generates a strong key pair, writes `data/livekit/livekit.yaml` (preserving existing keys), starts `livekit-server` as the site user via `nohup` (pid in `data/livekit/livekit.pid`), and enables voice. No root, no systemd — shared-hosting friendly |
+| **Max concurrent voice users** (`voice_max_users`) | Global ceiling (1–200, default 50). Enforced by the join gate **and** stamped into every room's `max_participants` |
+| **Talkers per listener** (`voice_talker_cap`) | Active speakers each listener hears (1–50, default 8) — downlink bound |
+| **Quality preset / bitrate** | `high`/`moderate`/`minimum` → `voice_bitrate` (64/40/16 kbit/s) |
+| **Ring timeout** (`call_ring_seconds`) | Unanswered calls fail to "no answer" (default 20 s) |
+| **Allow meeting recording** (`recording_enabled`) | Lets hosts record calls/channel voice via LiveKit egress |
+| **Recording path** (`recording_path`) | Storage dir (default `data/recordings/`); applied when the directory exists and is writable |
+| **Status panel** | LiveKit `/health` dot, connected users (`active/max`), managed-process pid, config/binary paths, **live rooms** (from LiveKit's admin API, cached a few seconds), and the **recordings** list |
+
+Recording needs the `livekit-egress` binary + Redis (see `docs/installation.md`
+§11.2). Without them the in-call Record button degrades to a friendly "not
+available" — voice itself is unaffected. All writes appear in the audit log as
+`voice_settings` (or `voice_settings` + autoconfigure detail).
+
 ### 2.18 Invites (`/admin/invites`)
 
 Invite people by email instead of (or in addition to) open registration. Enter
@@ -542,6 +568,11 @@ badge, license key field, and boot warnings.
 Licensing is configured under **Settings → Licensing** (§2.17) and the full
 protocol is documented in `docs/protocol/licensing.md`.
 
+The shipped **webrtc** module (free, `"license": false`) adds the **Admin →
+Voice (LiveKit)** page described in §2.17.1 — it manages the LiveKit SFU's
+keys/daemon, the voice capacity caps, recording, and the live rooms/recordings
+status panels.
+
 ---
 
 ## 3. OperServ / IRCop command reference
@@ -570,9 +601,10 @@ the parser gates them server-side.
 | `/sqline <nick> [reason]` | Reserve / forbid a nickname |
 | `/spamfilter add <match> [reason] \| del <id> \| list` | Manage spam filters (simple match, `*`/`?`) |
 | `/badword add <word> [censor\|block] \| del <id> \| list \| toggle <id>` | Manage the bad-word list |
-| `/clients` | List users currently online |
-| `/serverstats` | Server counters (front page equivalents) |
+| `/clients` | List users currently online (public) |
+| `/serverstats` | Server counters (oper-restricted) |
 | `/rehash` | Record/log a config reload |
+| `/os <command> [args]` | OperServ prefix alias for any command above |
 | `/ignore` (from Core) | Also usable by ops to mute a specific nick in DMs |
 
 Duration syntax: `30m`, `2h`, `1d`, `1w`, `1mo`, `1y`, bare number = minutes,
@@ -633,6 +665,12 @@ Every dashboard POST and the important chat actions append a row. Common
 `avatar_upload`, `message_edit`, `message_edit_denied`, `message_delete`,
 `password_change`, `rehash`, `kline_add`, `gline_add`, `zline_add`,
 `shun_add`, `unkline`, `ungline`, `unzline`, `unshun`, etc.
+Voice module (via Admin → Voice): `voice_settings` (saves + autoconfigure),
+`channel_voice_on/off`, and host actions `voice_kick`, `voice_mute`,
+`voice_unmute`, `voice_mute_all`, `voice_unmute_all`, `voice_lock`,
+`voice_unlock`, `voice_admit`, `voice_deny`, `voice_waiting_room_on/off`,
+`recording_start`, `recording_stop`, plus call/event actions `call_invite`,
+`event_create`, `event_invite`, `event_cancel`.
 
 The overview page shows the 15 most recent; the full table is behind any admin's
 SQLite access (`sqlite3 data/chat.db "SELECT * FROM audit_log ORDER BY id
@@ -682,6 +720,16 @@ DESC LIMIT 100;"`).
 | `license_grace_days` | `7` | How long a never-confirmed key runs while the license server is unreachable |
 | `license_recheck_hours` | `24` | How long a `valid` result is cached before the app asks the license server again |
 | `license_server_id` | — | Per-install fingerprint bound to license seats (generated once; keep `data/` backups) |
+| `voice_enabled` | `0` | Master switch for the WebRTC voice module (hides all voice/call UI when off) |
+| `livekit_url` | `ws://127.0.0.1:7880` | Where clients + server admin calls reach LiveKit (`wss://` in production) |
+| `livekit_api_key` / `livekit_api_secret` | — | LiveKit JWT-signing pair; secret is write-only |
+| `voice_max_users` | `50` | Global concurrent-voice ceiling (1–200); join gate + room `max_participants` |
+| `voice_talker_cap` | `8` | Active speakers each listener hears (1–50) |
+| `voice_bitrate` | `40000` | Per-user Opus bitrate (16–64 kbit/s) |
+| `voice_quality_preset` | `moderate` | `high` / `moderate` / `minimum` convenience preset for `voice_bitrate` |
+| `call_ring_seconds` | `20` | Unanswered calls fail to "no answer" |
+| `recording_enabled` | `0` | Lets hosts record calls/channel voice via LiveKit egress |
+| `recording_path` | — | Recording storage dir (default `data/recordings/`) |
 | `realtime` | `poll` | `poll` or `sse` (SSE holds a worker per client) |
 | `max_channels_per_user` | `100` | Owned-channel cap |
 | `smtp_enabled` | `0` | Master switch for email sending |

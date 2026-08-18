@@ -56,7 +56,7 @@ final class AdminVoiceController
         return [
             'voice_enabled', 'livekit_url', 'livekit_api_key', 'livekit_api_secret',
             'voice_max_users', 'voice_talker_cap', 'voice_bitrate', 'voice_quality_preset',
-            'call_ring_seconds',
+            'call_ring_seconds', 'recording_enabled', 'recording_path',
         ];
     }
 
@@ -76,6 +76,8 @@ final class AdminVoiceController
             'status' => LiveKitService::status(),
             'health' => LiveKitService::health(),
             'daemon' => LiveKitService::daemonInfo(),
+            'rooms' => LiveKitService::roomsCached(),
+            'recordings' => self::recordings(),
             'module' => ModuleLoader::get('webrtc'),
         ], 'layout');
     }
@@ -129,6 +131,40 @@ final class AdminVoiceController
             $bitrate = (string) max(16000, min(64000, $custom));
         }
         config_set('voice_bitrate', $bitrate);
+
+        // Recording (egress).
+        config_set('recording_enabled', ($post['recording_enabled'] ?? '0') === '1' ? '1' : '0');
+        $recPath = trim((string) ($post['recording_path'] ?? ''));
+        if ($recPath !== '' && is_dir($recPath) && is_writable($recPath)) {
+            config_set('recording_path', $recPath);
+        }
+    }
+
+    /** Recordings list for the admin panel (from the app table + disk scan). */
+    private static function recordings(): array
+    {
+        $rows = Database::all(
+            'SELECT * FROM recordings ORDER BY id DESC LIMIT 50'
+        );
+        $out = [];
+        foreach ($rows as $r) {
+            $size = (int) $r['size_bytes'];
+            if ($size <= 0 && $r['filename']) {
+                $p = LiveKitService::recordingsDir() . '/' . $r['filename'];
+                $size = is_file($p) ? (int) filesize($p) : 0;
+            }
+            $out[] = [
+                'id' => (int) $r['id'],
+                'room' => (string) $r['room'],
+                'kind' => (string) $r['kind'],
+                'status' => (string) $r['status'],
+                'filename' => (string) ($r['filename'] ?? ''),
+                'size' => $size,
+                'started_at' => (string) ($r['started_at'] ?? ''),
+                'stopped_at' => (string) ($r['stopped_at'] ?? ''),
+            ];
+        }
+        return $out;
     }
 
     /** Autoconfigure: generate keys, push them into LiveKit, restart, enable voice. */

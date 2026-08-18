@@ -384,6 +384,27 @@ final class PushService
         self::sendAll($subs, $payload, 'high');
     }
 
+    /** Send a test push to every subscription the user has registered. */
+    public static function sendTest(array $user): bool
+    {
+        if (Auth::isGuest($user)) {
+            return false;
+        }
+        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [(int) $user['id']]);
+        if (!$subs) {
+            return false;
+        }
+        $payload = [
+            'type' => 'test',
+            'title' => 'LVChat',
+            'body' => 'Test notification — alerts are working.',
+            'tag' => 'test:' . time(),
+            'data' => ['type' => 'test'],
+        ];
+        self::sendAll($subs, $payload, 'normal');
+        return true;
+    }
+
     /** Push a channel invitation to the invited user. */
     public static function invite(int $targetUserId, int $channelId, int $senderId): void
     {
@@ -413,6 +434,34 @@ final class PushService
             'body' => $senderName . ' invited you to ' . $channel['name'],
             'tag' => 'invite:' . $channel['slug'],
             'data' => ['type' => 'invite', 'channel' => $channel['slug']],
+        ];
+        self::sendAll($subs, $payload, 'high');
+    }
+
+    /** Push a missed call to the callee (per-user DM prefs gate the nudge). */
+    public static function missedCall(int $targetUserId, string $callerName, int $callId): void
+    {
+        $pref = (int) (Database::scalar('SELECT dms FROM user_push_prefs WHERE user_id = ?', [$targetUserId]) ?? 1);
+        if (!self::dmDecision($pref, false)) {
+            return;
+        }
+        $notifyPrefs = NotifyPrefs::get(['id' => $targetUserId]);
+        if (!(int) ($notifyPrefs['os_master'] ?? 1)) {
+            return;
+        }
+        if (NotifyPrefs::quietHoursActive($notifyPrefs)) {
+            return;
+        }
+        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [$targetUserId]);
+        if (!$subs) {
+            return;
+        }
+        $payload = [
+            'type' => 'call',
+            'title' => ($callerName !== '' ? $callerName : 'A user') . ' called you',
+            'body' => 'Missed call — tap to return it',
+            'tag' => 'call:' . $callId,
+            'data' => ['type' => 'call', 'call_id' => $callId, 'username' => $callerName],
         ];
         self::sendAll($subs, $payload, 'high');
     }

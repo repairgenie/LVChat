@@ -223,6 +223,90 @@
 }
 #lvcvoice-toast.show { opacity: 1; }
 
+/* Talking ring (active-speaker highlight) on a video tile. */
+.lvcvoice-tile.speaking { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34,197,94,.5); }
+
+/* Connection quality dot in the roster. */
+.lvcvoice-q { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.lvcvoice-q.q-good { background: #22c55e; }
+.lvcvoice-q.q-fair { background: #f59e0b; }
+.lvcvoice-q.q-poor { background: #ef4444; }
+.lvcvoice-hand { font-size: 11px; margin-right: 4px; }
+
+/* Roster rows inside the pane. */
+.pane-roster { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+.pane-roster-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 6px; }
+.pane-roster-row:hover { background: rgba(255,255,255,.04); }
+.pane-roster-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-roster-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.pane-roster-actions .lvcvoice-btn-ghost { padding: 3px 8px; font-size: 11px; }
+
+/* Waiting-room card. */
+.pane-waiting { text-align: center; padding: 18px 6px; }
+.pane-waiting-card {
+  background: #2b2d31; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px; padding: 16px 14px; display: flex;
+  flex-direction: column; gap: 8px; align-items: center;
+}
+.pane-waiting-title { font-weight: 700; color: #fff; }
+
+/* Reaction strip + floating bursts. */
+.pane-reactions { display: flex; gap: 4px; flex-wrap: wrap; }
+.pane-reactions.hidden { display: none; }
+.pane-reac-btn { padding: 3px 8px; font-size: 14px; }
+.pane-reaction-bursts { min-height: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.pane-reaction { font-size: 20px; animation: lvcvoice-pop .3s ease-out; }
+@keyframes lvcvoice-pop { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+/* Moderator bar + share-audio option. */
+.pane-mod { display: flex; gap: 6px; flex-wrap: wrap; }
+.pane-mod.hidden { display: none; }
+.pane-shareaudio-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9ba1a6; cursor: pointer; }
+.pane-record.recording { color: #f87171; border-color: rgba(239,68,68,.5); animation: lvcvoice-pulse 1.2s infinite; }
+
+/* Group-call invite row. */
+.pane-invite { display: flex; flex-direction: column; gap: 4px; }
+.pane-invite.hidden { display: none; }
+.pane-invite-row { display: flex; gap: 6px; align-items: center; }
+.pane-invite-row .input { flex: 1; min-width: 0; color: #dbdee1; background: #1e1f22; border-color: rgba(255,255,255,.15); }
+.pane-invite-row .input:focus { border-color: #5865f2; outline: none; }
+.pane-invite-result { color: #fbbf24; font-size: 11px; }
+
+/* Pane minimized: a floating video-only pill. */
+#lvcvoice-pane.minimized { width: 180px; }
+#lvcvoice-pane.minimized .pane-head { font-size: 11px; padding: 5px 8px; }
+#lvcvoice-pane.minimized .pane-body { padding: 4px; gap: 4px; }
+#lvcvoice-pane.minimized .pane-body > :not(#lvcvoice-videos) { display: none; }
+#lvcvoice-pane.minimized .lvcvoice-videos { grid-template-columns: 1fr; }
+#lvcvoice-pane.minimized .lvcvoice-tile { aspect-ratio: 4/3; }
+
+/* Layouts: speaker spotlight vs gallery grid. */
+#lvcvoice-pane.speaker .lvcvoice-videos {
+  grid-template-columns: 1fr;
+  grid-auto-rows: auto;
+}
+#lvcvoice-pane.speaker .lvcvoice-tile.speaking {
+  order: -1;
+  min-height: 140px;
+}
+#lvcvoice-pane.gallery .lvcvoice-videos {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
+/* Pane action states. */
+#lvcvoice-pane .pane-controls .lvcvoice-btn-ghost.active { background: #5865f2; border-color: #5865f2; color: #fff; }
+
+/* Event list rows in the events modal. */
+.evt-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+.evt-list-row {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  background: #2b2d31; border: 1px solid rgba(255,255,255,.07);
+  border-radius: 8px; padding: 6px 10px;
+}
+.evt-list-title { color: #dbdee1; font-size: 12px; min-width: 0; }
+.evt-list-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.evt-list-actions .lvcvoice-btn-ghost { padding: 3px 8px; font-size: 11px; }
+
 /* Small buttons used inside pane/overlay. */
 .lvcvoice-btn-ghost {
   background: #2b2d31;
@@ -297,3 +381,72 @@
 .st-hint { color: #9ba1a6; font-size: 11px; line-height: 1.5; }
 #lvcvoice-settings input[type="file"] { font-size: 12px; color: #9ba1a6; }
 #lvcvoice-settings input[type="range"] { width: 100%; }
+
+/* Small buttons used inside pane/overlay. */
+.lvcvoice-btn-ghost {
+  background: #2b2d31;
+  border: 1px solid rgba(255,255,255,.08);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lvcvoice-btn-ghost:hover { background: #35373c; }
+.lvcvoice-btn-danger { border-color: rgba(239,68,68,.4); color: #f87171; }
+
+/* Hidden utility: the web app depends on Tailwind's `.hidden`; the messenger
+   shells have their own CSS system, so provide it here for our own widgets. */
+.lvcvoice-mtg-overlay.hidden,
+.lvcvoice-settings-card.hidden,
+#lvcvoice-pane.hidden,
+#lvcvoice-ring.hidden,
+#lvcvoice-settings.hidden,
+#lvcvoice-toast.hidden,
+.lvcvoice-dd-menu.hidden,
+#lvcvoice-callpill.hidden,
+.lvcvoice-dropdown.hidden { display: none !important; }
+.pane-waiting.hidden, .pane-mod.hidden,
+.pane-reactions.hidden, .pane-shareaudio-label.hidden, .pane-invite.hidden,
+.lvcvoice-pill.hidden, .st-camtest.hidden, .st-blur.hidden, .st-image.hidden,
+.st-imgprev.hidden, .lvcvoice-mtg-result.hidden,
+#lvcvoice-evt-form.hidden, #lvcvoice-evt-view.hidden { display: none !important; }
+
+/* Form-ish inputs used by the event + settings modals (Tailwind supplies
+   these in the web app; messenger shells style them here so the modals are
+   usable standalone). */
+#lvcvoice-evt-modal .input, #lvcvoice-settings .input {
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.15);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+#lvcvoice-evt-modal .label, #lvcvoice-settings .label {
+  display: block;
+  color: #9ba1a6;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  margin-bottom: 4px;
+}
+#lvcvoice-evt-modal .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #5865f2;
+  border: 1px solid #5865f2;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#lvcvoice-evt-modal .btn-primary:hover { background: #4752c4; }
+#lvcvoice-evt-modal .text-xs, #lvcvoice-settings .text-xs { font-size: 12px; }
+#lvcvoice-evt-modal .text-discord-300, #lvcvoice-settings .text-discord-300 { color: #9ba1a6; }

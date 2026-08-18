@@ -134,10 +134,13 @@ Query params: `since`, `channel` (slug), `dm` (nick), `bg_since`.
   "messages": [ /* delta for the viewed channel or DM */ ],
   "presence": [ /* member list with live flags, when viewing a channel */ ],
   "notify_count": 3,
+  "alerts": [ /* new unread notifications since this session's watermark */ ],
   "dm_list": [ /* live DM sidebar summaries */ ],
   "channel_unread": [ {"slug":"general","unread":2} ],
+  "channel_mentions": [ {"slug":"general","mentions":1} ],
   "channel_presence": [ {"slug":"general","online":12} ],
   "bg_messages": [ /* new real messages in other member channels */ ],
+  "typing": [ "alice" ],
   "mentions": [ /* unread notifications for the viewed channel */ ],
   "reconnect": 1
 }
@@ -150,12 +153,15 @@ Field reference:
 | `messages` | always | Delta (`id > since`) for the viewed channel or DM. Empty when no conversation is open. |
 | `presence` | channel view | Full member roster with `username`, `is_online`, `away`, `level`, `role`, `bot`, `guest`, `role_helper`, `role_color`, `avatar`. |
 | `notify_count` | always | Unread count for the notification bell. |
+| `alerts` | always | New unread notifications since this session's `lvc_alert_seen` watermark — the unified alert delta consumed by every surface (web toasts, desktop bridge, Messenger). Each item: `id`, `kind`, `sender`, `channel_id`, `channel_slug`, `channel_name`, `message_id`, `content`, `excerpt`, `created_at`. The first poll of a fresh session seeds the watermark silently (returns `[]`). |
 | `dm_list` | always | Live DM sidebar (partner, unread, last preview) — see `dmSummaries`. |
 | `channel_unread` | always | Unread badges per joined channel. |
+| `channel_mentions` | always | Unread `@mention` notification counts per channel (`{slug, mentions}`) — drives the highlight vs. activity badge split. |
 | `channel_presence` | always | Active-chatter count per joined channel. |
 | `friends` / `friend_requests` / `channel_invites` | registered users | Sidebar friends + pending requests + channel invites. |
-| `bg_messages` | always | Background-channel messages (`id > bg_since`, excludes the viewed channel and system kinds) — fuel for channel audio alerts. |
-| `mentions` | channel view | Unread notifications scoped to the viewed channel (toast surface). |
+| `bg_messages` | always | Background-channel messages (`id > bg_since`, excludes the viewed channel and system kinds) — fuel for channel audio alerts. Each message also carries `notify_mode` (`"all"`/`"mentions"`/`"muted"`) and a `mentioned` boolean so clients gate sounds exactly like the server's push tier; channels the viewer muted (and muted senders) are excluded server-side. |
+| `typing` | always | Usernames currently typing in the viewed conversation (grace window ≈8s; swept by `TypingService`). |
+| `mentions` | channel view | Unread notifications scoped to the viewed channel (open-channel ping sound). |
 | `dm` | DM view | The partner nick echoed back. |
 | `channel` / `topic` | channel view | Slug + current topic echoed back. |
 | `channel_url` / `url_banned` | channel view | The channel's embedded URL (null when unset or its domain is banned); `url_banned` is true when a stored URL is hidden by the global blocked-domains list. |
@@ -277,11 +283,22 @@ posts a `system` line to the channel so every viewer sees the change.
 
 | Endpoint | Behaviour |
 |---|---|
-| `GET /api/notifications` | Unread notifications (≤ 50), each with `created_at` relativized. |
+| `GET /api/notifications` | Unread notifications (≤ 50), each with `created_at` relativized plus `channel_slug` and message `content` (DMs resolve from `private_messages`; other kinds from `messages`). |
 | `POST /api/notifications/read` | Marks all the session's notifications read. |
 | `POST /api/notifications/dismiss` | Deletes one notification (`id`), returns the new `notify_count`. |
+| `GET /api/notify/prefs` | The full per-user preference set: `{prefs:{push:{channels,dms,invites}, notify:{sound_master, os_master, previews, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, quiet_hours_days, highlight_keywords, tz_offset_minutes}}}`. Guests get defaults. |
+| `POST /api/notify/prefs` | Save any subset (same shape). `quiet_hours_days` / `highlight_keywords` accept arrays or JSON strings. Also stores `tz_offset_minutes` so server-side quiet-hours gating (Web Push) matches the client's local time. |
+| `POST /api/push/test` | Sends a test Web Push to the caller's subscriptions; **400** when none. |
+| `POST /api/push/subscribe` / `POST /api/push/unsubscribe` | Manage browser push subscriptions. |
+| `POST /api/push/mute` / `POST /api/push/unmute` | Mute a user across every notification surface. |
+| `POST /api/typing` | Record that the caller is typing (`channel` or `dm`); surfaced via the poll's `typing` field. |
+| `POST /api/message/pin` | Pin a channel message (`id`) — operators/admins only, chat messages only. Returns the channel's updated `pins`. |
+| `POST /api/message/unpin` | Unpin a message (`id`), same permission gate. |
+| `GET /api/channel/pins` | `channel` (slug) → `{ok, pins:[{message_id, username, sender_id, sender_guest_id, content, message_at, created_at}]}`. |
 
-Notification kinds include `dm`, `mention`, `invite`, plus friend events.
+Notification kinds include `dm`, `mention`, `invite`, `notice`, `knock`, `friend_request`, `friend_accepted`.
+
+**Web Push payloads** (`channelMessage`, `dm`, `invite`) carry `title`, `body`, `tag`, and `data:{type, channel|username, msg_id}`. The service worker uses `data.msg_id` to deep-link notification clicks to `/app?channel=…&jump=<id>` (or `?dm=…&jump=<id>`). Per-recipient preferences (`os_master`, quiet hours, `previews`) partition the fan-out; `previews=0` replaces bodies with a generic line. Channels in `muted` notify-mode and per-user muted senders are excluded.
 
 ---
 
@@ -351,3 +368,12 @@ Presence semantics and throttling are documented in [presence.md](presence.md).
 | 410 | Message already deleted/removed. |
 | 419 | CSRF token mismatch. |
 | 429 | Rate limited (12 sends/5 s; GIF proxy 30/10 s; etc.). |
+
+## 12. Voice, calls & meetings (WebRTC)
+
+The WebRTC voice module adds its own endpoint family — `/api/webrtc/voice/*`,
+`/api/webrtc/call/*`, `/api/webrtc/moderate`, `/api/webrtc/record`, and
+`/api/webrtc/recordings/{id}`, plus the `/api/events/*` meeting-event endpoints.
+They follow the same auth/CSRF/JSON conventions as the rest of this catalog but
+are documented separately in [voice.md](voice.md), because they return
+LiveKit JWT payloads rather than plain chat data.

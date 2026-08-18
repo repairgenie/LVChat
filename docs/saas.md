@@ -23,7 +23,7 @@ model, the entitlement engine, and the core integration points.
 | Resource | Metering |
 |---|---|
 | Concurrent connections | Per-account pool; reject-new; global ceiling 200 (configurable) |
-| Meetings (#mtg) | Feature on/off + per-plan concurrent cap |
+| Meetings (events) | Feature on/off + per-plan concurrent cap |
 | Voice (calls + channel voice) | Feature on/off; concurrent slots reuse global `voice_max_users` |
 | Voice QoS | Per-plan talker cap + bitrate tiers |
 | Owned channels | Per-plan cap (replaces global `max_channels_per_user`) |
@@ -72,7 +72,7 @@ so the module is fully optional):
 - `historyFloor($channelId, $actor)` / `historyFloorGlobal($actor)` — the
   sliding message window.
 - Live counters: `ownedChannelCount`, `membershipCount`, `botCount`,
-  `openTicketCount`, `regInviteCount`, `meetingCount`.
+  `openTicketCount`, `regInviteCount`, `eventCount`.
 
 **Enforcement state machine:** `saas_enabled` (master switch, default off) →
 `saas_enabled` off means every feature is allowed and every limit is unlimited,
@@ -106,7 +106,7 @@ Provider webhooks drive the same transitions: `paid` → assign/renew,
 | `src/services/InviteService.php` | `reg_invites` cap |
 | `src/services/MessageService.php` | `history()`/`historyBefore()` take a floor id; `searchChannels()` clamps |
 | `src/controllers/ChatController.php` | passes the history floor; passes actor to uploads |
-| `modules/webrtc/MtgController.php` | meetings feature + concurrent cap |
+| `modules/webrtc/EventController.php` | events (`#evt-*`) feature + `events_concurrent` cap |
 | `modules/webrtc/VoiceController.php` | voice feature gate; per-user QoS in join response |
 | `modules/webrtc/CallController.php` | voice feature gate on initiate |
 | `modules/webrtc/LiveKitService.php` | `talkerCap($actor)` / `bitrate($actor)` |

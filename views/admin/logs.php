@@ -21,36 +21,32 @@
 $title = 'Chat logs';
 $active = 'logs';
 $fullWidth = true;
-?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Chat logs</h1>
-  <form method="get" action="/admin/logs" class="flex gap-2">
+$pageSubtitle = 'One entry per channel per day. Click a day to view its full log (also available for deleted / unregistered channels and private messages).';
+$pageActions = '<form method="get" action="/admin/logs" class="flex gap-2">
     <select name="channel" class="input w-56 !py-1.5 text-xs" onchange="this.form.submit()">
       <option value="">All channels</option>
-      <?php foreach ($channels as $c): ?>
-      <option value="<?= h($c['channel_name']) ?>" <?= $channel === $c['channel_name'] ? 'selected' : '' ?>><?= h($c['channel_name']) ?> (<?= (int) $c['entries'] ?> entries)</option>
-      <?php endforeach; ?>
+      ' . implode('', array_map(function ($c) use ($channel) {
+          return '<option value="' . h($c['channel_name']) . '"' . ($channel === $c['channel_name'] ? ' selected' : '') . '>' . h($c['channel_name']) . ' (' . (int) $c['entries'] . ' entries)</option>';
+      }, $channels)) . '
     </select>
-    <input type="search" name="q" value="<?= h($q ?? '') ?>" placeholder="Search log content…" class="input w-64 !py-1.5 text-xs" autocomplete="off">
+    <input type="search" name="q" value="' . h($q ?? '') . '" placeholder="Search log content…" class="input w-64 !py-1.5 text-xs" autocomplete="off">
     <button type="submit" class="btn-primary text-xs !py-1">Search</button>
-  </form>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
-<div class="text-xs text-discord-500 mb-3">One entry per channel per day. Click a day to view its full log (also available for deleted / unregistered channels and private messages).</div>
+  </form>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <div class="card overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead><tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-      <th class="px-4 py-2">Channel</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">Entries</th><th class="px-4 py-2 text-right"></th>
-    </tr></thead>
+  <table class="data-table">
+    <thead><tr><th>Channel</th><th>Date</th><th>Entries</th><th class="text-right"></th></tr></thead>
     <tbody>
-      <?php if (!$rows): ?><tr><td class="px-4 py-3 text-discord-500" colspan="4">No log entries yet.</td></tr><?php endif; ?>
+      <?php if (!$rows): ?><tr><td class="text-discord-500" colspan="4">No log entries yet.</td></tr><?php endif; ?>
       <?php foreach ($rows as $r): $isToday = $r['day'] === gmdate('Y-m-d'); ?>
-      <tr class="border-b border-discord-800 cursor-pointer hover:bg-discord-750/40" data-channel="<?= h($r['channel_name']) ?>" data-date="<?= h($r['day']) ?>">
-        <td class="px-4 py-2 text-discord-200"><?= h($r['channel_name']) ?></td>
-        <td class="px-4 py-2 text-discord-300"><?= h($r['day']) ?><?= $isToday ? ' <span class="text-[10px] text-green-400">today</span>' : '' ?></td>
-        <td class="px-4 py-2 text-discord-400"><?= (int) $r['entries'] ?></td>
-        <td class="px-4 py-2 text-right text-blurple text-xs">View log →</td>
+      <tr class="cursor-pointer hover:bg-discord-750/40" data-channel="<?= h($r['channel_name']) ?>" data-date="<?= h($r['day']) ?>">
+        <td class="text-discord-200"><?= h($r['channel_name']) ?></td>
+        <td class="text-discord-300"><?= h($r['day']) ?><?= $isToday ? ' <span class="text-[10px] text-green-400">today</span>' : '' ?></td>
+        <td class="text-discord-400"><?= (int) $r['entries'] ?></td>
+        <td class="text-right text-blurple text-xs">View log →</td>
       </tr>
       <?php endforeach; ?>
     </tbody>

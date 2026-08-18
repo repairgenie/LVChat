@@ -18,16 +18,15 @@
  */
 
  $title = 'Settings'; $active = 'settings';
+$pageTitle = 'Server settings';
 // SMTP fields are genuinely disabled when SMTP is off: they are neither
 // constraint-validated (a hidden port must not block saving) nor submitted,
 // so the stored config survives toggling SMTP off and back on.
 $smtpOn = ($settings['smtp_enabled'] ?? '0') === '1';
 $smtpDisabled = $smtpOn ? '' : ' disabled';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
 ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Server settings</h1>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
 <form method="post" action="/admin/action" class="card p-6 max-w-2xl space-y-5">
   <?= Csrf::field() ?>
   <input type="hidden" name="back" value="/admin/settings">
@@ -46,7 +45,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     <p class="text-xs text-discord-400 mt-1">Shown in place of the site name in the header and login pages. Leave empty to use the default mark.</p>
   </div>
   <div class="pt-4 border-t border-discord-700">
-    <div class="text-sm font-medium text-white mb-1">Updates</div>
+    <div class="text-sm font-semibold text-white tracking-wide mb-2">Updates</div>
     <p class="text-xs text-discord-400 mb-3">Point this server at an LVChat Update Server (or your own mirror) so the <a href="/admin/updates" class="text-blurple-300 hover:underline">Updates page</a>, your chat's download modal and the desktop clients can resolve the latest versions. Leave disabled to keep today's fully-manual behavior.</p>
     <div class="flex items-center justify-between card p-4">
       <div>
@@ -62,7 +61,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     </div>
   </div>
   <div class="pt-4 border-t border-discord-700">
-    <div class="text-sm font-medium text-white mb-1">Licensing</div>
+    <div class="text-sm font-semibold text-white tracking-wide mb-2">Licensing</div>
     <p class="text-xs text-discord-400 mb-3">Paid modules (those with <code class="text-discord-300">"license": true</code> in their manifest) validate their key <strong>offline first</strong> (Ed25519 signature), then ask your license server to confirm the key exists and is active. See <code class="text-discord-300">docs/protocol/licensing.md</code>.</p>
     <div class="mt-3">
       <label class="label">License server URL</label>
@@ -90,7 +89,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     <p class="text-xs text-discord-400 mt-2">Grace: a key that once validated keeps working when the server is unreachable; a key that never confirmed gets the grace window above, then stops. Strict refuses immediately when unreachable.</p>
   </div>
   <div class="pt-4 border-t border-discord-700">
-    <div class="text-sm font-medium text-white mb-1">Desktop apps &amp; downloads</div>
+    <div class="text-sm font-semibold text-white tracking-wide mb-2">Desktop apps &amp; downloads</div>
     <p class="text-xs text-discord-400 mb-3">Custom download links shown in the chat's "Download the desktop app" modal. These <strong>override the upstream feed</strong> — ideal for white-labelled builds tailored to this community. Leave a URL empty to fall back to the upstream link (or hide the button when no feed is configured); the version shown comes from the feed unless you type one.</p>
     <?php
     $dlApps = [
@@ -107,7 +106,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     foreach ($dlApps as $dlApp => $dlInfo):
     ?>
     <div class="card p-4 mb-4">
-      <div class="text-sm font-medium text-white mb-1"><?= h($dlInfo['name']) ?></div>
+      <div class="text-sm font-semibold text-white tracking-wide mb-2"><?= h($dlInfo['name']) ?></div>
       <p class="text-xs text-discord-400 mb-3"><?= h($dlInfo['desc']) ?></p>
       <div class="space-y-3">
         <?php foreach ($dlPlatforms as $dlPlat => $dlPlatInfo): ?>
@@ -129,7 +128,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     </div>
   </div>
   <div class="pt-4 border-t border-discord-700">
-    <div class="text-sm font-medium text-white mb-1">Web messenger clients</div>
+    <div class="text-sm font-semibold text-white tracking-wide mb-2">Web messenger clients</div>
     <p class="text-xs text-discord-400 mb-3">Origins allowed to use this server's Messenger API cross-origin — the LVChat Messenger web app / PWA and any other browser or mobile client you host. <code class="font-mono">http://127.0.0.1:*</code> and <code class="font-mono">null</code> (file://) are always allowed, so the local Electron messenger works out of the box.</p>
     <label class="label">Allowed origins</label>
     <input class="input font-mono text-xs" name="app_origins" value="<?= h($settings['app_origins'] ?? '') ?>" placeholder="https://msg.example.com, https://app.example.com" autocomplete="off" spellcheck="false">
@@ -155,7 +154,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
     <p class="text-xs text-discord-400 mt-1">Max new accounts per IP per 10 minutes. Set to 0 for unlimited. Invite links are exempt.</p>
   </div>
   <div class="pt-4 border-t border-discord-700">
-    <div class="text-sm font-medium text-white mb-1">Require two-factor authentication</div>
+    <div class="text-sm font-semibold text-white tracking-wide mb-2">Require two-factor authentication</div>
     <p class="text-xs text-discord-400 mb-3">Accounts in a checked class must enroll MFA (authenticator app) before they can use the site. Users not yet enrolled are walked through setup right after signing in with their password. Admins can reset a user's MFA from their profile page if they lose their authenticator.</p>
     <div class="flex items-center justify-between card p-4">
       <div>
@@ -258,7 +257,7 @@ $smtpDisabled = $smtpOn ? '' : ' disabled';
   }
   ?>
   <div id="ws-settings" class="card p-4">
-    <div class="text-sm font-medium text-white mb-1">WebSocket gateway</div>
+    <div class="text-sm font-semibold text-white tracking-wide mb-2">WebSocket gateway</div>
     <p class="text-xs text-discord-400 mb-3">Manual override for the gateway bind address — a last resort. deploy.sh normally auto-selects the first free port (8080–8089).</p>
     <div class="grid grid-cols-2 gap-4">
       <div>

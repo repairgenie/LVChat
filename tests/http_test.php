@@ -28,6 +28,17 @@ declare(strict_types=1);
  */
 
 $PORT = 8098;
+
+// A leaked php -S from an interrupted run would hold $PORT and serve a stale
+// DB/sessions to this run (intermittent 401s, phantom state). Fail loudly
+// instead of testing a zombie.
+$probe = @fsockopen('127.0.0.1', $PORT, $errno, $errstr, 0.5);
+if (is_resource($probe)) {
+    fclose($probe);
+    fwrite(STDERR, "ERROR: port $PORT is already in use — a previous test server is still running.\n");
+    fwrite(STDERR, "Kill it (e.g. `fuser -k 127.0.0.1:$PORT/tcp`) and re-run.\n");
+    exit(1);
+}
 $DB = '/tmp/opencode/httptest.db';
 $BASE = "http://127.0.0.1:$PORT";
 
@@ -1115,9 +1126,13 @@ check('admin can join #oper-log', $s === 302 && str_contains($h['location'] ?? '
 check('regular user denied #oper-log', $s === 200, (string) $s);
 [$s, , $b] = req('GET', '/api/commands', [], $cjA);
 $cmds = jsonDecode($b);
-check('/api/commands returns the command list', $s === 200 && is_array($cmds['commands'] ?? null) && in_array('sanick', $cmds['commands'], true), "$s $b");
+check('/api/commands returns the command list', $s === 200 && is_array($cmds['commands'] ?? null) && in_array('sanick', $cmds['commands'], true) && in_array('os', $cmds['commands'], true) && in_array('names', $cmds['commands'], true) && in_array('passwd', $cmds['commands'], true), "$s $b");
 [$s] = req('GET', '/api/commands');
 check('/api/commands requires a session', $s === 302, (string) $s);
+// /serverstats is oper-restricted — the parser replies for a regular user.
+$tC = csrf(req('GET', '/app', [], $cjC)[2]);
+[$s, , $b] = req('POST', '/api/command', ['csrf' => $tC, 'text' => '/serverstats'], $cjC);
+check('/serverstats non-oper restricted', $s === 200 && str_contains((jsonDecode($b)['replies'][0] ?? ''), 'restricted'), "$s $b");
 
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
@@ -2195,6 +2210,172 @@ check('public event channel is public', dbq('SELECT visibility FROM channels WHE
 check('public event has stream URL set', !empty(dbq('SELECT channel_url FROM channels WHERE slug = ?', [$pubEvtSlug])[0]['channel_url']));
 [$s, , $b] = req('POST', '/api/events/cancel', ['csrf' => $tV, 'event_id' => (int) ($j['id'] ?? 0)], $cjA);
 
+// ── WebRTC overhaul: moderation, waiting room, rate limits ────────────────
+echo "== webrtc overhaul (moderation + waiting room) ==\n";
+$tV2 = csrf(req('GET', '/app', [], $cjA)[2]);
+$tW2 = csrf(req('GET', '/app', [], $cjB)[2]);
+// Raise the cap so waiting-room tests aren't constrained by the 1-user cap
+// set during the earlier capacity test.
+req('POST', '/admin/voice/save', ['csrf' => $tV2, 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'voice_max_users' => '4', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+
+// 1) Lock: a moderator locks the room → non-moderators refused at the gate.
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tV2, 'channel' => 'general'], $cjA);
+check('alice joins general voice (moderator)', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+$room = 'chan:general';
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'lock'], $cjA);
+check('moderator locks the room', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW2, 'channel' => 'general'], $cjB);
+$j = jsonDecode($b);
+check('locked room refuses bobs join (403)', $s === 403 && str_contains($j['error'] ?? '', 'locked'), "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'unlock'], $cjA);
+check('moderator unlocks the room', $s === 200, "$s $b");
+
+// 2) Waiting room: bob's join lands in the lobby, alice admits him, and the
+//    mint handoff delivers a fresh token exactly once.
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'waiting_room', 'value' => '1'], $cjA);
+check('ops+ enables the waiting room flag', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('channels.voice_waiting_room persisted', dbq("SELECT voice_waiting_room FROM channels WHERE slug='general'")[0]['voice_waiting_room'] === 1);
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW2, 'channel' => 'general'], $cjB);
+$j = jsonDecode($b);
+check('bob joins the waiting room (no token yet)', $s === 200 && $j['ok'] === true && $j['waiting'] === true, "$s $b");
+$bobIdent = 'u' . dbq("SELECT id FROM users WHERE username='bob'")[0]['id'];
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjB);
+$j = jsonDecode($b);
+check('waiting occupant keeps a session + waiting flag', $s === 200 && ($j['session']['waiting'] ?? false) === true, $b);
+check('waiting room usage is not counted against the cap', (int) ($j['active'] ?? 0) === 1, 'active=' . ($j['active'] ?? 0));
+// The moderator sees the waiting occupant in their roster (status poll).
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjA);
+$j = jsonDecode($b);
+$roster = $j['session']['roster'] ?? [];
+$waitingRow = array_values(array_filter($roster, fn($r) => ($r['identity'] ?? '') === $bobIdent && $r['waiting']));
+check('moderator sees the waiting occupant in roster', count($waitingRow) === 1, json_encode($roster));
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'admit', 'identity' => $bobIdent], $cjA);
+check('host admits the waiting occupant', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjB);
+$j = jsonDecode($b);
+$mint = $j['session']['mint'] ?? null;
+check('admitted user receives the mint handoff (token)', $s === 200 && $mint && substr_count((string) $mint['token'], '.') === 2 && ($mint['room'] ?? '') === $room, json_encode($j['session'] ?? []));
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjB);
+$j = jsonDecode($b);
+check('mint is single-delivery', ($j['session']['mint'] ?? null) === null, json_encode($j['session'] ?? []));
+check('admitted (waiting cleared)', ($j['session']['waiting'] ?? true) === false, json_encode($j['session'] ?? []));
+// Deny path: bob waits again, host denies → session removed.
+[$s, , $b] = req('POST', '/api/webrtc/voice/leave', ['csrf' => $tW2], $cjB);
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW2, 'channel' => 'general'], $cjB);
+check('bob waits again', $s === 200 && jsonDecode($b)['waiting'] === true, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'deny', 'identity' => $bobIdent], $cjA);
+check('host denies the waiting occupant', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjB);
+$j = jsonDecode($b);
+check('denied occupant loses their session', ($j['session'] ?? null) === null, $b);
+
+// 3) Kick: with the waiting room off, bob joins for real; host kics him out.
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'waiting_room', 'value' => '0'], $cjA);
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW2, 'channel' => 'general'], $cjB);
+check('bob joins voice for real', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'kick', 'identity' => $bobIdent], $cjA);
+check('host kics bob', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('kicked user session removed', (int) dbq('SELECT COUNT(*) AS n FROM voice_sessions WHERE guest_id IS NULL AND user_id = ?', [dbq("SELECT id FROM users WHERE username='bob'")[0]['id']])[0]['n'] === 0);
+
+// 4) Moderation authority + validation.
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tW2, 'room' => $room, 'action' => 'lock'], $cjB);
+check('bob (non-moderator) cannot lock', $s === 403, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'bogus'], $cjA);
+check('unknown moderation action rejected', $s === 400, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'kick', 'identity' => 'u' . dbq("SELECT id FROM users WHERE username='alice'")[0]['id']], $cjA);
+check('cannot moderate yourself', $s === 400, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => 'chan:nope', 'action' => 'lock'], $cjA);
+check('unknown room not moderatable', $s === 403, "$s $b");
+
+// 5) Rate limits: voice-join and call-initiate buckets trip 429.
+$bobId = dbq("SELECT id FROM users WHERE username='bob'")[0]['id'];
+$pdo->exec("INSERT OR REPLACE INTO rate_limits (bucket, hits, window_start) VALUES ('voice-join:u$bobId', 12, " . time() . ')');
+[$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW2, 'channel' => 'general'], $cjB);
+check('voice join rate-limited (429)', $s === 429, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tW2, 'user' => 'alice'], $cjB);
+check('call initiate works for bob', $s === 200, "$s $b");
+$busyCallId = (int) (jsonDecode($b)['call_id'] ?? 0);
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tW2, 'user' => 'alice'], $cjB);
+check('busy gate still guards second call', $s === 409, "$s $b");
+
+// ── Group calls: a 1:1 call grows via /invite (Discord-style) ─────────────
+echo "== webrtc group calls ==\n";
+[$s, , $b] = req('POST', '/api/webrtc/call/end', ['csrf' => $tW2, 'call_id' => (string) $busyCallId], $cjB);
+req('POST', '/api/webrtc/voice/leave', ['csrf' => $tW2], $cjB);
+req('POST', '/api/webrtc/voice/leave', ['csrf' => $tV2], $cjA);
+// bob -> alice call, accepted.
+[$s, , $b] = req('POST', '/api/webrtc/call/initiate', ['csrf' => $tB2 = csrf(req('GET', '/app', [], $cjB)[2]), 'user' => 'alice'], $cjB);
+$gcallId = (int) (jsonDecode($b)['call_id'] ?? 0);
+$groom = (string) (jsonDecode($b)['room'] ?? '');
+[$s, , $b] = req('POST', '/api/webrtc/call/accept', ['csrf' => $tV2, 'call_id' => (string) $gcallId], $cjA);
+check('alice accepts the group seed call', $s === 200, "$s $b");
+// Host (bob) invites carol.
+[$s, , $b] = req('POST', '/api/webrtc/call/invite', ['csrf' => $tB2, 'call_id' => (string) $gcallId, 'users' => 'carol'], $cjB);
+$j = jsonDecode($b);
+check('host invites carol into the call', $s === 200 && $j['ok'] === true && in_array('carol', $j['added'] ?? [], true), "$s $b");
+// Invitee-only: carol must accept; alice cannot invite.
+$tC = csrf(req('GET', '/app', [], $cjC)[2]);
+[$s, , $b] = req('POST', '/api/webrtc/call/invite', ['csrf' => $tV2, 'call_id' => (string) $gcallId, 'users' => 'nobody'], $cjA);
+check('non-host cannot invite', $s === 403, "$s $b");
+[$s, , $b] = req('POST', '/api/webrtc/call/invite', ['csrf' => $tB2, 'call_id' => (string) $gcallId, 'users' => 'ghost-user-xyz'], $cjB);
+check('unknown invitee reported', $s === 200 && in_array('ghost-user-xyz', jsonDecode($b)['unknown'] ?? [], true), "$s $b");
+// Carol sees the group call as incoming (active + invited) and accepts.
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjC);
+$j = jsonDecode($b);
+$inc = array_values(array_filter($j['calls']['incoming'] ?? [], fn($c) => (int) ($c['call_id'] ?? 0) === $gcallId));
+check('carol sees the group invite as incoming', count($inc) === 1 && ($inc[0]['group'] ?? false) === true && ($inc[0]['peer'] ?? '') === 'bob', json_encode($j['calls']['incoming'] ?? []));
+[$s, , $b] = req('POST', '/api/webrtc/call/accept', ['csrf' => $tC, 'call_id' => (string) $gcallId], $cjC);
+check('carol accepts and joins the group call', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('group call has three participants', (int) dbq("SELECT COUNT(*) AS n FROM call_participants WHERE call_id = $gcallId")[0]['n'] === 3);
+// A joined group member (not the original callee) sees the call as active on
+// reload — the status sweep covers call_participants beyond the 1:1 pair.
+[$s, , $b] = req('GET', '/api/webrtc/voice/status', [], $cjC);
+$j = jsonDecode($b);
+check('joined group member sees the active call', $s === 200 && ($j['calls']['active']['call_id'] ?? 0) === $gcallId, json_encode($j['calls'] ?? []));
+// Member (carol) hanging up leaves the call alive; host ends for everyone.
+[$s, , $b] = req('POST', '/api/webrtc/call/end', ['csrf' => $tC, 'call_id' => (string) $gcallId], $cjC);
+check('member hangs up in a group call', $s === 200, "$s $b");
+check('group call survives a member hangup', dbq('SELECT status FROM call_sessions WHERE id = ?', [$gcallId])[0]['status'] === 'active');
+[$s, , $b] = req('POST', '/api/webrtc/call/end', ['csrf' => $tB2, 'call_id' => (string) $gcallId], $cjB);
+check('host ends the group call for everyone', $s === 200 && dbq('SELECT status FROM call_sessions WHERE id = ?', [$gcallId])[0]['status'] === 'ended', "$s $b");
+
+// ── Recording (egress): gates + graceful egress-down path ──────────────────
+echo "== webrtc recording ==\n";
+// Not enabled → 403.
+[$s, , $b] = req('POST', '/api/webrtc/record', ['csrf' => $tV2, 'room' => $room, 'action' => 'start'], $cjA);
+check('recording refused while disabled', $s === 403, "$s $b");
+// Enable it through the admin page (keeps voice on).
+req('POST', '/admin/voice/save', ['csrf' => $tV2, 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'recording_enabled' => '1', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+check('recording_enabled persisted', dbq("SELECT value FROM server_config WHERE key='recording_enabled'")[0]['value'] === '1');
+// Egress down → friendly 503 (LiveKit isn't running in the test env).
+[$s, , $b] = req('POST', '/api/webrtc/record', ['csrf' => $tV2, 'room' => $room, 'action' => 'start'], $cjA);
+check('recording start with egress down is a graceful 503', $s === 503, "$s $b");
+// Non-host cannot record.
+[$s, , $b] = req('POST', '/api/webrtc/record', ['csrf' => $tW2, 'room' => $room, 'action' => 'start'], $cjB);
+check('non-host cannot record', $s === 403, "$s $b");
+// Stop is idempotent (nothing running → ok).
+[$s, , $b] = req('POST', '/api/webrtc/record', ['csrf' => $tV2, 'room' => $room, 'action' => 'stop'], $cjA);
+check('recording stop is idempotent', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+// Download gating: a started row (simulated) + file → host streams it; guest 404.
+$recDir = dirname(__DIR__) . '/data/recordings';
+@mkdir($recDir, 0775, true);
+file_put_contents($recDir . '/fake.mp4', 'MP4');
+$pdo->exec("INSERT INTO recordings (room, kind, filename, status, started_by_user_id) VALUES ('chan:general', 'channel', 'fake.mp4', 'stopped', " . dbq("SELECT id FROM users WHERE username='alice'")[0]['id'] . ")");
+$recId = (int) $pdo->lastInsertId();
+[$s, $h, $b] = req('GET', '/api/webrtc/recordings/' . $recId, [], $cjA);
+check('host downloads their recording', $s === 200 && ($h['content-disposition'] ?? '') !== '', "$s " . ($h['content-disposition'] ?? 'none'));
+[$s, , $b] = req('GET', '/api/webrtc/recordings/' . $recId, [], $cjB);
+check('non-host cannot download the recording', $s === 404, (string) $s);
+[$s, , $b] = req('GET', '/api/webrtc/recordings/999999', [], $cjA);
+check('unknown recording is a 404', $s === 404, (string) $s);
+$pdo->exec('DELETE FROM recordings WHERE id = ' . $recId);
+@unlink($recDir . '/fake.mp4');
+
+// Cleanup: disable the waiting-room flag + leave both sides.
+req('POST', '/api/webrtc/voice/leave', ['csrf' => $tW2], $cjB);
+req('POST', '/api/webrtc/voice/leave', ['csrf' => $tV2], $cjA);
+req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'waiting_room', 'value' => '0'], $cjA);
+
 // Restore admin config defaults for the rest of the suite.
 req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '0', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
 req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tV, 'channel' => 'general', 'enabled' => '0'], $cjA);
@@ -2230,6 +2411,162 @@ $tA = csrf(req('GET', '/admin/modules', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'module_recheck', 'id' => 'paid-mod', 'back' => '/admin/modules'], $cjA);
 [$s, , $b] = req('GET', '/admin/modules', [], $cjA);
 check('malformed key fails offline → invalid badge', str_contains($b, 'invalid: malformed'), substr($b, 0, 200));
+
+// ── Unified notifications: alerts delta, notify prefs, typing, pins ─────────
+echo "== unified notifications ==\n";
+
+// Two fresh accounts so session watermarks and prefs defaults are predictable.
+// Jar files are unique per run — a stale PHPSESSID from a previous suite run
+// would leak that run's notification watermark into the fresh one.
+$cjNT = '/tmp/opencode/httptest-notify-a-' . getmypid() . '.txt';
+[$s] = req('POST', '/register', ['csrf' => csrf(req('GET', '/register', [], $cjNT)[2]), 'username' => 'noteeeee', 'email' => 'noteeeee@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjNT);
+check('notify user registered', $s === 302, (string) $s);
+$cjNB = '/tmp/opencode/httptest-notify-b-' . getmypid() . '.txt';
+[$s] = req('POST', '/register', ['csrf' => csrf(req('GET', '/register', [], $cjNB)[2]), 'username' => 'notebob', 'email' => 'notebob@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjNB);
+check('notify partner registered', $s === 302, (string) $s);
+[$s, , $appN] = req('GET', '/app', [], $cjNT);
+check('web app exposes notify prefs to the client', $s === 200 && str_contains($appN, 'data-notify-prefs'), (string) $s);
+req('GET', '/app', [], $cjNB);
+
+// /api/notify/prefs: defaults, save, roundtrip, validation, auth gate.
+[$s, , $b] = req('GET', '/api/notify/prefs', [], $cjNT);
+$np = jsonDecode($b);
+check('notify prefs defaults',
+    $s === 200 && ($np['prefs']['notify']['sound_master'] ?? null) === 1
+    && ($np['prefs']['notify']['os_master'] ?? null) === 1
+    && ($np['prefs']['notify']['previews'] ?? null) === 1
+    && ($np['prefs']['notify']['quiet_hours_enabled'] ?? null) === 0
+    && ($np['prefs']['push']['dms'] ?? null) === 1, $b);
+[$s, , $b] = req('POST', '/api/notify/prefs', [
+    'csrf' => csrf(req('GET', '/app', [], $cjNT)[2]),
+    'sound_master' => '0', 'os_master' => '0', 'previews' => '0',
+    'quiet_hours_enabled' => '1', 'quiet_hours_start' => '23:00', 'quiet_hours_end' => '07:00',
+    'quiet_hours_days' => '[0,6]', 'highlight_keywords' => '["launch","deploy"]',
+    'tz_offset_minutes' => '-480', 'dms' => '0',
+], $cjNT);
+check('notify prefs save accepted', $s === 200 && (jsonDecode($b)['ok'] ?? false) === true, $b);
+[$s, , $b] = req('GET', '/api/notify/prefs', [], $cjNT);
+$np = jsonDecode($b);
+check('notify prefs roundtrip',
+    $s === 200 && ($np['prefs']['notify']['sound_master'] ?? null) === 0
+    && ($np['prefs']['notify']['previews'] ?? null) === 0
+    && ($np['prefs']['notify']['quiet_hours_enabled'] ?? null) === 1
+    && ($np['prefs']['notify']['quiet_hours_start'] ?? null) === '23:00'
+    && ($np['prefs']['notify']['quiet_hours_days'] ?? null) === ['0', '6']
+    && in_array('deploy', (array) ($np['prefs']['notify']['highlight_keywords'] ?? []), true)
+    && (int) ($np['prefs']['notify']['tz_offset_minutes'] ?? 0) === -480
+    && ($np['prefs']['push']['dms'] ?? null) === 0, $b);
+[$s] = req('POST', '/api/notify/prefs', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'quiet_hours_start' => '25:99'], $cjNT);
+[$s, , $b] = req('GET', '/api/notify/prefs', [], $cjNT);
+check('notify prefs rejects invalid times', (jsonDecode($b)['prefs']['notify']['quiet_hours_start'] ?? '') === '23:00', $b);
+[$s] = req('GET', '/api/notify/prefs');
+check('notify prefs requires auth', $s === 401, (string) $s);
+
+// /api/push/test: auth-gated; real result with an actual subscription.
+[$s, , $b] = req('POST', '/api/push/test', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2])], $cjNT);
+check('push test without subscription errors', $s === 400 && str_contains($b, 'subscription'), "$s $b");
+[$s] = req('POST', '/api/push/subscribe', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'endpoint' => 'https://127.0.0.1:9/push/nonotif', 'p256dh' => strtr(base64_encode(str_repeat("\x05", 65)), '+/', '-_'), 'auth' => strtr(base64_encode(str_repeat("\x09", 16)), '+/', '-_')], $cjNT);
+check('push subscribe accepted', $s === 200, (string) $s);
+[$s, , $b] = req('POST', '/api/push/test', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2])], $cjNT);
+check('push test fires with a subscription', $s === 200 && (jsonDecode($b)['ok'] ?? false) === true, "$s $b");
+dbq('DELETE FROM push_subscriptions WHERE user_id = (SELECT id FROM users WHERE username = "noteeeee")');
+[$s] = req('POST', '/api/push/test', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2])]);
+check('push test logged-out rejected', $s === 401, (string) $s);
+
+// Typing indicators ride the poll payload (channel + DM).
+$tB = csrf(req('GET', '/app', [], $cjNB)[2]);
+[$s] = req('POST', '/api/typing', ['csrf' => $tB, 'channel' => 'general'], $cjNB);
+check('typing recorded for channel', $s === 200, (string) $s);
+[$s, , $b] = req('GET', '/api/poll?channel=general&since=0', [], $cjNT);
+$tp = jsonDecode($b);
+check('poll surfaces channel typing', $s === 200 && in_array('notebob', (array) ($tp['typing'] ?? []), true), $b);
+[$s] = req('POST', '/api/typing', ['csrf' => $tB, 'dm' => 'noteeeee'], $cjNB);
+[$s, , $b] = req('GET', '/api/poll?dm=notebob&since=0', [], $cjNT);
+$tp = jsonDecode($b);
+check('poll surfaces DM typing', $s === 200 && in_array('notebob', (array) ($tp['typing'] ?? []), true), $b);
+
+// Pinned messages: permission gate + list/unpin lifecycle.
+[$s, , $b] = req('POST', '/api/send', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'channel' => 'general', 'content' => 'pin me please'], $cjNT);
+check('notify user can chat', $s === 200, (string) $s);
+$pinMsgId = (int) (dbq('SELECT id FROM messages WHERE content = "pin me please" ORDER BY id DESC LIMIT 1')[0]['id'] ?? 0);
+[$s, , $b] = req('POST', '/api/message/pin', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'id' => (string) $pinMsgId], $cjNT);
+check('non-op pin rejected', $s === 403, "$s $b");
+$tA = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/message/pin', ['csrf' => $tA, 'id' => (string) $pinMsgId], $cjA);
+$pj = jsonDecode($b);
+check('admin pins the message', $s === 200 && count($pj['pins'] ?? []) === 1, $b);
+check('pins carry sender + content', (($pj['pins'][0]['content'] ?? '') === 'pin me please') && (($pj['pins'][0]['username'] ?? '') === 'noteeeee'), $b);
+[$s, , $b] = req('GET', '/api/channel/pins?channel=general', [], $cjNT);
+check('channel pins list', $s === 200 && count(jsonDecode($b)['pins'] ?? []) === 1, $b);
+[$s, , $b] = req('POST', '/api/message/unpin', ['csrf' => $tA, 'id' => (string) $pinMsgId], $cjA);
+check('unpin empties the list', $s === 200 && (count(jsonDecode($b)['pins'] ?? []) === 0), $b);
+[$s, , $b] = req('POST', '/api/message/pin', ['csrf' => $tA, 'id' => (string) ($pinMsgId - 1)], $cjA);
+check('system messages cannot be pinned', $s === 403, "$s $b");
+
+// Unified alerts delta: fresh-session seeding, DM + mention alerts, and the
+// mention-aware channel_mentions / bg_messages flags.
+[$s, , $b] = req('GET', '/api/poll?channel=general&since=0', [], $cjNT);
+$first = jsonDecode($b);
+check('poll carries the alerts key', $s === 200 && is_array($first['alerts'] ?? null), $b);
+$tB = csrf(req('GET', '/app', [], $cjNB)[2]);
+[$s] = req('POST', '/api/send', ['csrf' => $tB, 'recipient' => 'noteeeee', 'content' => 'ping dm'], $cjNB);
+[$s, , $b] = req('GET', '/api/poll?dm=notebob&since=0', [], $cjNT);
+$al = jsonDecode($b);
+$dmAlert = null;
+foreach (($al['alerts'] ?? []) as $a) {
+    if (($a['kind'] ?? '') === 'dm' && ($a['sender'] ?? '') === 'notebob') { $dmAlert = $a; }
+}
+check('DM surfaces as an alert', $dmAlert !== null && ($dmAlert['message_id'] ?? 0) > 0 && ($dmAlert['excerpt'] ?? '') === 'ping dm', $b);
+[$s] = req('POST', '/api/send', ['csrf' => $tB, 'channel' => 'general', 'content' => '@noteeeee hello there'], $cjNB);
+[$s, , $b] = req('GET', '/api/poll?channel=general&since=0', [], $cjNT);
+$al = jsonDecode($b);
+$mAlert = null;
+foreach (($al['alerts'] ?? []) as $a) {
+    if (($a['kind'] ?? '') === 'mention' && (($a['channel_slug'] ?? '') === 'general')) { $mAlert = $a; }
+}
+check('mention surfaces as an alert', $mAlert !== null && ($mAlert['message_id'] ?? 0) > 0, $b);
+$mentions = null;
+foreach (($al['channel_mentions'] ?? []) as $cm) {
+    if (($cm['slug'] ?? '') === 'general') { $mentions = (int) ($cm['mentions'] ?? 0); }
+}
+check('mention-aware channel badge', $mentions !== null && $mentions >= 1, $b);
+check('bell count reflects unread alerts', (int) ($al['notify_count'] ?? 0) >= 1, $b);
+$uni = null;
+foreach (($al['channel_unread'] ?? []) as $cu) {
+    if (($cu['slug'] ?? '') === 'general') { $uni = (int) ($cu['unread'] ?? 0); }
+}
+check('channel unread advanced', $uni !== null && $uni >= 1, $b);
+
+// bg_messages carry notify_mode + mentioned flags for the alert engine.
+[$s] = req('POST', '/api/send', ['csrf' => $tB, 'channel' => 'general', 'content' => 'plain bg chatter'], $cjNB);
+[$s, , $b] = req('GET', '/api/poll?dm=notebob&since=0', [], $cjNT);
+$bg = jsonDecode($b);
+$plainBg = null;
+foreach (($bg['bg_messages'] ?? []) as $m) {
+    if (($m['content'] ?? '') === 'plain bg chatter') { $plainBg = $m; }
+}
+check('bg messages carry notify_mode', $plainBg !== null && ($plainBg['notify_mode'] ?? '') === 'all' && (int) ($plainBg['mentioned'] ?? 1) === 0, $b);
+[$s] = req('POST', '/api/send', ['csrf' => $tB, 'channel' => 'general', 'content' => '@noteeeee bg flagged'], $cjNB);
+[$s, , $b] = req('GET', '/api/poll?dm=notebob&since=0', [], $cjNT);
+$flagged = null;
+foreach ((jsonDecode($b)['bg_messages'] ?? []) as $m) {
+    if (($m['content'] ?? '') === '@noteeeee bg flagged') { $flagged = $m; }
+}
+check('bg messages flag mentions', $flagged !== null && (int) ($flagged['mentioned'] ?? 0) === 1, $b);
+
+// A channel the user muted is excluded from the background stream entirely.
+[$s] = req('POST', '/api/channel/notify', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'channel' => 'general', 'mode' => 'muted'], $cjNT);
+check('channel notify mode muted', $s === 200, (string) $s);
+[$s] = req('POST', '/api/send', ['csrf' => $tB, 'channel' => 'general', 'content' => 'muted bg chatter'], $cjNB);
+[$s, , $b] = req('GET', '/api/poll?dm=notebob&since=0', [], $cjNT);
+$bg = jsonDecode($b);
+$mutedHit = null;
+foreach (($bg['bg_messages'] ?? []) as $m) {
+    if (($m['content'] ?? '') === 'muted bg chatter') { $mutedHit = $m; }
+}
+check('muted channel excluded from background stream', $mutedHit === null, $b);
+req('POST', '/api/channel/notify', ['csrf' => csrf(req('GET', '/app', [], $cjNT)[2]), 'channel' => 'general', 'mode' => 'all'], $cjNT);
+check('channel notify mode restored', true);
 
 // logout
 [$s, $h] = req('POST', '/logout', ['csrf' => csrf(req('GET', '/app', [], $cjA)[2])], $cjA);

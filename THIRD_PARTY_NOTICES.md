@@ -19,6 +19,13 @@ License: MIT — https://github.com/ueberdosis/tiptap/blob/main/LICENSE.md
 Bundled verbatim as `modules/webrtc/assets/vendor/livekit-client.umd.js`.
 License: Apache-2.0 — https://github.com/livekit/client-sdk-js/blob/main/LICENSE
 
+### MediaPipe Selfie Segmentation (Google) — Apache License 2.0
+Bundled verbatim under `modules/webrtc/assets/vendor/selfie-segmentation/`
+(JS + TF Lite model + SIMD WASM), mirrored in `lvchat-messenger/renderer/vendor/`
+and `messenger-web/src/vendor/`; lazily loaded by the voice client for video
+background effects (blur / custom image).
+License: Apache-2.0 — https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE
+
 ### Tailwind CSS — MIT License
 Build-time dependency used to generate `public/assets/css/app.css`.
 License: MIT — https://github.com/tailwindlabs/tailwindcss/blob/master/LICENSE

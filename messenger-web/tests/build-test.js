@@ -92,11 +92,11 @@ function readText (p) {
     check('dist copies ' + f, fs.existsSync(path.join(DIST, f)))
   }
   // WebRTC voice assets ship with the build and are precached by the SW.
-  for (const f of ['voice.js', 'voice.css', 'vendor/livekit-client.umd.js']) {
+  for (const f of ['voice.js', 'voice.css', 'voice-host.js', 'vendor/livekit-client.umd.js']) {
     check('dist copies voice asset ' + f, fs.existsSync(path.join(DIST, f)) && fs.statSync(path.join(DIST, f)).size > 100)
   }
-  check('sw.js precaches the voice shell', sw.includes('voice.js') && sw.includes('voice.css') && sw.includes('livekit-client.umd.js'))
-  check('messenger.html loads the voice scripts', readText(path.join(DIST, 'messenger.html')).includes('vendor/livekit-client.umd.js') && readText(path.join(DIST, 'messenger.html')).includes('voice.js'))
+  check('sw.js precaches the voice shell', sw.includes('voice.js') && sw.includes('voice.css') && sw.includes('voice-host.js') && sw.includes('livekit-client.umd.js'))
+  check('messenger.html loads the voice scripts', readText(path.join(DIST, 'messenger.html')).includes('voice-host.js') && readText(path.join(DIST, 'messenger.html')).includes('vendor/livekit-client.umd.js') && readText(path.join(DIST, 'messenger.html')).includes('voice.js'))
   check('voice.js gates on the server status endpoint', readText(path.join(DIST, 'voice.js')).includes('/api/webrtc/voice/status'))
   check('voice.js ships video (camera + screen share)', readText(path.join(DIST, 'voice.js')).includes('setCameraEnabled') && readText(path.join(DIST, 'voice.js')).includes('setScreenShareEnabled'))
   // Background effects: MediaPipe selfie-segmentation ships + is precached.
@@ -108,6 +108,31 @@ function readText (p) {
   const vjs = readText(path.join(DIST, 'voice.js'))
   check('voice.js ships device settings + camera/mic test', vjs.includes('enumerateDevices') && vjs.includes('getUserMedia') && vjs.includes('Test camera'))
   check('voice.js ships background effects', vjs.includes('makeBgProcessor') && vjs.includes('selfie_segmentation.js'))
+  // WebRTC overhaul parity markers: the canonical client ships the new
+  // features server-gated (waiting room, moderation, recording, group calls,
+  // quality dots, reactions, raise hand, ring tone, audio processing).
+  const parityMarkers = {
+    'moderation endpoint': '/api/webrtc/moderate',
+    'recording endpoint': '/api/webrtc/record',
+    'group-call invite endpoint': '/api/webrtc/call/invite',
+    'waiting-room lobby DOM': "pane-waiting",
+    'host admit control': 'roster-admit',
+    'host kick control': 'roster-kick',
+    'host mute control': 'roster-mute',
+    'record button': 'pane-record',
+    'lock room button': 'pane-lock',
+    'deafen control': 'pane-deafen',
+    'quality dots': 'ConnectionQualityChanged',
+    'raise hand attributes': 'setAttributes',
+    'reactions data channel': 'publishData',
+    'synthesized ring tone': 'playRing',
+    'noise suppression toggle': 'noiseSuppression'
+  }
+  for (const [label, marker] of Object.entries(parityMarkers)) {
+    check('voice.js ships ' + label, vjs.includes(marker))
+  }
+  const hostShim = readText(path.join(DIST, 'voice-host.js'))
+  check('voice-host.js adapts the canonical client to LvApi', hostShim.includes('LVCVoiceHost') && hostShim.includes('LvApi'))
   for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'favicon.png']) {
     const p = path.join(DIST, 'icons', f)
     check('icon ' + f + ' exists', fs.existsSync(p) && fs.statSync(p).size > 100)
@@ -207,13 +232,35 @@ const mockServer = http.createServer((req, res) => {
   // never renders when it 404s (module absent) or reports enabled:false.
   if (url.pathname === '/api/webrtc/voice/status') {
     if (!mockSession) return json(401, { error: 'Not authenticated.' })
-    return json(200, { ok: true, enabled: true, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000, channels: [{ slug: 'general', name: '#general', voice_enabled: true }], session: null, calls: { incoming: [], outgoing: [], active: null } })
+    return json(200, { ok: true, enabled: true, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000, recording: { enabled: false, active: null }, channels: [{ slug: 'general', name: '#general', voice_enabled: true }], session: null, calls: { incoming: [], outgoing: [], active: null } })
   }
   if (url.pathname === '/api/webrtc/voice/join' && req.method === 'POST') {
     if (!mockSession) return json(401, { error: 'Not authenticated.' })
     return formBody().then((body) => {
       if (body.get('csrf') !== 'csrf-token-123') return json(419, { error: 'CSRF token mismatch.' })
       return json(200, { ok: true, url: 'wss://livekit.test/', token: 'a.b.c', room: 'chan:' + (body.get('channel') || ''), talker_cap: 8, bitrate: 40000 })
+    })
+  }
+  // WebRTC overhaul contract: host moderation + group-call invite + recording.
+  if (url.pathname === '/api/webrtc/moderate' && req.method === 'POST') {
+    if (!mockSession) return json(401, { error: 'Not authenticated.' })
+    return formBody().then((body) => {
+      if (body.get('csrf') !== 'csrf-token-123') return json(419, { error: 'CSRF token mismatch.' })
+      return json(200, { ok: true })
+    })
+  }
+  if (url.pathname === '/api/webrtc/call/invite' && req.method === 'POST') {
+    if (!mockSession) return json(401, { error: 'Not authenticated.' })
+    return formBody().then((body) => {
+      if (body.get('csrf') !== 'csrf-token-123') return json(419, { error: 'CSRF token mismatch.' })
+      return json(200, { ok: true, added: ['carol'], unknown: [], busy: [] })
+    })
+  }
+  if (url.pathname === '/api/webrtc/record' && req.method === 'POST') {
+    if (!mockSession) return json(401, { error: 'Not authenticated.' })
+    return formBody().then((body) => {
+      if (body.get('csrf') !== 'csrf-token-123') return json(419, { error: 'CSRF token mismatch.' })
+      return json(200, { ok: true })
     })
   }
   return html(404, 'not found: ' + url.pathname)
@@ -330,11 +377,19 @@ function loadApiClient () {
   check('api: push subscribe accepted', sub.ok && sub.body && sub.body.ok === true, JSON.stringify(sub))
 
   // WebRTC voice contract: status is gated on auth, carries the enabled flag +
-  // channels; join requires CSRF and returns the LiveKit payload.
+  // channels + recording state; join requires CSRF and returns the LiveKit
+  // payload; the overhaul endpoints (moderate/invite/record) round-trip.
   const vs = await LvApi.getJson('/api/webrtc/voice/status')
   check('api: voice status returns the module contract', vs.ok && vs.body.enabled === true && vs.body.talker_cap === 8 && Array.isArray(vs.body.channels), JSON.stringify(vs.body))
+  check('api: voice status carries the recording state', vs.ok && vs.body.recording && vs.body.recording.enabled === false, JSON.stringify(vs.body))
   const join = await LvApi.postForm('/api/webrtc/voice/join', { channel: 'general' })
   check('api: voice join returns the LiveKit payload', join.ok && join.body && join.body.url === 'wss://livekit.test/' && join.body.room === 'chan:general' && join.body.token === 'a.b.c', JSON.stringify(join.body))
+  const mod = await LvApi.postForm('/api/webrtc/moderate', { room: 'chan:general', action: 'admit', identity: 'u2' })
+  check('api: moderate accepts host actions', mod.ok && mod.body && mod.body.ok === true, JSON.stringify(mod.body))
+  const inv = await LvApi.postForm('/api/webrtc/call/invite', { call_id: '1', users: 'carol' })
+  check('api: call invite grows the call', inv.ok && inv.body && Array.isArray(inv.body.added) && inv.body.added[0] === 'carol', JSON.stringify(inv.body))
+  const rec = await LvApi.postForm('/api/webrtc/record', { room: 'chan:general', action: 'start' })
+  check('api: record start round-trips', rec.ok && rec.body && rec.body.ok === true, JSON.stringify(rec.body))
 
   /* Part 2: web-bridge against stubbed browser globals. */
   let notifShown = false

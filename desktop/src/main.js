@@ -164,11 +164,15 @@ const NOTIFY_BRIDGE = `
         if (!n || !n.id || seen[n.id]) continue;
         seen[n.id] = 1;
         if (!seeded) continue;
-        if (dndNow() || !focused()) continue;
+        if (dndNow()) continue;
         var kind = String(n.kind || '');
         var title = 'LVChat';
         var body = '';
-        if (kind === 'mention') {
+        if (kind === 'dm') {
+          title = 'DM from ' + (n.sender || 'someone');
+          body = n.content ? strip(n.content) : 'New direct message';
+          notify(title, body, { type: 'dm', id: n.sender || '', msg_id: n.message_id || 0 });
+        } else if (kind === 'mention') {
           title = 'Mentioned you';
           body = (n.sender ? '@' + n.sender : 'Someone') + (n.channel_name ? ' in ' + n.channel_name : '');
           notify(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });

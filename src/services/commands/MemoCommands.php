@@ -104,13 +104,19 @@ CommandRegistry::register('memo', [
             case 'summary':
                 $unread = (int) Database::scalar('SELECT COUNT(*) FROM memos WHERE recipient_id = ? AND read_at IS NULL', [$me]);
                 $total = (int) Database::scalar('SELECT COUNT(*) FROM memos WHERE recipient_id = ?', [$me]);
-                return ['replies' => ["$unread unread of $total total memos."]];
+                $mode = (string) (Database::scalar('SELECT memo_notify FROM user_notify_prefs WHERE user_id = ?', [$me]) ?? 'notify');
+                return ['replies' => ["$unread unread of $total total memos.", 'Memo notifications: ' . $mode . ' (/memo set notify|silent)']];
             case 'set':
                 $mode = strtolower($args[1] ?? '');
                 if (!in_array($mode, ['notify', 'silent'], true)) {
                     return ['replies' => ['Usage: /memo set <notify|silent>']];
                 }
-                return ['replies' => ["Memo notifications are $mode."]];
+                Database::query(
+                    'INSERT INTO user_notify_prefs (user_id, memo_notify, updated_at) VALUES (?, ?, datetime("now"))
+                     ON CONFLICT(user_id) DO UPDATE SET memo_notify = excluded.memo_notify, updated_at = datetime("now")',
+                    [$me, $mode]
+                );
+                return ['replies' => ["Memo notifications are now $mode."]];
             default:
                 return ['replies' => ['Usage: /memo <send|read|list|del|summary|set>']];
         }

@@ -1013,7 +1013,7 @@ final class ChatController
     /** Shared pin/unpin logic. Returns the updated pin list or an error string. */
     private static function setPin(int $id, array $user, bool $pin): array|string
     {
-        $msg = Database::one('SELECT id, channel_id, content, username, sender_id, kind FROM messages WHERE id = ?', [$id]);
+        $msg = Database::row('SELECT id, channel_id, content, sender_id, kind FROM messages WHERE id = ?', [$id]);
         if (!$msg) {
             return 'Message not found.';
         }
@@ -1177,8 +1177,9 @@ final class ChatController
         $user = self::requireUser();
         $rows = Database::all(
             'SELECT n.*, COALESCE(s.username, gs.nick) AS sender, c.name AS channel_name, c.slug AS channel_slug,
-                    COALESCE((SELECT m.content FROM messages m WHERE m.id = n.message_id),
-                             (SELECT pm.content FROM private_messages pm WHERE pm.id = n.message_id)) AS content
+                    CASE WHEN n.kind = \'dm\'
+                         THEN (SELECT pm.content FROM private_messages pm WHERE pm.id = n.message_id)
+                         ELSE (SELECT m.content FROM messages m WHERE m.id = n.message_id) END AS content
              FROM notifications n
              LEFT JOIN users s ON s.id = n.sender_id
              LEFT JOIN guests gs ON gs.id = n.sender_guest_id
@@ -1208,8 +1209,9 @@ final class ChatController
             "SELECT n.id, n.kind, n.channel_id, n.message_id, n.created_at,
                     COALESCE(s.username, gs.nick) AS sender,
                     c.name AS channel_name, c.slug AS channel_slug,
-                    COALESCE((SELECT m.content FROM messages m WHERE m.id = n.message_id),
-                             (SELECT pm.content FROM private_messages pm WHERE pm.id = n.message_id)) AS content
+                    CASE WHEN n.kind = 'dm'
+                         THEN (SELECT pm.content FROM private_messages pm WHERE pm.id = n.message_id)
+                         ELSE (SELECT m.content FROM messages m WHERE m.id = n.message_id) END AS content
              FROM notifications n
              LEFT JOIN users s ON s.id = n.sender_id
              LEFT JOIN guests gs ON gs.id = n.sender_guest_id

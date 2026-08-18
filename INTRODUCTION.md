@@ -12,7 +12,7 @@ LVChat is a full-featured team and community chat application you run on your ow
 
 - **Channels** — public, private, secret, invite-only, keyed, moderated, with member limits and persistent topics
 - **Direct Messages** — private conversations with read receipts, unread badges, and offline memos (MemoServ)
-- **Voice & Video** — one-on-one calls (ring/accept/decline), per-channel voice chat, camera and screen sharing, meeting rooms (`#mtg-XXXXXX`), powered by LiveKit WebRTC
+- **Voice & Video** — one-on-one and group calls (ring/accept/decline), per-channel voice chat, camera and screen sharing with background effects, waiting rooms, host moderation (mute/kick/lock), recording, and scheduled meeting events (`#evt-*`), powered by LiveKit WebRTC
 - **GIF Search** — Giphy-backed picker with trending and live search, inline rendering
 - **Image Uploads** — drag-and-drop or attach, with lightbox preview
 - **Reactions** — emoji reactions on any message
@@ -55,6 +55,7 @@ LVChat is a full-featured team and community chat application you run on your ow
 - **75 Preset Color Themes** — Midnight, Nord, Dracula, Solarized, Catppuccin, Tokyo Night, Cyberpunk, and many more
 - **Custom Themes** — personal accent/sidebar colors, font choice, chat background image with overlay opacity
 - **Per-Channel Backgrounds** — channel owners set custom backgrounds
+- **Unified Notifications** — one alert engine shared by the web app, PWA, desktop client and Messenger: in-app toasts, mention-aware badges, quiet hours, highlight keywords, content-preview toggles, master sound/OS switches, and click-to-message deep links
 - **Notification Sounds** — per-context sounds (DMs, channels), per-user overrides, admin-uploadable sound library
 - **Push Notifications** — real OS/browser notifications via Web Push (VAPID + RFC 8291), per-channel and per-user muting, delivered even when the app is closed
 - **Dark/Light Mode** — instant toggle, remembered per account

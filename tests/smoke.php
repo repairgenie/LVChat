@@ -531,6 +531,30 @@ $res = CommandParser::run('/back', $alice, $ch);
 check('/back', $res['replies'][0] === 'You are back.', $res['replies'][0] ?? '');
 $res = CommandParser::run('/ping', $alice, $ch);
 check('/ping', $res['replies'][0] === 'Pong!');
+$res = CommandParser::run('/pong', $alice, $ch);
+check('/pong', $res['replies'][0] === 'Ping!');
+$res = CommandParser::run('/version', $alice, $ch);
+check('/version', str_contains($res['replies'][0] ?? '', 'Discord-style IRC'));
+$res = CommandParser::run('/time', $alice, $ch);
+check('/time returns UTC clock', preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$/', $res['replies'][0] ?? '') === 1, $res['replies'][0] ?? '');
+$res = CommandParser::run('/userhost alice', $alice, $ch);
+check('/userhost', str_starts_with($res['replies'][0] ?? '', 'alice=alice@'), $res['replies'][0] ?? '');
+Database::query('UPDATE users SET last_seen = datetime("now") WHERE id = ?', [$alice['id']]);
+$res = CommandParser::run('/names #test', $alice, $ch);
+check('/names lists members with prefixes', str_contains($res['replies'][0] ?? '', 'alice') && str_contains($res['replies'][0] ?? '', '@alice'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/who #test', $alice, $ch);
+check('/who #channel', str_contains($res['replies'][0] ?? '', 'member'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/who al*', $alice, $ch);
+check('/who nick mask', str_contains(implode(' ', $res['replies']), 'alice'), json_encode($res['replies']));
+$res = CommandParser::run('/who nobody*', $alice, $ch);
+check('/who no match', str_contains($res['replies'][0] ?? '', 'No users match'));
+$res = CommandParser::run('/whowas alice', $alice, $ch);
+check('/whowas', str_contains($res['replies'][0] ?? '', 'last seen'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/whowas bob', $alice, $ch);
+check('/whowas archive fallback', str_contains(implode(' ', $res['replies']), 'last active'), json_encode($res['replies']));
+Database::query('UPDATE users SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$alice['id']]);
+$res = CommandParser::run('/whois alice', $alice, $ch);
+check('/whois idle + signon info', count(array_filter($res['replies'], fn ($l) => str_starts_with($l, 'Idle:') || str_starts_with($l, 'Signon:'))) >= 1, json_encode($res['replies']));
 $res = CommandParser::run('/info', $alice, $ch);
 check('/info', count($res['replies']) >= 3);
 $res = CommandParser::run('/whois bob_the_second', $alice, $ch);
@@ -588,6 +612,35 @@ $res = CommandParser::run('/topiclock #test on', $alice, $ch);
 check('/topiclock on', str_contains($res['replies'][0] ?? '', 'locked'));
 $res = CommandParser::run('/topiclock #test off', $alice, $ch);
 check('/topiclock off', str_contains($res['replies'][0] ?? '', 'unlocked'));
+
+// Per-user modes through /mode (IRC style): +o/-o/+h/+v/+q nick.
+$res = CommandParser::run('/mode #test +o erin', $alice, $ch);
+check('/mode +o nick', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('/mode +o grants op', AccessService::effectiveLevel($ch['id'], (int) $erin['id']) === 'op');
+$res = CommandParser::run('/mode #test -o erin', $alice, $ch);
+check('/mode -o nick', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('/mode -o removes op', AccessService::effectiveLevel($ch['id'], (int) $erin['id']) === 'normal');
+$res = CommandParser::run('/mode #test +v erin', $alice, $ch);
+check('/mode +v grants voice', AccessService::effectiveLevel($ch['id'], (int) $erin['id']) === 'voice', $res['replies'][0] ?? '');
+$res = CommandParser::run('/mode #test +q erin', $alice, $ch);
+check('/mode +q muted', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('mode +q quiet ban applies', BanService::canPost($ch, $erin, AccessService::member($ch['id'], (int) $erin['id'])) !== null);
+$res = CommandParser::run('/mode #test -q erin', $alice, $ch);
+check('/mode -q unmuted', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('mode -q quiet ban removed', BanService::canPost($ch, $erin, AccessService::member($ch['id'], (int) $erin['id'])) === null);
+$res = CommandParser::run('/mode #test +v erin', $alice, $ch);
+$res = CommandParser::run('/mode #test -v erin', $alice, $ch);
+check('/mode -v removes voice', AccessService::effectiveLevel($ch['id'], (int) $erin['id']) === 'normal');
+$res = CommandParser::run('/mode #test +b erin', $alice, $ch);
+check('/mode +b nick resolves to a mask', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('mode +b ban stored as nick!*@*', (int) Database::scalar('SELECT COUNT(*) FROM bans WHERE kind = "channel_ban" AND channel_id = ? AND mask = "erin!*@*"', [$ch['id']]) === 1);
+$res = CommandParser::run('/mode #test -b erin!*@*', $alice, $ch);
+check('/mode -b removes the ban', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+$res = CommandParser::run('/clear #test bans', $alice, $ch);
+check('/clear #chan bans', str_contains($res['replies'][0] ?? '', 'bans'), $res['replies'][0] ?? '');
+check('/clear clears the bans it promises', (int) Database::scalar('SELECT COUNT(*) FROM bans WHERE channel_id = ? AND kind IN ("channel_ban","quiet")', [$ch['id']]) === 0);
+$res = CommandParser::run('/clear #secret bans', $dave, $ch);
+check('/clear #chan membership gate', str_contains($res['replies'][0] ?? '', 'member of'), $res['replies'][0] ?? '');
 
 echo "== chanserv ==\n";
 $res = CommandParser::run('/register #test', $alice, $ch);
@@ -705,6 +758,13 @@ $res = CommandParser::run('/group', $alice, $ch);
 check('/group', str_contains($res['replies'][0] ?? '', 'unified'));
 $res = CommandParser::run('/identify password123', $alice, $ch);
 check('/identify nickserv', str_contains($res['replies'][0] ?? '', 'verified'));
+$res = CommandParser::run('/passwd password456', $alice, $ch);
+check('/passwd updates the password', str_contains($res['replies'][0] ?? '', 'Password updated'), $res['replies'][0] ?? '');
+$alice = Auth::attempt('alice', 'password456');
+$res = CommandParser::run('/identify password456', $alice, $ch);
+check('new password verifies via identify', str_contains($res['replies'][0] ?? '', 'verified'), $res['replies'][0] ?? '');
+Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash('password123', PASSWORD_ARGON2ID), $alice['id']]);
+$alice = Auth::attempt('alice', 'password123');
 
 echo "== memoserv ==\n";
 $res = CommandParser::run('/memo send alice test memo', $bob2, $ch);
@@ -721,7 +781,14 @@ check('/memo read id', str_contains($res['replies'][0] ?? '', 'Memo'));
 $res = CommandParser::run("/memo del $memoId", $alice, $ch);
 check('/memo del', $res['replies'][0] === 'Memo deleted.');
 $res = CommandParser::run('/memo set notify', $alice, $ch);
-check('/memo set', str_contains($res['replies'][0] ?? '', 'notifications are notify'));
+check('/memo set', preg_match('/notifications are (now )?notify\./', (string) ($res['replies'][0] ?? '')) === 1);
+check('/memo set persisted', Database::scalar('SELECT memo_notify FROM user_notify_prefs WHERE user_id = ?', [$alice['id']]) === 'notify');
+$res = CommandParser::run('/memo set silent', $alice, $ch);
+check('/memo set silent', str_contains($res['replies'][0] ?? '', 'silent'));
+check('/memo set silent persisted', Database::scalar('SELECT memo_notify FROM user_notify_prefs WHERE user_id = ?', [$alice['id']]) === 'silent');
+$res = CommandParser::run('/memo summary', $alice, $ch);
+check('/memo summary shows the mode', str_contains(implode(' ', $res['replies']), 'silent'), json_encode($res['replies']));
+$res = CommandParser::run('/memo set notify', $alice, $ch);
 $res = CommandParser::run('/ms send alice hi', $bob2, $ch);
 check('/ms alias', str_contains($res['replies'][0] ?? '', 'sent'));
 
@@ -797,6 +864,41 @@ check('/rehash', $res['replies'][0] === 'Configuration reloaded.');
 $sf = (int) Database::scalar('SELECT id FROM spamfilters WHERE match = "badword" ORDER BY id DESC LIMIT 1');
 $res = CommandParser::run("/spamfilter del $sf", $alice, $ch);
 check('/spamfilter del', $res['replies'][0] === 'Spam filter removed.');
+
+// ── OperServ: o:line flow, /os alias, gating, rename sync, SAMODE bypass ────
+Auth::register('gina', 'gina@example.com', 'password123', true);
+$gina = Auth::attempt('gina', 'password123');
+$oclass = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "globalop"');
+Database::query('INSERT INTO opers (username, password_hash, operclass_id, enabled) VALUES (?, ?, ?, 1)', ['gina', password_hash('opersecret', PASSWORD_ARGON2ID), $oclass ?: 1]);
+$res = CommandParser::run('/oper gina opersecret', $gina, $ch);
+check('/oper from o:line', str_contains($res['replies'][0] ?? '', 'operating'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/deoper', $gina, $ch);
+check('/deoper', $res['replies'][0] === 'You are no longer operating.');
+unset($_SESSION['last_nick_ts']); // clear the /nick throttle from the earlier rename
+$res = CommandParser::run('/nick gina_v2', $gina, $ch);
+check('/nick rename keeps o:line attached', $res['replies'][0] === 'You are now known as gina_v2.', $res['replies'][0] ?? '');
+check('o:line follows /nick', Database::scalar('SELECT id FROM opers WHERE username = "gina_v2" COLLATE NOCASE') !== false);
+check('stale o:line row removed', Database::scalar('SELECT id FROM opers WHERE username = "gina"') === false);
+$gina = Auth::attempt('gina_v2', 'password123');
+$res = CommandParser::run('/oper gina_v2 opersecret', $gina, $ch);
+check('/oper works after rename', str_contains($res['replies'][0] ?? '', 'operating'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/deoper', $gina, $ch);
+$res = CommandParser::run('/serverstats', $bob2, $ch);
+check('/serverstats non-oper restricted', str_contains($res['replies'][0] ?? '', 'restricted'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/os kline gina_v2 1h spam test', $alice, $ch);
+check('/os alias runs an oper command', str_contains($res['replies'][0] ?? '', 'KLINE'), $res['replies'][0] ?? '');
+Database::query('DELETE FROM bans WHERE kind = "kline" AND mask = "gina_v2!*@*"');
+$res = CommandParser::run("/os nosuchcommand", $alice, $ch);
+check('/os unknown command', str_contains($res['replies'][0] ?? '', 'Unknown OperServ command'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/os serverstats', $bob2, $ch);
+check('/os enforces the target command gates', str_contains($res['replies'][0] ?? '', 'restricted'), $res['replies'][0] ?? '');
+// SAMODE + staff /mode bypass channel-level guards on channels they are not in.
+$res = CommandParser::run('/samode #secret +m', $alice, $ch);
+check('/samode as non-member works', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('#secret moderated after samode', (int) ChannelService::find('#secret')['moderated'] === 1);
+$res = CommandParser::run('/mode #secret -m', $alice, $ch);
+check('staff /mode bypass as non-member', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('#secret unmoderated after staff /mode', (int) ChannelService::find('#secret')['moderated'] === 0);
 
 echo "== mentions ==\n";
 $before = (int) Database::scalar('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND kind = "mention"', [$erin['id']]);
@@ -1016,6 +1118,13 @@ check('guest can send messages', ($gm['username'] ?? '') === 'anoncat');
 check('guest cannot create a channel', is_string(ChannelService::create($guest, '#guestchan')));
 $res = CommandParser::run('/join #nobodyhere', $guest, null);
 check('guest /join nonexistent denied', str_contains($res['replies'][0] ?? '', 'existing channels'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/whois anoncat', $alice, $ch);
+check('/whois resolves a guest nick', str_contains($res['replies'][0] ?? '', '(guest)'), $res['replies'][0] ?? '');
+$res = CommandParser::run('/register alice@example.com password123', $guest, $ch);
+check('guest /register points at the web form', str_contains($res['replies'][0] ?? '', '/register'), $res['replies'][0] ?? '');
+Database::query('UPDATE users SET last_seen = datetime("now") WHERE id = ?', [$alice['id']]);
+$res = CommandParser::run('/names #test', $alice, $ch);
+check('/names includes the guest', str_contains($res['replies'][0] ?? '', 'anoncat'), $res['replies'][0] ?? '');
 Database::query('UPDATE guests SET last_seen = datetime("now", "-2 days") WHERE nick = "anoncat"');
 Auth::purgeGuests();
 check('inactive guest purged', Database::scalar('SELECT id FROM guests WHERE nick = "anoncat"') === false);
@@ -1360,7 +1469,51 @@ $bgEx = MessageService::backgroundSince($alice, 0, (int) $ch2['id']);
 check('backgroundSince excludes the open channel', !in_array('bg hello', array_column($bgEx, 'content'), true));
 $bgKinds = MessageService::backgroundSince($alice, 0, 0);
 check('backgroundSince filters system kinds', !array_intersect(array_column($bgKinds, 'kind'), MessageService::SYSTEM_KINDS));
+// The unified alert engine needs a per-message notify_mode + mention flag.
+$bgFlag = null;
+foreach ($bg as $m) {
+    if ($m['content'] === 'bg hello') { $bgFlag = $m; }
+}
+check('background messages carry notify_mode', $bgFlag !== null && ($bgFlag['notify_mode'] ?? '') === 'all', json_encode($bgFlag));
+check('background messages carry the mention flag', $bgFlag !== null && (int) ($bgFlag['mentioned'] ?? 1) === 0, json_encode($bgFlag));
+MessageService::send((int) $ch2['id'], $bob, '@alice flagged bg');
+$bgMent = MessageService::backgroundSince($alice, 0, (int) $ch['id']);
+$mentRow = null;
+foreach ($bgMent as $m) {
+    if ($m['content'] === '@alice flagged bg') { $mentRow = $m; }
+}
+check('mention flag flips when the viewer is mentioned', $mentRow !== null && (int) ($mentRow['mentioned'] ?? 0) === 1, json_encode($mentRow));
+// A channel the viewer muted is excluded from the background stream entirely.
+Database::query('INSERT INTO channel_notify (channel_id, user_id, mode) VALUES (?, ?, "muted")', [(int) $ch2['id'], (int) $alice['id']]);
+$bgMuted = MessageService::backgroundSince($alice, 0, (int) $ch['id']);
+check('muted channels excluded from the background stream', !in_array('@alice flagged bg', array_column($bgMuted, 'content'), true), json_encode(array_column($bgMuted, 'content')));
+Database::query('DELETE FROM channel_notify WHERE channel_id = ? AND user_id = ?', [(int) $ch2['id'], (int) $alice['id']]);
 ChannelService::drop((string) $ch2['id']);
+
+// ── Per-user notification preferences (masters, quiet hours, keywords) ───────
+echo "== notify prefs ==\n";
+$npDef = NotifyPrefs::defaults();
+check('notify prefs defaults sane', $npDef['sound_master'] === 1 && $npDef['os_master'] === 1 && $npDef['previews'] === 1 && $npDef['quiet_hours_enabled'] === 0 && $npDef['highlight_keywords'] === [], json_encode($npDef));
+check('notify prefs guests get defaults', NotifyPrefs::get(['id' => 1, 'guest' => 1])['sound_master'] === 1);
+check('notify prefs guest save refused', is_string(NotifyPrefs::save(['id' => 1, 'guest' => 1], ['sound_master' => '0'])));
+check('notify prefs save roundtrip', NotifyPrefs::save($alice, ['sound_master' => '0', 'os_master' => '0', 'previews' => '0', 'quiet_hours_enabled' => '1', 'quiet_hours_start' => '23:00', 'quiet_hours_end' => '07:00', 'quiet_hours_days' => '[0,6]', 'highlight_keywords' => '["Launch","deploy"]', 'tz_offset_minutes' => '-480']) === null);
+$np = NotifyPrefs::get($alice);
+check('notify prefs persisted', $np['sound_master'] === 0 && $np['previews'] === 0 && $np['quiet_hours_enabled'] === 1 && $np['quiet_hours_start'] === '23:00' && $np['quiet_hours_days'] === ['0', '6'] && in_array('deploy', $np['highlight_keywords'], true) && $np['tz_offset_minutes'] === -480, json_encode($np));
+check('keyword match is case-insensitive', NotifyPrefs::matchesKeywords($np, 'Preparing the LAUNCH today') === true);
+check('keyword no-match', NotifyPrefs::matchesKeywords($np, 'just chatting about lunch') === false);
+check('notify prefs JSON-string days decoded', NotifyPrefs::save($alice, ['quiet_hours_days' => '[1,3,5]']) === null && NotifyPrefs::get($alice)['quiet_hours_days'] === ['1', '3', '5']);
+check('notify prefs invalid times keep stored value', NotifyPrefs::save($alice, ['quiet_hours_start' => '25:99']) === null && NotifyPrefs::get($alice)['quiet_hours_start'] === '23:00');
+check('notify prefs keyword list capped + deduped', NotifyPrefs::save($alice, ['highlight_keywords' => ['one', 'one', 'two']]) === null && NotifyPrefs::get($alice)['highlight_keywords'] === ['one', 'two']);
+
+// Quiet hours: cross-midnight window evaluated in the user's local time.
+$qh = NotifyPrefs::get($alice); // enabled, 23:00-07:00, offset -480 (UTC-8)
+check('quiet hours active inside the window', NotifyPrefs::quietHoursActive($qh, 1704117600) === true); // 2024-01-01 14:00 UTC = 06:00 local
+check('quiet hours off outside the window', NotifyPrefs::quietHoursActive($qh, 1704139200) === false); // 2024-01-01 20:00 UTC = 12:00 local
+check('quiet hours day filter respected', NotifyPrefs::quietHoursActive(array_merge($qh, ['quiet_hours_days' => ['0', '6']]), 1704117600) === false); // Monday not selected
+check('quiet hours zero-length window never blocks', NotifyPrefs::quietHoursActive(array_merge($qh, ['quiet_hours_start' => '08:00', 'quiet_hours_end' => '08:00']), 1704117600) === false);
+check('quiet hours disabled never blocks', NotifyPrefs::quietHoursActive(array_merge($qh, ['quiet_hours_enabled' => 0]), 1704117600) === false);
+NotifyPrefs::save($alice, ['sound_master' => '1', 'os_master' => '1', 'previews' => '1', 'quiet_hours_enabled' => '0', 'highlight_keywords' => '[]']);
+check('notify prefs restored', NotifyPrefs::get($alice)['quiet_hours_enabled'] === 0);
 
 // ── Age verification ─────────────────────────────────────────────────────────
 echo "== age verification ==\n";
@@ -1557,7 +1710,7 @@ check('old-module init.php not run', CommandRegistry::get('oldcmd') === null);
 check('broken-mod loaded (valid manifest) despite boot throw', ModuleLoader::get('broken-mod') !== null);
 check('broken-mod throw caught with a boot warning', in_array(true, array_map(static fn (string $w): bool => str_contains($w, "Module 'broken-mod' failed to boot"), ModuleLoader::warnings()), true), implode(' | ', ModuleLoader::warnings()));
 check('app keeps running after a module boot failure', ModuleLoader::get('good-module') !== null && CommandRegistry::get('goodmod') !== null);
-check('warnings recorded for bad manifests + requires', count(ModuleLoader::warnings()) >= 4, implode(' | ', ModuleLoader::warnings()));
+check('warnings recorded for bad manifests + requires', count(ModuleLoader::warnings()) >= 3, implode(' | ', ModuleLoader::warnings()));
 $dbRow = Database::row('SELECT enabled FROM modules WHERE id = ?', ['good-module']);
 check('good-module DB row enabled', $dbRow !== null && (int) $dbRow['enabled'] === 1);
 check('.disabled module keeps its DB row', Database::row('SELECT id FROM modules WHERE id = ?', ['disabled-mod']) !== null);

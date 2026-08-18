@@ -229,6 +229,9 @@ CommandRegistry::register('nick', [
             return ['replies' => ['That nickname is reserved (' . ($ban['reason'] ?: 'q-lined') . ').']];
         }
         Database::query('UPDATE users SET username = ? WHERE id = ?', [$newnick, $user['id']]);
+        // Keep the user's o:line (if any) attached to the new nick, so /oper
+        // keeps working after a rename (mirrors /sanick).
+        Database::query('UPDATE opers SET username = ? WHERE username = ? COLLATE NOCASE', [$newnick, $user['username']]);
         foreach (ChannelService::joinedChannelNames($user) as $c) {
             MessageService::system($c['id'], 'nick', $user['username'] . ' is now known as ' . $newnick);
         }
@@ -271,17 +274,18 @@ CommandRegistry::register('back', [
 
 CommandRegistry::register('whois', [
     'group' => 'Core',
-    'desc' => 'Show information about a user.',
+    'desc' => 'Show information about a user (registered users and guests).',
     'usage' => '/whois <nick>',
     'run' => function (array $args, array $user, ?array $channel) {
         $nick = $args[0] ?? null;
         if (!$nick) {
             return ['replies' => ['Usage: /whois <nick>']];
         }
-        $t = Database::row('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [$nick]);
+        $t = Auth::findActor($nick);
         if (!$t) {
             return ['replies' => ["No such user: $nick"]];
         }
+        $isGuestTarget = (int) ($t['guest'] ?? 0) === 1;
         $si = Auth::statusInfo($t);
         $statusWord = match ($si['status_mode']) {
             'away' => 'away',
@@ -290,16 +294,37 @@ CommandRegistry::register('whois', [
             'custom' => 'custom status',
             default => 'online',
         };
-        $roleTag = match ($t['role']) {
+        $roleTag = $isGuestTarget ? ' (guest)' : match ($t['role']) {
             'admin' => ' (IRC Operator)',
             'staff' => ' (Staff)',
             default => '',
         };
         $lines = [
             h($t['username']) . " — $statusWord" . $roleTag,
-            'Registered: ' . date('Y-m-d H:i', strtotime($t['registered_at'] . ' UTC')),
-            'Last seen: ' . relative_time($t['last_seen']),
         ];
+        if ($isGuestTarget) {
+            if (!empty($t['last_seen'])) {
+                $lines[] = 'Last seen: ' . relative_time($t['last_seen']);
+            } else {
+                $lines[] = 'Never seen online.';
+            }
+        } else {
+            $lines[] = 'Registered: ' . date('Y-m-d H:i', strtotime($t['registered_at'] . ' UTC'));
+            if (!empty($t['last_seen'])) {
+                $lines[] = 'Last seen: ' . relative_time($t['last_seen']);
+                $idle = max(0, time() - strtotime($t['last_seen'] . ' UTC'));
+                if ($idle >= 60) {
+                    $lines[] = 'Idle: ' . UserCommands::idleFmt($idle);
+                }
+            }
+            $signon = Database::scalar(
+                'SELECT MIN(created_at) FROM sessions WHERE user_id = ? AND expires_at > datetime("now")',
+                [(int) $t['id']]
+            );
+            if ($signon) {
+                $lines[] = 'Signon: ' . date('Y-m-d H:i', strtotime($signon . ' UTC'));
+            }
+        }
         if (Auth::isOper($user)) {
             $lines[] = 'IP: ' . ($t['last_ip'] ?: '(none recorded)');
         }
@@ -373,6 +398,147 @@ CommandRegistry::register('ping', [
     'usage' => '/ping',
     'run' => function (array $args, array $user, ?array $channel) {
         return ['replies' => ['Pong!']];
+    },
+]);
+
+CommandRegistry::register('pong', [
+    'group' => 'Core',
+    'desc' => 'Reply to a server ping (also a latency check).',
+    'usage' => '/pong [token]',
+    'run' => function (array $args, array $user, ?array $channel) {
+        return ['replies' => ['Ping!']];
+    },
+]);
+
+CommandRegistry::register('version', [
+    'group' => 'Core',
+    'desc' => 'Show the server software version.',
+    'usage' => '/version',
+    'run' => function (array $args, array $user, ?array $channel) {
+        return ['replies' => [h(config_get('site_name', 'LVChat')) . ' ' . LVC_VERSION . ' — a Discord-style IRC web chat with an UnrealIRCd/Anope-style command set.']];
+    },
+]);
+
+CommandRegistry::register('time', [
+    'group' => 'Core',
+    'desc' => 'Show the server time (UTC).',
+    'usage' => '/time',
+    'run' => function (array $args, array $user, ?array $channel) {
+        return ['replies' => [gmdate('Y-m-d H:i:s') . ' UTC']];
+    },
+]);
+
+CommandRegistry::register('userhost', [
+    'group' => 'Core',
+    'desc' => 'Show a user\'s ident@host.',
+    'usage' => '/userhost <nick>',
+    'run' => function (array $args, array $user, ?array $channel) {
+        $nick = $args[0] ?? null;
+        if (!$nick) {
+            return ['replies' => ['Usage: /userhost <nick>']];
+        }
+        $t = Auth::findActor($nick);
+        if (!$t) {
+            return ['replies' => ["No such user: $nick"]];
+        }
+        $host = $t['vhost'] ?? $t['last_ip'] ?? 'unknown';
+        $ident = Auth::isGuest($t) ? '~' . strtolower($t['username']) : strtolower($t['username']);
+        return ['replies' => ["$nick=$ident@$host"]];
+    },
+]);
+
+CommandRegistry::register('names', [
+    'group' => 'Core',
+    'desc' => 'List the members of a channel with their mode prefixes.',
+    'usage' => '/names [#channel]',
+    'needs_channel' => true,
+    'min_level' => 0,
+    'run' => function (array $args, array $user, ?array $channel) {
+        $members = ChannelService::members($channel['id']);
+        if (!$members) {
+            return ['replies' => [$channel['name'] . ': (empty)']];
+        }
+        $list = array_map(
+            fn ($m) => ($m['level'] !== 'normal' ? level_symbol($m['level']) : '') . $m['username'],
+            $members
+        );
+        return ['replies' => [$channel['name'] . ' (' . count($members) . '): ' . implode(' ', $list)]];
+    },
+]);
+
+CommandRegistry::register('who', [
+    'group' => 'Core',
+    'desc' => 'List online users matching a nick mask (or all users of a #channel).',
+    'usage' => '/who [#channel|<mask>]',
+    'run' => function (array $args, array $user, ?array $channel) {
+        $arg = $args[0] ?? null;
+        if ($arg && preg_match('/^[#&]/', $arg)) {
+            $ch = ChannelService::find($arg);
+            if (!$ch) {
+                return ['replies' => ["No such channel: $arg"]];
+            }
+            if (!AccessService::member($ch['id'], $user)) {
+                return ['replies' => ['You must be a member of ' . $arg . ' to see its users.']];
+            }
+            $members = ChannelService::members($ch['id']);
+            $lines = [$ch['name'] . ' (' . count($members) . ' members):'];
+            foreach ($members as $m) {
+                $lines[] = ($m['level'] !== 'normal' ? level_symbol($m['level']) : '') . $m['username'] . ($m['guest'] ? ' (guest)' : '');
+            }
+            return ['replies' => $lines];
+        }
+        $like = '%' . str_replace(['*', '?'], ['%', '_'], strtolower($arg ?? '*')) . '%';
+        $rows = Database::all(
+            'SELECT username, role, status_mode, away FROM users
+             WHERE username LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-30 seconds")
+             ORDER BY username',
+            [$like]
+        );
+        $guests = Database::all(
+            'SELECT nick FROM guests WHERE nick LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-30 seconds")
+             ORDER BY nick',
+            [$like]
+        );
+        if (!$rows && !$guests) {
+            return ['replies' => ['No users match ' . ($arg ?: '*') . '.']];
+        }
+        $lines = ['Who match (' . (count($rows) + count($guests)) . ' online):'];
+        foreach ($rows as $u) {
+            $pref = $u['role'] === 'admin' ? '*' : '';
+            $st = $u['status_mode'] === 'away' ? ' [away]' : ($u['status_mode'] === 'dnd' ? ' [dnd]' : '');
+            $lines[] = $pref . $u['username'] . $st;
+        }
+        foreach ($guests as $g) {
+            $lines[] = $g['nick'] . ' (guest)';
+        }
+        return ['replies' => $lines];
+    },
+]);
+
+CommandRegistry::register('whowas', [
+    'group' => 'Core',
+    'desc' => 'Show the last-seen record for a nickname.',
+    'usage' => '/whowas <nick>',
+    'run' => function (array $args, array $user, ?array $channel) {
+        $nick = $args[0] ?? null;
+        if (!$nick) {
+            return ['replies' => ['Usage: /whowas <nick>']];
+        }
+        $t = Auth::findActor($nick);
+        if (!$t) {
+            // Not currently known — fall back to the append-only chat archive.
+            $r = Database::row(
+                'SELECT created_at FROM chat_logs WHERE username = ? COLLATE NOCASE ORDER BY id DESC LIMIT 1',
+                [$nick]
+            );
+            if ($r) {
+                return ['replies' => ["$nick was last active " . date('Y-m-d H:i', strtotime($r['created_at'] . ' UTC')) . ' UTC (from the chat archive).']];
+            }
+            return ['replies' => ["No such user: $nick"]];
+        }
+        $when = !empty($t['last_seen']) ? relative_time($t['last_seen']) : 'never';
+        $kind = Auth::isGuest($t) ? ' (guest)' : '';
+        return ['replies' => ["$nick$kind was last seen " . $when . '.']];
     },
 ]);
 
@@ -551,6 +717,17 @@ CommandRegistry::register('search', [
 // Used by /msg handlers above.
 final class UserCommands
 {
+    public static function idleFmt(int $seconds): string
+    {
+        if ($seconds >= 86400) {
+            return floor($seconds / 86400) . 'd ' . floor(($seconds % 86400) / 3600) . 'h';
+        }
+        if ($seconds >= 3600) {
+            return floor($seconds / 3600) . 'h ' . floor(($seconds % 3600) / 60) . 'm';
+        }
+        return floor($seconds / 60) . 'm';
+    }
+
     public static function privateMessage(array $user, string $nick, string $text): ?array
     {
         $target = Auth::findActor($nick);

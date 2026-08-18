@@ -63,6 +63,30 @@ a sign-off, amend or rebase to add it before opening a pull request.
   assertions in `tests/smoke.php` and HTTP assertions in `tests/http_test.php`
   (see "Testing the module system" in `docs/modules.md`).
 
+### Test layers
+
+| Layer | Command | Covers |
+|---|---|---|
+| Service/command | `php tests/smoke.php` | slash commands + services against a scratch DB |
+| HTTP e2e | `php tests/http_test.php` | the full HTTP API incl. admin, messenger, licensing, and **all `== webrtc * ==` sections** |
+| Gateway | `php tests/ws_test.php` | the Workerman WebSocket daemon (auth, fan-out, realtime authz) |
+| All three | `bin/test.sh` | runs the layers above in order |
+
+The WebRTC voice module's assertions live in `tests/http_test.php` under the
+`== webrtc … ==` banners (module gating, JWT join/leave, capacity, 1:1 + group
+calls, host moderation + waiting room, egress recording, rate limits, events).
+The fixture is a **symlink to the shipped `modules/webrtc` code**
+(`tests/http_test.php` re-points it into the throwaway staging dir), so the
+suite always exercises the real module.
+
+The two Electron clients ship their own end-to-end suites (`npm test` in
+`desktop/` and `lvchat-messenger/`; messenger-web has `node tests/build-test.js`
+after `node build.js`). The voice UI assertions there are **reachable-UI only**
+— the in-call pane's moderation/record buttons need a live LiveKit connection,
+which the mock servers don't provide — so they cover the waiting-room lobby,
+admit/deny handoff, and full-state labels, while the server-side contract is
+fully covered by `tests/http_test.php`.
+
 ## Reporting issues
 
 Include the LVChat version, PHP version, the steps to reproduce, and any

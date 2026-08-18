@@ -1,6 +1,16 @@
 # LVChat — Mumble (Murmur) Voice Integration
 
-**Status:** Planning / not implemented
+> **SUPERSEDED.** This plan was **rejected** — voice ships via the WebRTC/LiveKit
+> module instead (`modules/webrtc/`, see [`docs/webrtc-implementation.md`](webrtc-implementation.md)
+> and [`docs/protocol/voice.md`](protocol/voice.md)). The Mumble browser path
+> needed mumble-web-proxy (a Rust bridge, AGPL-3.0, ~75★/41 commits, WebRTC
+> extension "not yet stabilized"); LiveKit lets browsers speak native WebRTC to
+> a single Apache-2.0 daemon with no proxy. This document is kept only for the
+> historical **MCU-vs-SFU** bandwidth comparison (§Appendix A and
+> webrtc-implementation.md §3.1 "the one tradeoff"). None of its §7A per-client
+> plans or §9 change tables were applied.
+
+**Status:** ~~Planning / not implemented~~ — **rejected in favor of the WebRTC (LiveKit) module**
 **Target app:** LVChat (PHP 8.1+ / SQLite / Workerman) at `chat.lasvegasbestinternet.com`
 **Scope:** Voice channels inside LVChat backed by a Mumble **Murmur** server, with max-connection and per-user bandwidth caps managed from **Admin → Settings**, delivered to **all four clients**: web app, desktop, messenger, and messenger-web.
 

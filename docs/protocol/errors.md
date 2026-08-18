@@ -24,10 +24,11 @@ This page collects the cross-cutting error conventions shared by every endpoint.
 | 401 | Not authenticated | Missing/expired session on a protected endpoint |
 | 403 | Forbidden | Restriction gate, not a member, channel ban/mute/moderated, spamfilter/shun hit, word-filter block, owner-only action, report on a non-member channel, edit/delete of someone else's message |
 | 404 | Not found | Unknown channel, user, message, or missing `channel`/`dm` params |
-| 409 | Conflict | Duplicate report (one per message per reporter) |
+| 409 | Conflict | Duplicate report (one per message per reporter); voice: "Voice is full", "You are already in a call" / busy-gate |
 | 410 | Gone | Reporting an already-deleted message |
 | 419 | CSRF mismatch | Missing/incorrect `csrf` field or `X-CSRF` header |
-| 429 | Rate limited | 12 sends+DMs per 5 s; GIF proxy 30 calls per 10 s |
+| 429 | Rate limited | 12 sends+DMs per 5 s; GIF proxy 30 calls per 10 s; voice/call/event buckets (see [voice.md](voice.md) §Rate limits) |
+| 503 | Service unavailable | Voice: recording requested while LiveKit egress isn't configured |
 
 ---
 
@@ -77,6 +78,7 @@ Every send path (channel, DM, upload, GIF search, command) first runs:
 | **30 GIF proxy calls** | 10 s | `/api/gifs` |
 | **10 failed logins** | 10 min, per IP | `/login`, `/login/mfa` |
 | **20 registrations** | 10 min, per IP | `/register` |
+| **Voice/call/event buckets** | see [voice.md](voice.md) §Rate limits | `/api/webrtc/voice/join` (12/min), `/api/webrtc/call/initiate` (6/min), `/api/webrtc/call/invite` (20/min), `/api/webrtc/moderate` (120/min), `/api/events/create` (10/hr), `/api/events/invite` (30/hr) |
 
 Exceeding a chat limit returns **429** with a "slow down" style message. The
 composer also queues sends while offline (PWA) and replays them in order on

@@ -179,7 +179,7 @@ Everything is driven by the monotonic `messages.id` (and `private_messages.id`).
 | Query param | Used by | Semantics |
 |---|---|---|
 | `since` | `/api/poll`, `/api/stream` | Return rows with `id > since`. This is the client's *delta watermark* for the conversation it is viewing. |
-| `bg_since` | `/api/poll`, `/api/stream` | Global watermark for **background** channel messages (every member channel except the one being viewed) — drives channel audio alerts. |
+| `bg_since` | `/api/poll`, `/api/stream` | Global watermark for **background** channel messages (every member channel except the one being viewed) — drives channel audio alerts. Each `bg_messages` row also carries the viewer's `notify_mode` (`"all"`/`"mentions"`/`"muted"`) and a `mentioned` boolean so the client plays sounds exactly like the server's push tier; channels in `muted` mode and muted senders are excluded server-side. |
 | `before` | `/api/history` | Return rows with `id < before`, newest-first batch (then reversed) — "load earlier messages". |
 
 ### Delta-fetch details

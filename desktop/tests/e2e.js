@@ -83,7 +83,18 @@ function mockLvchatServer () {
   const csrf = 'test-csrf-token'
   const sessions = new Set()
   const notifications = []
-  const mockState = { voiceEnabled: false, lastVoiceJoin: null }
+  const mockState = {
+    voiceEnabled: false,
+    lastVoiceJoin: null,
+    sessionWaiting: false,   // join returns {ok, waiting:true} when true
+    session: null,           // status session payload (waiting/lobby/host states)
+    recording: { enabled: false, active: null },
+    lastModeration: null,
+    lastInvite: null,
+    lastRecord: null,
+    modernBridge: false, // serve data-notify-prefs → the bridge takes the unified path
+    feedRequests: 0      // /api/notifications request counter (bridge feed polling)
+  }
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
     const baseUrl = `http://127.0.0.1:${server.address().port}`
@@ -130,6 +141,7 @@ function mockLvchatServer () {
     }
 
     if (url.pathname === '/api/notifications') {
+      mockState.feedRequests++
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ ok: true, notifications }))
       return
@@ -180,7 +192,9 @@ function mockLvchatServer () {
           '<script src="' + baseUrl + '/modules/webrtc/assets/vendor/livekit-client.umd.js"></script>' +
           '<script src="' + baseUrl + '/modules/webrtc/assets/js/voice.js"></script>' +
           '</head>' +
-          '<body class="chat-app" data-csrf="' + csrf + '" data-channel="general" data-dm="" data-my-guest="0">' +
+          '<body class="chat-app" data-csrf="' + csrf + '" data-channel="general" data-dm="" data-my-guest="0"' +
+          (mockState.modernBridge ? ' data-notify-prefs=\'{"sound_master":1,"os_master":1,"previews":1,"quiet_hours_enabled":0,"quiet_hours_start":"22:00","quiet_hours_end":"08:00","quiet_hours_days":[],"highlight_keywords":[],"tz_offset_minutes":0}\'' : '') +
+          '>' +
           '<header><div class="relative ml-auto flex items-center gap-2"></div></header>' +
           '<h1>logged in</h1><div id="notif-list"></div></body></html>'
         )
@@ -194,9 +208,11 @@ function mockLvchatServer () {
     if (url.pathname === '/api/webrtc/voice/status') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({
-        ok: true, enabled: !!mockState.voiceEnabled, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000,
+        ok: true, enabled: !!mockState.voiceEnabled, active: 0, max: 50,
+        full: !!mockState.voiceFull, talker_cap: 8, bitrate: 40000,
         channels: [{ slug: 'general', name: '#general', voice_enabled: !!mockState.voiceEnabled }],
-        session: null,
+        session: mockState.session,
+        recording: mockState.recording,
         calls: { incoming: [], outgoing: [], active: null }
       }))
       return
@@ -208,8 +224,59 @@ function mockLvchatServer () {
       req.on('end', () => {
         const params = new URLSearchParams(body)
         mockState.lastVoiceJoin = { channel: params.get('channel') || '' }
+        const waiting = !!mockState.sessionWaiting
+        // Waiting-room lobby: the server hands over no token until the host
+        // admits; the client shows the lobby and polls status for session.mint.
+        if (waiting) {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, waiting: true, room: 'chan:' + (params.get('channel') || '') }))
+          return
+        }
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: true, url: 'ws://127.0.0.1:1/', token: 'a.b.c', room: 'chan:' + (params.get('channel') || ''), talker_cap: 8, bitrate: 40000 }))
+      })
+      return
+    }
+
+    // Host controls (kick/mute/lock/waiting-room admit+deny) — record the call
+    // so the e2e can assert the canonical client posts the right room+action.
+    if (url.pathname === '/api/webrtc/moderate' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const params = new URLSearchParams(body)
+        mockState.lastModeration = {
+          room: params.get('room') || '',
+          action: params.get('action') || '',
+          identity: params.get('identity') || '',
+          value: params.get('value') || ''
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      })
+      return
+    }
+
+    if (url.pathname === '/api/webrtc/call/invite' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const params = new URLSearchParams(body)
+        mockState.lastInvite = { call_id: params.get('call_id') || '', users: params.get('users') || '' }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, added: ['carol'], unknown: [], busy: [] }))
+      })
+      return
+    }
+
+    if (url.pathname === '/api/webrtc/record' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const params = new URLSearchParams(body)
+        mockState.lastRecord = { room: params.get('room') || '', action: params.get('action') || '' }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
       })
       return
     }
@@ -313,13 +380,76 @@ async function main () {
   }
   lvchat.mockState.voiceEnabled = false
   check('voice button hidden while the module is disabled',
-    await waitVoice(`(() => { const b = document.getElementById('lvcvoice-btn'); return (!b || b.hidden) ? 'ok' : 'visible' })()`))
+    await waitVoice(`(() => { const b = document.getElementById('lvcvoice-dropdown'); return (!b || b.classList.contains('hidden')) ? 'ok' : 'visible' })()`))
   lvchat.mockState.voiceEnabled = true
   check('voice button appears when the module is enabled',
-    await waitVoice(`(() => { const b = document.getElementById('lvcvoice-btn'); return !!b && !b.hidden && b.textContent === 'Voice' && 'ok' })()`))
-  await js(voiceWin(), `document.getElementById('lvcvoice-btn').click()`)
+    await waitVoice(`(() => { const b = document.getElementById('lvcvoice-dd-trigger'); return !!b && !document.getElementById('lvcvoice-dropdown').classList.contains('hidden') && 'ok' })()`))
+  await js(voiceWin(), `document.getElementById('lvcvoice-dd-trigger').click()`)
+  await new Promise((r) => setTimeout(r, 400))
+  await js(voiceWin(), `document.querySelector('#lvcvoice-dropdown .lvcvoice-dd-item').click()`)
   await waitFor(() => lvchat.mockState.lastVoiceJoin !== null)
   check('voice join posted the channel', lvchat.mockState.lastVoiceJoin && lvchat.mockState.lastVoiceJoin.channel === 'general', JSON.stringify(lvchat.mockState.lastVoiceJoin))
+  lvchat.mockState.voiceEnabled = false
+
+  // ── Voice parity: waiting room, admit/deny, full-state label ─────────────
+  // The pane's moderation/record controls only render after a real LiveKit
+  // connection (Room.Connected), which the mock cannot provide — these tests
+  // cover every voice state reachable over the plain HTTP contract.
+  const joinVoice = async () => {
+    // A previous dead-end connect attempt (the mock ws never opens) can leave
+    // the client with connecting=true for a while; the join button is inert
+    // until it settles. Wait for the label to leave "Connecting…" first.
+    const settled = await waitVoice(`(() => { const b = document.querySelector('#lvcvoice-dd-menu .lvcvoice-dd-item-label'); return (!b || b.textContent !== 'Connecting…') ? 'ok' : 'connecting' })()`)
+    if (!settled) return false
+    lvchat.mockState.lastVoiceJoin = null
+    await js(voiceWin(), `document.getElementById('lvcvoice-dd-trigger').click()`)
+    await new Promise((r) => setTimeout(r, 400))
+    await js(voiceWin(), `document.querySelector('#lvcvoice-dropdown .lvcvoice-dd-item').click()`)
+    if (await waitFor(() => lvchat.mockState.lastVoiceJoin !== null)) return true
+    const dbg = await js(voiceWin(), `(() => ({ label: (document.querySelector('#lvcvoice-dd-menu .lvcvoice-dd-item-label') || {}).textContent, menuHidden: document.getElementById('lvcvoice-dd-menu').classList.contains('hidden'), toast: (document.getElementById('lvcvoice-toast') || {}).textContent || '' }))()`)
+    return 'timeout ' + JSON.stringify(dbg)
+  }
+  const lobbyVisible = () => `(() => { const p = document.getElementById('lvcvoice-pane'); const w = p && p.querySelector('.pane-waiting'); return (p && !p.classList.contains('hidden') && w && !w.classList.contains('hidden')) ? 'ok' : 'hidden' })()`
+
+  // (1) Waiting room: join returns {ok, waiting:true} → lobby UI in the pane.
+  // Note: the join click must happen while session is null — if the status
+  // poll already reports a waiting session the client is already "in the
+  // lobby" and the join button short-circuits (toggleVoice checks waitingRoom).
+  lvchat.mockState.voiceEnabled = true
+  lvchat.mockState.sessionWaiting = true
+  lvchat.mockState.session = null
+  check('waiting-room join posts the channel too', await joinVoice(), JSON.stringify(lvchat.mockState.lastVoiceJoin))
+  lvchat.mockState.session = { room: 'chan:general', kind: 'channel', waiting: true, can_moderate: false, locked: false, roster: [], mint: null }
+  check('waiting room shows the lobby banner', await waitVoice(lobbyVisible()))
+  // (2) Admit: the host's admit flips the session → status delivers session.mint
+  // once → the client leaves the lobby and attempts the LiveKit connection
+  // (which fails gracefully against the mock's dead ws endpoint).
+  lvchat.mockState.sessionWaiting = false
+  lvchat.mockState.session = {
+    room: 'chan:general', kind: 'channel', waiting: false, can_moderate: false, locked: false,
+    roster: [], mint: { url: 'ws://127.0.0.1:1/', token: 'a.b.c', room: 'chan:general' }
+  }
+  check('admitted user leaves the waiting room (mint handoff consumed)',
+    await waitVoice(`(() => { const p = document.getElementById('lvcvoice-pane'); const w = p && p.querySelector('.pane-waiting'); return (!p || p.classList.contains('hidden') || (w && w.classList.contains('hidden'))) ? 'ok' : 'still-waiting' })()`))
+  // The connect attempt surfaces a graceful failure toast (no crash).
+  check('failed LiveKit connect is reported gracefully',
+    await waitVoice(`(() => { const t = document.getElementById('lvcvoice-toast'); return (t && t.textContent.indexOf('Could not connect to voice') !== -1) ? 'ok' : 'no-toast' })()`))
+  // (3) Deny: a waiting session row disappears → the client shows the toast.
+  lvchat.mockState.sessionWaiting = true
+  lvchat.mockState.session = null
+  await joinVoice()
+  lvchat.mockState.session = { room: 'chan:general', kind: 'channel', waiting: true, can_moderate: false, locked: false, roster: [], mint: null }
+  await new Promise((r) => setTimeout(r, 300))
+  lvchat.mockState.session = null
+  check('denied occupant sees the host-declined toast',
+    await waitVoice(`(() => { const t = document.getElementById('lvcvoice-toast'); return (t && t.textContent.indexOf('host declined') !== -1) ? 'ok' : 'no-toast' })()`))
+  // (4) Full state: status reports full → the dropdown label tells the user.
+  lvchat.mockState.session = null
+  lvchat.mockState.sessionWaiting = false
+  lvchat.mockState.voiceFull = true
+  check('voice-full state surfaces in the dropdown label',
+    await waitVoice(`(() => { const b = document.querySelector('#lvcvoice-dd-menu .lvcvoice-dd-item-label'); return b && b.textContent.indexOf('Voice full (0/50)') !== -1 ? 'ok' : (b ? b.textContent : 'no-label') })()`))
+  lvchat.mockState.voiceFull = false
   lvchat.mockState.voiceEnabled = false
 
   const connAgain = await js(win, `window.lvchat.connectProfile({ id: '${add.profile.id}' })`)
@@ -419,7 +549,39 @@ async function main () {
     const beforeFeed = getNotifyCount()
     lvchat.addNotification({ id: 1002, kind: 'dm', sender: 'bob', content: 'new dm' })
     const feedObserved = await waitFor(() => getNotifyCount() > beforeFeed)
-    check('bridge polls the notifications API and shows alerts', feedObserved)
+    check('bridge polls the notifications API and shows alerts', feedObserved, String(beforeFeed) + ' -> ' + String(getNotifyCount()) + ' feedReq=' + lvchat.mockState.feedRequests)
+
+    // ── Modern bridge: with data-notify-prefs the page's unified alert engine
+    // drives everything, so the bridge stops polling the feed itself (no
+    // double alerts, no DND/focus gaps) and only forwards page events + the
+    // notification-click deep-link (with msg_id) back to the page.
+    lvchat.mockState.modernBridge = true
+    const feedBeforeModern = lvchat.mockState.feedRequests
+    const modernRec = chatWindows.get(connAuto.id)
+    await modernRec.win.webContents.reload()
+    const modernLoaded = await waitFor(() => {
+      if (modernRec.win.isDestroyed() || modernRec.win.webContents.isLoading()) return false
+      return modernRec.win.webContents.getURL().includes('/app')
+    })
+    check('modern bridge shell loads', modernLoaded)
+    await new Promise((r) => setTimeout(r, 5000)) // legacy bridge polls every 5s
+    check('modern bridge does not poll the feed API', lvchat.mockState.feedRequests === feedBeforeModern, 'feedRequests=' + lvchat.mockState.feedRequests + ' (before=' + feedBeforeModern + ')')
+    const modernNotify = getNotifyCount()
+    await js(modernRec.win, `window.dispatchEvent(new CustomEvent('lvchat:notify', { detail: { title: 'DM from bob', body: 'hey', conv: { type: 'dm', id: 'bob', msg_id: 7 } } }))`)
+    const modernShown = await waitFor(() => getNotifyCount() > modernNotify)
+    check('modern bridge forwards the page alert (with conv)', modernShown)
+    // Notification click → main sends notification:open → the page jumps to the message.
+    await js(modernRec.win, `window.__lvcNav = null; (function () { const orig = window.location.href; window.addEventListener('notification:open', function () { window.__lvcNav = window.location.href; }); })()`)
+    modernRec.win.webContents.send('notification:open', { type: 'dm', id: 'bob', msg_id: 7 })
+    const jumped = await waitFor(() => {
+      const nav = modernRec.win.webContents.getURL()
+      return nav.includes('/app?dm=bob') && nav.includes('jump=7')
+    })
+    check('notification click deep-links to the message', jumped, modernRec.win.webContents.getURL())
+    lvchat.mockState.modernBridge = false
+    await modernRec.win.webContents.reload()
+    await waitFor(() => !modernRec.win.webContents.isLoading())
+    check('modern bridge switched off again', true)
 
     // Admin dashboard links pop out into a separate window (same session).
     const chatWin = chatWindows.get(connAuto.id).win

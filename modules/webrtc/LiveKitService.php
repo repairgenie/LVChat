@@ -109,6 +109,34 @@ final class LiveKitService
         return ((int) ($actor['guest'] ?? 0) === 1 ? 'g' : 'u') . (int) $actor['id'];
     }
 
+    /** Inverse of identity(): 'u12' → ['user_id' => 12], 'g3' → ['guest_id' => 3]. */
+    public static function parseIdentity(string $identity): ?array
+    {
+        if (preg_match('/^u(\d+)$/', $identity, $m)) {
+            return ['user_id' => (int) $m[1]];
+        }
+        if (preg_match('/^g(\d+)$/', $identity, $m)) {
+            return ['guest_id' => (int) $m[1]];
+        }
+        return null;
+    }
+
+    /** The HTTP/HTTPS base URL for server-side admin calls (ws→http, wss→https). */
+    public static function httpUrl(): string
+    {
+        $url = self::url();
+        if ($url === '') {
+            return '';
+        }
+        if (str_starts_with($url, 'ws://')) {
+            return 'http://' . substr($url, 5);
+        }
+        if (str_starts_with($url, 'wss://')) {
+            return 'https://' . substr($url, 6);
+        }
+        return $url;
+    }
+
     /**
      * Mint a LiveKit access token (JWT HS256).
      *
@@ -147,8 +175,10 @@ final class LiveKitService
     /** Current app-level voice status (join gate + admin panel source). */
     public static function status(): array
     {
+        // Waiting-room occupants hold session rows (so hosts can see them) but
+        // are not connected to LiveKit — they must not consume the global cap.
         $active = (int) Database::scalar(
-            'SELECT COUNT(*) FROM voice_sessions WHERE last_seen >= datetime("now", "-2 minutes")'
+            'SELECT COUNT(*) FROM voice_sessions WHERE last_seen >= datetime("now", "-2 minutes") AND waiting = 0'
         );
         $max = self::maxUsers();
         return [
@@ -196,6 +226,289 @@ final class LiveKitService
             && preg_match('/\{.*\}/s', $resp, $m)
             && !empty(json_decode($m[0], true)['ok']);
         return ['running' => $ok, 'error' => $ok ? '' : 'not ok'];
+    }
+
+    // ── Admin API (Twirp over HTTP, zero external deps) ─────────────────────
+    //
+    // LiveKit exposes its admin surface as Twirp RPCs on the server's HTTP
+    // port (the same host/port as the /health probe): services livekit.RoomService
+    // and livekit.Egress, called as JSON POSTs with `Authorization: Bearer
+    // <admin JWT>`. The admin JWT is a normal access token minted with our API
+    // key + secret — same signing path as user tokens, no extra deps.
+
+    /** Mint a short-lived admin token (room + egress admin grants). */
+    public static function adminToken(): string
+    {
+        $now = time();
+        $header = ['alg' => 'HS256', 'typ' => 'JWT'];
+        $payload = [
+            'iss' => self::apiKey(),
+            'sub' => 'lvc-admin',
+            'name' => 'LVChat Admin',
+            'iat' => $now,
+            'exp' => $now + 30, // short: minted per admin call
+            'video' => [
+                'roomCreate' => true,
+                'roomList' => true,
+                'roomAdmin' => true,
+                'egressAdmin' => true,
+            ],
+        ];
+        $h = self::b64url(json_encode($header, JSON_UNESCAPED_SLASHES));
+        $p = self::b64url(json_encode($payload, JSON_UNESCAPED_SLASHES));
+        $sig = self::b64url(hash_hmac('sha256', "$h.$p", self::apiSecret(), true));
+        return "$h.$p.$sig";
+    }
+
+    /**
+     * Call a LiveKit Twirp endpoint: "RoomService/ListRooms", "Egress/ListEgress", …
+     * Returns ['ok' => true, 'data' => decoded body] on 2xx, or
+     * ['ok' => false, 'error' => msg] on any failure. Never throws.
+     */
+    public static function adminCall(string $endpoint, array $payload = []): array
+    {
+        $base = self::httpUrl();
+        if ($base === '' || self::apiKey() === '' || self::apiSecret() === '') {
+            return ['ok' => false, 'error' => 'not configured'];
+        }
+        $url = rtrim($base, '/') . '/twirp/livekit.' . $endpoint;
+        $body = json_encode(
+            array_filter($payload, static fn ($v) => $v !== null),
+            JSON_UNESCAPED_SLASHES
+        );
+        if ($body === false) {
+            return ['ok' => false, 'error' => 'bad payload'];
+        }
+
+        $headers = [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . self::adminToken(),
+        ];
+
+        // Prefer curl when the extension is loaded (PushService already depends
+        // on it); fall back to a minimal stream-context POST otherwise.
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $body,
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT_MS => 1500,
+                CURLOPT_TIMEOUT_MS => 4000,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0,
+            ]);
+            $resp = curl_exec($ch);
+            $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $err = curl_error($ch);
+            curl_close($ch);
+            if ($resp === false) {
+                return ['ok' => false, 'error' => ($err !== '' ? $err : 'request failed')];
+            }
+            return self::adminResult($code, $resp);
+        }
+
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", $headers),
+                'content' => $body,
+                'timeout' => 4,
+                'ignore_errors' => true,
+            ],
+        ]);
+        $resp = @file_get_contents($url, false, $ctx);
+        if ($resp === false) {
+            return ['ok' => false, 'error' => 'request failed'];
+        }
+        $code = 0;
+        foreach ($http_response_header ?? [] as $line) {
+            if (preg_match('/^HTTP\/\S+\s+(\d{3})/', $line, $m)) {
+                $code = (int) $m[1];
+            }
+        }
+        return self::adminResult($code, $resp);
+    }
+
+    /** Normalize a Twirp response (HTTP status + JSON body) into ok/data. */
+    private static function adminResult(int $code, string $resp): array
+    {
+        $data = json_decode($resp, true);
+        if (!is_array($data)) {
+            return ['ok' => $code >= 200 && $code < 300, 'error' => 'unparseable response', 'data' => []];
+        }
+        if ($code >= 200 && $code < 300) {
+            return ['ok' => true, 'data' => $data, 'error' => ''];
+        }
+        return [
+            'ok' => false,
+            'error' => (string) ($data['msg'] ?? $data['error'] ?? ($code === 401 || $code === 403 ? 'admin token rejected' : 'HTTP ' . $code)),
+            'code' => $code,
+            'data' => $data,
+        ];
+    }
+
+    /** List rooms + participant counts as seen by the LiveKit server itself. */
+    public static function rooms(): array
+    {
+        $r = self::adminCall('RoomService/ListRooms');
+        if (!$r['ok']) {
+            return [];
+        }
+        $rooms = [];
+        foreach ((array) ($r['data']['rooms'] ?? []) as $room) {
+            $rooms[] = [
+                'name' => (string) ($room['name'] ?? ''),
+                'num_participants' => (int) ($room['num_participants'] ?? 0),
+                'created_at' => (string) ($room['creation_time'] ?? ''),
+                'empty_timeout' => (int) ($room['empty_timeout'] ?? 0),
+            ];
+        }
+        return $rooms;
+    }
+
+    /**
+     * Throttled room listing for the admin panel (the admin page is heavy on
+     * these; room list is cached for a few seconds so the panel can poll live
+     * state without hammering LiveKit from a fleet of admin tabs).
+     */
+    public static function roomsCached(int $ttlSeconds = 5): array
+    {
+        $file = ROOT . '/data/livekit/rooms-cache.json';
+        if (is_file($file) && filemtime($file) > time() - $ttlSeconds) {
+            $data = json_decode((string) @file_get_contents($file), true);
+            if (is_array($data)) {
+                return $data;
+            }
+        }
+        $rooms = self::rooms();
+        @mkdir(dirname($file), 0775, true);
+        @file_put_contents($file, (string) json_encode($rooms));
+        return $rooms;
+    }
+
+    /** Participants of a room, as LiveKit sees them (identity + track state). */
+    public static function participants(string $room): array
+    {
+        $r = self::adminCall('RoomService/ListParticipants', ['room' => $room]);
+        if (!$r['ok']) {
+            return [];
+        }
+        $out = [];
+        foreach ((array) ($r['data']['participants'] ?? []) as $p) {
+            $tracks = [];
+            foreach ((array) ($p['tracks'] ?? []) as $t) {
+                $tracks[] = [
+                    'sid' => (string) ($t['sid'] ?? ''),
+                    'type' => (int) ($t['type'] ?? 0), // 0=audio, 1=video, 3=screen_share_audio, 4=screen_share_video
+                    'muted' => (bool) ($t['muted'] ?? false),
+                ];
+            }
+            $out[] = [
+                'identity' => (string) ($p['identity'] ?? ''),
+                'name' => (string) ($p['name'] ?? ''),
+                'is_publisher' => (bool) ($p['isPublisher'] ?? false),
+                'tracks' => $tracks,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Kick a participant from a room server-side (repo's room admin API now
+     * wired — replaces the former no-op placeholder). Returns true on success.
+     */
+    public static function removeParticipant(string $room, string $identity): bool
+    {
+        $r = self::adminCall('RoomService/RemoveParticipant', ['room' => $room, 'identity' => $identity]);
+        return $r['ok'];
+    }
+
+    /** Mute/unmute a participant's published audio track (host-mute, Zoom-style). */
+    public static function muteParticipant(string $room, string $identity, bool $muted): bool
+    {
+        // Find the audio track sid first (MutePublishedTrack targets a track).
+        $r = self::adminCall('RoomService/GetParticipant', ['room' => $room, 'identity' => $identity]);
+        if (!$r['ok']) {
+            return false;
+        }
+        $p = (array) ($r['data']['participant'] ?? []);
+        $audioSid = null;
+        foreach ((array) ($p['tracks'] ?? []) as $t) {
+            $type = (int) ($t['type'] ?? 0);
+            if ($type === 0 || $type === 3) { // AUDIO or SCREEN_SHARE_AUDIO
+                $audioSid = (string) ($t['sid'] ?? '');
+                break;
+            }
+        }
+        if ($audioSid === '') {
+            return false;
+        }
+        $r2 = self::adminCall('RoomService/MutePublishedTrack', [
+            'room' => $room,
+            'identity' => $identity,
+            'track_sid' => $audioSid,
+            'muted' => $muted,
+        ]);
+        return $r2['ok'];
+    }
+
+    /** Mute/unmute every participant currently publishing audio in a room. */
+    public static function muteAll(string $room, bool $muted): array
+    {
+        $names = [];
+        foreach (self::participants($room) as $p) {
+            $hasAudio = false;
+            foreach ($p['tracks'] as $t) {
+                if ($t['type'] === 0 || $t['type'] === 3) {
+                    $hasAudio = true;
+                    break;
+                }
+            }
+            if (!$hasAudio) {
+                continue;
+            }
+            $ok = self::muteParticipant($room, $p['identity'], $muted);
+            if ($ok) {
+                $names[] = $p['identity'];
+            }
+        }
+        return $names;
+    }
+
+    /** Flip a participant's publish/subscribe permissions (lock/unlock server-side). */
+    public static function updateParticipant(string $room, string $identity, bool $canPublish, bool $canSubscribe = true): bool
+    {
+        $r = self::adminCall('RoomService/UpdateParticipant', [
+            'room' => $room,
+            'identity' => $identity,
+            'permission' => [
+                'can_publish' => $canPublish,
+                'can_subscribe' => $canSubscribe,
+                'can_publish_data' => true,
+                'can_update_metadata' => false,
+            ],
+        ]);
+        return $r['ok'];
+    }
+
+    /** Delete an empty room (or force-close one) server-side. */
+    public static function deleteRoom(string $room): bool
+    {
+        $r = self::adminCall('RoomService/DeleteRoom', ['room' => $room]);
+        return $r['ok'];
+    }
+
+    // ── Active-speaker / subscription hints ──────────────────────────────────
+    // Talker-cap enforcement is client-side (selective subscription), but the
+    // server can still ask LiveKit which participants it considers speakers.
+    /** LiveKit's current speaker list for a room (identities, loudest first). */
+    public static function activeSpeakers(string $room): array
+    {
+        // RoomService has no direct "speakers" RPC; participants + track engine
+        // state is the practical approximation. Used by admin diagnostics only.
+        return array_column(self::participants($room), 'identity');
     }
 
     /**
@@ -400,28 +713,190 @@ final class LiveKitService
         return rtrim($yaml, "\n") . ($yaml !== '' ? "\n" : '') . "keys:\n" . $entry . "\n";
     }
 
-    /** Prune voice_sessions whose client stopped heartbeating (~2 min). */
-    public static function pruneStale(): void
-    {
-        Database::query('DELETE FROM voice_sessions WHERE last_seen < datetime("now", "-2 minutes")');
-    }
-
     /** Fail ringing calls nobody answered (~5 rings, see ringSeconds()). */
     public static function expireCalls(): void
     {
-        Database::query(
-            "UPDATE call_sessions SET status = 'missed'
-             WHERE status = 'ringing' AND created_at < datetime('now', '-' || ? || ' seconds')",
+        $rows = Database::all(
+            'SELECT * FROM call_sessions WHERE status = "ringing"
+             AND created_at < datetime("now", "-" || ? || " seconds")',
             [self::ringSeconds()]
+        );
+        if ($rows) {
+            foreach ($rows as $call) {
+                Database::query("UPDATE call_sessions SET status = 'missed' WHERE id = ?", [(int) $call['id']]);
+                self::logCallOutcome($call, 'missed');
+            }
+        }
+    }
+
+    /**
+     * Write a call outcome to chat_logs (kind='call') so moderation sees who
+     * called whom and what happened — the audit trail the IRC-style logger
+     * already keeps for messages. Best-effort; never breaks the call flow.
+     */
+    public static function logCallOutcome(array $call, string $outcome, ?int $durationSec = null): void
+    {
+        try {
+            $caller = self::callerName($call['caller_user_id'] ?? null, $call['caller_guest_id'] ?? null);
+            $callee = self::callerName($call['callee_user_id'] ?? null, $call['callee_guest_id'] ?? null);
+            $content = 'call ' . ($caller !== '' ? $caller : 'guest') . ' -> '
+                . ($callee !== '' ? $callee : 'guest') . ' [' . $outcome . ']';
+            if ($durationSec !== null && $durationSec > 0) {
+                $content .= ' ' . gmdate('H:i:s', $durationSec);
+            }
+            Database::query(
+                'INSERT INTO chat_logs (channel_name, user_id, username, kind, content, guest)
+                 VALUES (?, ?, ?, "call", ?, 0)',
+                ['calls', (int) ($call['caller_user_id'] ?? 0), $caller !== '' ? $caller : 'guest', $content]
+            );
+        } catch (\Throwable $e) {
+            // Logging must never break the call flow.
+        }
+    }
+
+    /** Display name for one side of a call. */
+    private static function callerName($userId, $guestId): string
+    {
+        if ($userId) {
+            return (string) (Database::scalar('SELECT username FROM users WHERE id = ?', [(int) $userId]) ?? '');
+        }
+        if ($guestId) {
+            return (string) (Database::scalar('SELECT nick FROM guests WHERE id = ?', [(int) $guestId]) ?? '');
+        }
+        return '';
+    }
+
+    // ── Server-side roster (app view, source of truth for the join gate) ──
+
+    /**
+     * Participants of a room as the app sees them (voice_sessions), joined with
+     * actor names. Includes waiting-room occupants so hosts can admit/deny.
+     * Mirrors what LiveKit sees, minus the sub-second window between a client
+     * disconnect and its session row aging out.
+     */
+    public static function roster(string $room): array
+    {
+        $rows = Database::all('SELECT * FROM voice_sessions WHERE room = ?', [$room]);
+        $out = [];
+        foreach ($rows as $row) {
+            $identity = ($row['user_id'] ? 'u' . (int) $row['user_id'] : 'g' . (int) $row['guest_id']);
+            if ($row['user_id']) {
+                $name = (string) (Database::scalar('SELECT username FROM users WHERE id = ?', [$row['user_id']]) ?? 'user');
+                $guest = false;
+            } else {
+                $name = (string) (Database::scalar('SELECT nick FROM guests WHERE id = ?', [$row['guest_id']]) ?? 'guest');
+                $guest = true;
+            }
+            $out[] = [
+                'identity' => $identity,
+                'name' => $name,
+                'guest' => $guest,
+                'waiting' => (int) ($row['waiting'] ?? 0) === 1,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Simple in-DB rate limiter (per-actor/per-action buckets) reused by the
+     * voice/call/event endpoints — the login_attempts-style spam guard.
+     * Returns true when the action is allowed, false when the caller is out
+     * of budget for the window.
+     */
+    public static function rateLimit(string $bucket, int $max, int $windowSeconds = 60): bool
+    {
+        $now = time();
+        $windowStart = $now - $windowSeconds;
+        $row = Database::row('SELECT hits, window_start FROM rate_limits WHERE bucket = ?', [$bucket]);
+        if (!$row || (int) $row['window_start'] < $windowStart) {
+            Database::query(
+                'INSERT INTO rate_limits (bucket, hits, window_start) VALUES (?, 1, ?)
+                 ON CONFLICT(bucket) DO UPDATE SET hits = 1, window_start = excluded.window_start',
+                [$bucket, $now]
+            );
+            return true;
+        }
+        if ((int) $row['hits'] >= $max) {
+            return false;
+        }
+        Database::query('UPDATE rate_limits SET hits = hits + 1 WHERE bucket = ?', [$bucket]);
+        return true;
+    }
+
+    /** Whether a voice room is locked (join gate blocks non-moderators). */
+    public static function roomLocked(string $room): bool
+    {
+        return (bool) Database::scalar('SELECT locked FROM voice_room_flags WHERE room = ?', [$room]);
+    }
+
+    public static function setRoomLocked(string $room, bool $locked): void
+    {
+        Database::query(
+            'INSERT INTO voice_room_flags (room, locked, updated_at) VALUES (?, ?, datetime("now"))
+             ON CONFLICT(room) DO UPDATE SET locked = excluded.locked, updated_at = excluded.updated_at',
+            [$room, $locked ? 1 : 0]
         );
     }
 
-    /** Remove a participant from a LiveKit room server-side (best effort). */
-    public static function removeParticipant(string $room, string $identity): void
+    // ── Egress (recording) ─────────────────────────────────────────────────
+
+    /**
+     * Kick off a room-composite recording via LiveKit's egress service
+     * (livekit-egress + Redis must be deployed; StartEgress fails otherwise).
+     */
+    public static function startEgress(string $room, array $outputs): array
     {
-        // The client disconnect already removes the participant; this hook exists
-        // for future server-side kicks via LiveKit's admin API. Deliberately a
-        // no-op until that API surface is pinned (see module README / Q4).
+        $payload = ['roomName' => $room];
+        foreach ($outputs as $o) {
+            if (($o['kind'] ?? '') === 'file') {
+                $payload['fileOutputs'] = [['fileType' => 'MP4', 'filepath' => $o['path']]];
+            }
+        }
+        return self::adminCall('Egress/StartRoomCompositeEgress', $payload);
+    }
+
+    public static function stopEgress(string $egressId): array
+    {
+        return self::adminCall('Egress/StopEgress', ['egressId' => $egressId]);
+    }
+
+    public static function listEgress(): array
+    {
+        $r = self::adminCall('Egress/ListEgress');
+        if (!$r['ok']) {
+            return [];
+        }
+        $out = [];
+        foreach ((array) ($r['data']['items'] ?? []) as $item) {
+            $out[] = [
+                'egress_id' => (string) ($item['egressId'] ?? ''),
+                'status' => (string) ($item['status'] ?? ''),
+                'room_name' => (string) ($item['roomName'] ?? ''),
+                'file_results' => (array) ($item['fileResults'] ?? []),
+                'error' => (string) ($item['error'] ?? ''),
+            ];
+        }
+        return $out;
+    }
+
+    /** Root dir for recording files (under data/, like LiveKit's own dirs). */
+    public static function recordingsDir(): string
+    {
+        return (string) (config_get('recording_path', '') ?? '') !== ''
+            ? (string) config_get('recording_path', '')
+            : ROOT . '/data/recordings';
+    }
+
+    /**
+     * Prune voice_sessions whose client stopped heartbeating (~2 min).
+     */
+    public static function pruneStale(): void
+    {
+        Database::query('DELETE FROM voice_sessions WHERE last_seen < datetime("now", "-2 minutes") AND waiting = 0');
+        // Waiting occupants never connect, but their client still heartbeats
+        // via the status poll — give them the same 2-minute window, and while
+        // we're here prune anything left behind by crashed clients.
+        Database::query('DELETE FROM voice_sessions WHERE last_seen < datetime("now", "-2 minutes")');
     }
 
     private static function b64url(string $data): string

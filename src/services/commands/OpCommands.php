@@ -37,7 +37,7 @@ $opHelp = [
     'devoice' => ['desc' => 'Remove voice.', 'usage' => '/devoice <nick>'],
     'mode' => ['desc' => 'View or change channel modes (i invite, m moderated, C word filter, k key, l limit, t topic lock, p private, s secret, b ban).', 'usage' => '/mode [#channel] [+/-modes] [args]'],
     'topiclock' => ['desc' => 'Lock or unlock the topic to ops.', 'usage' => '/topiclock [#channel] on|off'],
-    'clear' => ['desc' => 'Clear channel state.', 'usage' => '/clear <users|bans|ops|voices|topic|modes>'],
+    'clear' => ['desc' => 'Clear channel state (bare /clear clears your window).', 'usage' => '/clear [#channel] <users|bans|ops|voices|topic|modes>'],
 ];
 
 // Minimum channel level required per operator command (half-op = 2, op = 3).
@@ -278,16 +278,22 @@ final class OpCommands
 
     private static function level(string $name, array $args, array $user, array $channel): array
     {
-        $nick = $args[0] ?? null;
         $map = [
-            'op' => 'op', 'deop' => 'normal',
-            'halfop' => 'halfop', 'dehalfop' => 'normal',
-            'voice' => 'voice', 'devoice' => 'normal',
+            'op' => ['op', '+o'], 'deop' => ['normal', '-o'],
+            'halfop' => ['halfop', '+h'], 'dehalfop' => ['normal', '-h'],
+            'voice' => ['voice', '+v'], 'devoice' => ['normal', '-v'],
         ];
-        $newLevel = $map[$name];
+        $nick = $args[0] ?? null;
         if (!$nick) {
             return ['replies' => ["Usage: /$name <nick>"]];
         }
+        [$newLevel, $modeFlag] = $map[$name];
+        return self::applyUserLevel($channel, $user, $nick, $newLevel, $modeFlag);
+    }
+
+    /** Shared by /op /deop /halfop /dehalfop /voice /devoice and /mode ±o±v±h. */
+    private static function applyUserLevel(array $channel, array $user, string $nick, string $newLevel, string $modeFlag): array
+    {
         $target = self::targetUser($nick);
         if (!$target) {
             return ['replies' => ["No such user: $nick"]];
@@ -306,10 +312,9 @@ final class OpCommands
             AccessService::setLevel($channel['id'], (int) $target['id'], $newLevel);
         }
         $symbol = $newLevel === 'normal' ? '' : level_symbol($newLevel);
-        $flag = $newLevel === 'normal' ? '-' . $name[2] : '+' . $name[0];
         return [
             'replies' => ["$nick now has level: " . ($newLevel === 'normal' ? 'normal' : $newLevel) . '.'],
-            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' set mode ' . $flag . " on $nick ($symbol$nick)"]],
+            'events' => [['channel_id' => (int) $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' set mode ' . $modeFlag . " on $nick ($symbol$nick)"]],
         ];
     }
 
@@ -349,7 +354,9 @@ final class OpCommands
             '  +p  private        — hidden from /list, joinable via share link.',
             '  +s  secret         — hidden entirely; join by invitation only.',
             '  +L  no-log         — disable chat logging for this channel (opers only).',
-            '  +b <mask>          — ban a mask; /mode -b <mask> removes it.',
+            '  +b <mask>          — ban a mask (or a nick); /mode -b <mask> removes it.',
+            '  +q <nick>          — mute a user (cannot speak); -q unmutes.',
+            '  +o/+h/+v <nick>    — grant op / half-op / voice; prefix - to remove (e.g. -o <nick>).',
             'Current: ' . self::currentModeString($ch),
         ];
     }
@@ -390,7 +397,14 @@ final class OpCommands
     private static function applyModeFlag(array $channel, array $user, string $flag, bool $add, array &$rest): array|string
     {
         $level = AccessService::effectiveLevel($channel['id'], $user);
-        $w = level_weight($level);
+        // Server admins and /oper o:line holders bypass channel-level guards —
+        // this is what makes SAMODE (and a staff-run /mode) work on channels the
+        // actor does not belong to or where they hold no operator status.
+        if (self::isStaff($user)) {
+            $w = level_weight('founder');
+        } else {
+            $w = level_weight($level);
+        }
         $isHalfop = $w >= level_weight('halfop'); // half-op: +b +v +m +i +t +k, kick
         $isOp = $w >= level_weight('op');          // op: everything above + +l +C +p +s +o
         $name = $channel['name'];
@@ -461,6 +475,51 @@ final class OpCommands
                 ChannelService::update($channel['id'], ['visibility' => $add ? ($flag === 's' ? 'secret' : 'private') : 'public']);
                 $vis = $add ? ($flag === 's' ? 'secret' : 'private') : 'public';
                 return ['channel_id' => $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . " set channel visibility to $vis"];
+            case 'o':
+            case 'v':
+            case 'h':
+                if (!$isOp) {
+                    return 'Only channel operators can change user levels.';
+                }
+                $nick = array_shift($rest);
+                if (!$nick) {
+                    return 'Usage: /mode ' . ($add ? '+' : '-') . $flag . ' <nick>';
+                }
+                $levelMap = ['o' => 'op', 'v' => 'voice', 'h' => 'halfop'];
+                $newLevel = $add ? $levelMap[$flag] : 'normal';
+                // applyUserLevel returns ['replies'=>…, 'events'=>…]: treat a
+                // reply-only result as the error text, otherwise emit the event
+                // (the success line is redundant under /mode's "Modes updated.").
+                $r = self::applyUserLevel($channel, $user, $nick, $newLevel, ($add ? '+' : '-') . $flag);
+                if (!empty($r['events'])) {
+                    return $r['events'][0];
+                }
+                return $r['replies'][0] ?? 'Could not change the user level.';
+            case 'q':
+                if (!$isHalfop) {
+                    return 'Half-op or higher is required to mute users.';
+                }
+                $nick = array_shift($rest);
+                if (!$nick) {
+                    return 'Usage: /mode ' . ($add ? '+' : '-') . 'q <nick>';
+                }
+                $target = self::targetUser($nick);
+                if (!$target) {
+                    return "No such user: $nick";
+                }
+                $mask = strtolower($target['username']) . '!*@*';
+                if ($add) {
+                    BanService::addBan('quiet', $channel['id'], $mask, null, null, Auth::isGuest($user) ? null : (int) $user['id'], Auth::isGuest($target) ? null : (int) $target['id']);
+                    return ['channel_id' => $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' muted ' . $nick . ' (+q)'];
+                }
+                $removed = false;
+                if (!Auth::isGuest($target)) {
+                    $removed = (bool) Database::query('DELETE FROM bans WHERE kind = "quiet" AND channel_id = ? AND target_user_id = ?', [$channel['id'], (int) $target['id']])->rowCount();
+                }
+                if (!$removed) {
+                    Database::query('DELETE FROM bans WHERE kind = "quiet" AND channel_id = ? AND mask = ? COLLATE NOCASE', [$channel['id'], $mask]);
+                }
+                return ['channel_id' => $channel['id'], 'kind' => 'mode', 'content' => $user['username'] . ' unmuted ' . $nick . ' (-q)'];
             case 'b':
                 if (!$isHalfop) {
                     return 'Half-op or higher is required to change bans.';
@@ -468,6 +527,13 @@ final class OpCommands
                 $mask = array_shift($rest);
                 if (!$mask) {
                     return 'Usage: /mode +b <mask> or /mode -b <mask>';
+                }
+                // Resolve a bare nick to a full mask so /mode +b nick bans the user.
+                if ($add && !preg_match('/[*!@?]/', $mask)) {
+                    $u = self::targetUser($mask);
+                    if ($u) {
+                        $mask = strtolower($u['username']) . '!*@*';
+                    }
                 }
                 if ($add) {
                     BanService::addBan('channel_ban', $channel['id'], $mask, null, null, Auth::isGuest($user) ? null : (int) $user['id']);
@@ -496,6 +562,21 @@ final class OpCommands
 
     private static function clear(array $args, array $user, ?array $channel): array
     {
+        // Optional leading channel: /clear #chan <what> resolves the target and
+        // honours the same membership + level gates the parser applies to
+        // needs_channel commands (staff keep their override). Bare /clear is
+        // intercepted client-side above and never reaches this handler.
+        if (isset($args[0]) && preg_match('/^[#&]/', $args[0])) {
+            $name = array_shift($args);
+            $ch = ChannelService::find($name);
+            if (!$ch) {
+                return ['replies' => ["No such channel: $name"]];
+            }
+            if (!self::isStaff($user) && !AccessService::member((int) $ch['id'], $user)) {
+                return ['replies' => ['You must be a member of ' . $ch['name'] . ' to use /clear there.']];
+            }
+            $channel = $ch;
+        }
         $what = strtolower($args[0] ?? '');
         if (!$channel) {
             return ['replies' => ['You must be in a channel or provide one, e.g. /clear <#channel> <users|bans|ops|voices|topic|modes>']];

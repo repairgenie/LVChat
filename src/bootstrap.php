@@ -22,7 +22,7 @@
 declare(strict_types=1);
 
 define('ROOT', dirname(__DIR__));
-define('LVC_VERSION', '1.7.1');
+define('LVC_VERSION', '1.9.0');
 
 // Load deployment secrets / developer config from ROOT/.env (if present).
 // Never overrides variables already set in the environment.

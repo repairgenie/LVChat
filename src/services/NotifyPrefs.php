@@ -62,7 +62,7 @@ class NotifyPrefs
         if (!$row) {
             return $d;
         }
-        $decode = fn ($s) => array_values(array_filter(array_map('strval', (array) json_decode((string) $s, true) ?: [])));
+        $decode = fn ($s) => array_values(array_filter(array_map('strval', (array) json_decode((string) $s, true) ?: []), fn ($x) => $x !== ''));
         return [
             'sound_master' => (int) $row['sound_master'],
             'os_master' => (int) $row['os_master'],
@@ -96,8 +96,8 @@ class NotifyPrefs
                 ? max(-720, min(840, (int) $in['tz_offset_minutes']))
                 : (int) $cur['tz_offset_minutes'],
         ];
-        $next['quiet_hours_days'] = json_encode(self::cleanIntList($in['quiet_hours_days'] ?? $cur['quiet_hours_days'], 0, 6));
-        $next['highlight_keywords'] = json_encode(self::cleanKeywordList($in['highlight_keywords'] ?? $cur['highlight_keywords']));
+        $next['quiet_hours_days'] = json_encode(self::cleanIntList(self::asList($in['quiet_hours_days'] ?? $cur['quiet_hours_days']), 0, 6));
+        $next['highlight_keywords'] = json_encode(self::cleanKeywordList(self::asList($in['highlight_keywords'] ?? $cur['highlight_keywords'])));
 
         Database::query(
             'INSERT INTO user_notify_prefs (user_id, sound_master, os_master, previews, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, quiet_hours_days, highlight_keywords, tz_offset_minutes, updated_at)
@@ -192,6 +192,20 @@ class NotifyPrefs
         }
         sort($out);
         return $out;
+    }
+
+    /** Normalise a list-ish input: an array, or a JSON-encoded string (the
+     *  web app + messenger send JSON strings, e.g. "[0,6]"). */
+    private static function asList(mixed $v): array
+    {
+        if (is_string($v)) {
+            $dec = json_decode($v, true);
+            if (is_array($dec)) {
+                return $dec;
+            }
+            return [$v];
+        }
+        return is_array($v) ? $v : [];
     }
 
     private static function cleanKeywordList(mixed $v): array

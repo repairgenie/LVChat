@@ -495,7 +495,7 @@ via the `CHAT_MODULES` env var, on a scratch database.
 | `ModuleLoader::view()` renders a module view inside the standard layout | `tests/http_test.php` (`/admin/good-module` fixture route) |
 | Admin → Modules page (state badges incl. `disabled (.disabled)`, boot warnings, enable/disable, license save/clear) | `tests/http_test.php` |
 | Licensing gate + key validation — Ed25519 offline signature/claims, license-server round-trip, `no_key`/`expired`/`wrong_module`/server-refused states, feature gating via `isLicensed()`, re-check action | `tests/smoke.php` (`== license keys ==`, fixture `paid-mod`) + `tests/http_test.php` (`== licensing client ==`, fixture license server on `:8096`) |
-| The shipped `webrtc` module (admin config, LiveKit join/leave, calls, meetings) | `tests/http_test.php` (fixture is a symlink to `modules/webrtc`) |
+| The shipped `webrtc` module — admin config + write-only secret, LiveKit JWT join/leave, talker-cap enforcement, 1:1 + group calls (`/invite` + `call_participants`), host moderation (kick/mute/lock + waiting-room admit/deny), egress recording gates + authenticated download, rate-limit buckets, ring-timeout → missed, meeting events + email invites, module assets + `/app` head injection | `tests/http_test.php` (`== webrtc … ==` sections; fixture is a symlink to `modules/webrtc`) |
 | A module whose `init.php`/`schema.php` throws is caught with a boot warning — never fatal, the rest of the app keeps working | `tests/smoke.php` (`broken-mod` fixture) |
 
 **Adding tests for a new module or a loader change:** drop the fixture under

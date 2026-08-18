@@ -103,6 +103,9 @@ final class EventController
                 json_out(['error' => "You have reached the concurrent-event limit ($cap)."], 409);
             }
         }
+        if (!LiveKitService::rateLimit('event-create:' . (int) $actor['id'], 10, 3600)) {
+            json_out(['error' => 'Too many events created. Please wait a while.'], 429);
+        }
 
         $title = trim((string) ($_POST['title'] ?? ''));
         if ($title === '') {
@@ -118,6 +121,7 @@ final class EventController
         $streamUrl = trim((string) ($_POST['stream_url'] ?? ''));
         $scheduledAt = trim((string) ($_POST['scheduled_at'] ?? ''));
         $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
+        $waitingRoom = (int) ($_POST['waiting_room'] ?? 0) === 1;
 
         // Validate scheduled time.
         if ($scheduledAt !== '') {
@@ -154,8 +158,8 @@ final class EventController
         }
 
         Database::query(
-            'INSERT INTO events (channel_id, founder_id, title, description, is_public, event_type, stream_url, invite_code, scheduled_at, duration_minutes, started_at, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO events (channel_id, founder_id, title, description, is_public, event_type, stream_url, invite_code, scheduled_at, duration_minutes, started_at, status, waiting_room)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $channelId,
                 (int) $actor['id'],
@@ -169,6 +173,7 @@ final class EventController
                 $durationMinutes > 0 ? $durationMinutes : null,
                 $status === 'active' ? now() : null,
                 $status,
+                $waitingRoom ? 1 : 0,
             ]
         );
         $eventId = (int) Database::lastId();
@@ -187,6 +192,7 @@ final class EventController
             'title' => $title,
             'invite_code' => $inviteCode,
             'status' => $status,
+            'waiting_room' => $waitingRoom,
             'invite_url' => self::eventUrl([
                 'invite_code' => $inviteCode,
                 'channel_slug' => $slug,
@@ -201,6 +207,9 @@ final class EventController
         self::requireCsrf();
         if (Auth::isGuest($actor)) {
             json_out(['error' => 'Registered users only.'], 403);
+        }
+        if (!LiveKitService::rateLimit('event-invite:' . (int) $actor['id'], 30, 3600)) {
+            json_out(['error' => 'Too many invites sent. Please wait a while.'], 429);
         }
 
         $eventId = (int) ($_POST['event_id'] ?? 0);

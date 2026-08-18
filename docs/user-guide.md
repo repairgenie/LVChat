@@ -75,8 +75,8 @@ may appear in their assigned colour. Users operating through an **o:line**
 | Region | What it shows |
 |---|---|
 | Left sidebar | Server name + notification bell; your joined channels; direct-message conversations; a list of who is online; your user card (⚙ menu) |
-| Centre | The channel header (name, topic, **Share** / **Leave**), the mode bar, the message timeline, and the message composer |
-| Right sidebar | The member list for the current channel — Online and Offline groups, with access-level symbols (`~ & @ % +`) |
+| Centre | The channel header (name, topic, **Share** / **Leave**), the mode bar, the message timeline, the **pinned-bar** (jumpable list of pinned messages), the typing indicator, and the message composer |
+| Right sidebar | Friends, channel invites, and the member list for the current channel — Online and Offline groups, with access-level symbols (`~ & @ % +`) |
 
 - **Hide the chat list** with the ☰ button in the top-left of the message area:
   on desktop it collapses the sidebar (your choice is remembered), on mobile it
@@ -193,7 +193,9 @@ everyone can read them. The same settings are managed with `/mode`.
 | `+t` (topic lock) | Only operators may change the topic (usually on) |
 | `+p` (private) | Hidden from `/list`, joinable via share link |
 | `+s` (secret) | Hidden entirely, join by invitation only |
-| `+b` `/ -b` (ban) | Ban / unban a mask |
+| `+b` `/ -b` (ban) | Ban / unban a mask or nick (a bare nick resolves to `nick!*@*`) |
+| `+q` `/ -q` (mute) | Mute / unmute a specific user (cannot speak) |
+| `+o` `/ +h` `/ +v` | Grant op / half-op / voice to a nick (prefix `-` to remove, e.g. `/mode #chan -o nick`) |
 
 Run `/mode` in a channel with no arguments for a full inline explanation of
 every mode, plus the channel's current mode string.
@@ -347,6 +349,111 @@ sidebar (above the member list) or from any user's profile page.
   uses the friend block system (see §5).
 - The **notification bell** (top-left) aggregates mentions, DMs, invites,
   knocks, friend requests, and friend acceptances; **Mark all read** clears them.
+  New activity also arrives as **in-app toasts** (top-right) and OS/browser
+  notifications. Press **Ctrl+K** (⌘K) anywhere to jump between channels and
+  DMs with the **quick switcher**.
+
+### 5.1 Typing indicators, pinned messages & jumps
+
+- **Typing indicators** — while someone types in the conversation you're
+  reading, an animated "X is typing…" line appears above the composer (channels
+  and DMs alike).
+- **Pinned messages** — operators and admins pin any channel message
+  (right-click → **Pin message**). The pinned bar above the composer shows the
+  count; click it for the jumpable list, or use the header menu → **Pinned
+  messages**. Unpin from the same right-click menu.
+- **Deep links** — a notification click (toast, OS, or push) jumps straight to
+  the message that triggered it, highlighting it in context. Share-style links
+  with `?jump=<id>` work the same way.
+
+---
+
+## 6.1 Voice, calls & meetings (WebRTC)
+
+LVChat ships real-time audio and video powered by **LiveKit** (a self-hosted
+SFU). Voice is a server feature — the 📞 controls in the header appear only when
+an administrator has enabled it. Everything is **server-gated**: if the feature
+is off, no buttons render at all.
+
+### Channel voice (the "huddle")
+
+- An operator must first enable voice on a channel (**Channel settings →
+  Enable voice**). Once on, a voice button appears in the channel header.
+- Click it to **join the channel's voice room**: the chat window shows a small
+  voice panel with your mic mute, camera, screen share, deafen, layout, and
+  **Leave** controls, plus the current roster of participants.
+- **Talking** is automatic (voice-activity detection); each listener hears up
+  to `voice_talker_cap` loudest speakers at once — the same "top talkers"
+  model Discord uses, so big rooms don't drown you in audio.
+- While in voice, press **M** to toggle your microphone.
+- **Video** — toggle your camera, share your screen (optionally with system
+  audio), and switch between **auto / speaker / gallery** layouts. Choose your
+  devices and a **video background** (blur or a custom image) under
+  **⚙ Voice & video settings**.
+- **Deafen** silences everyone else's audio without leaving.
+
+### One-on-one and group calls
+
+- In a DM conversation, the voice button places a **call**: the other person
+  sees an incoming-call overlay with **Accept** / **Decline**. Unanswered calls
+  ring ~20 seconds and become "no answer"; missed calls appear in your
+  notification bell (and as an OS push when you're offline, if notifications
+  are enabled).
+- **Group calls (Discord-style)** — while in an active call, the caller/host
+  can use the in-call **Invite** box to add more people (comma-separated
+  nicks). They see the call as an incoming call and join the same room.
+  Members can hang up and leave the call running; the host ends it for everyone.
+
+### Host controls (moderating a room)
+
+In any voice room you have host privileges if you're the **channel operator**
+(channel voice), the **event founder** (a meeting), or the **call host**:
+- **Mute / unmute** an individual participant, **Mute all**, or **Kick**
+  someone from the roster list in the voice panel.
+- **Lock / unlock** the room — locked rooms refuse new joins until unlocked.
+
+### Waiting rooms (lobby)
+
+An operator can enable a **waiting room** on a channel (or an event creator on
+a meeting). Joining then lands you in a "Waiting for the host…" lobby instead
+of the room; the host admits you from the roster (**Admit**) or rejects you
+(**Deny**). Admitted guests are silently connected the moment the host lets
+them in.
+
+### Recording
+
+When recording is enabled, a host's voice panel shows a **Record** button —
+tap it to record the meeting (LiveKit egress composites the room to an MP4 on
+the server). Hosts (and admins) can download their recordings from
+**Admin → Voice**. Recording needs the server's egress service deployed; if
+it isn't, the button reports "not available" and nothing else changes.
+
+### Meetings (`#evt-*`)
+
+- The **📅 Event** button in the header opens the events panel: create a
+  **WebRTC (interactive)** or **Link** (YouTube/Twitch) event, choose
+  **Public** or **Private**, optionally **schedule** it and set a **duration**,
+  and turn on a **waiting room (Lobby)**.
+- **Private** events get a shareable invite link (`/e/<code>`); the founder can
+  also **invite by email** (each person gets a unique link). **Public** events
+  have a plain `/event/<slug>` link anyone can open.
+- Meeting channels are temporary — they appear in your sidebar while active and
+  are cleaned up when they end. From the events panel's **My events** list you
+  can copy links or **cancel** your own events.
+- Open an invite or event link while logged in to auto-join; logged-out
+  visitors are bounced through login first.
+
+### Connection quality
+
+Each participant in the roster carries a small quality dot (green / amber /
+red) driven by LiveKit's connection-quality reports — a quick way to tell if
+someone's link is the reason a room feels laggy.
+
+### Reacting and raising your hand
+
+In-call buttons let you **raise your hand** (a ✋ badge appears on your tile
+and in the roster) and send **emoji reactions** (👍 ❤️ 🎉 👏 😮 😂) that float
+into the room for a few seconds.
 
 ---
 
@@ -397,7 +504,7 @@ and choose **Channel background** to give it its own image, colour, image fit
 (defaults to **Contain**), and overlay opacity (default 55%). Everyone viewing
 the channel sees it. Admins can set (or remove) any channel's background too.
 
-### 7.2 Notification sounds
+### 7.2 Notification sounds & alerts
 
 Audio alerts play in your browser when a message lands while you're looking
 elsewhere. Open your **Profile & settings** page (from the `⚙` menu) and scroll
@@ -417,6 +524,38 @@ to **Notification sounds**:
 
 Guests get the default sounds automatically but can't change them. Any sound the
 admin uploads is available to everyone — you can't upload your own.
+
+#### Unified alert preferences
+
+One preference set drives every surface — the web chat, the PWA, the Desktop
+client and the Messenger. From **Profile & settings → Push notifications**:
+
+- **Master toggles** — *Play sounds* and *OS & in-app alerts* switch an entire
+  channel off in one click; *Show message previews* replaces message bodies in
+  notifications with a generic line.
+- **Quiet hours** — suppress sounds and alerts between a start and end time, on
+  selected days (none selected = every day). Evaluated in your **local time**;
+  Web Push uses the UTC offset you report automatically at save/time.
+- **Highlight keywords** — messages containing these words alert you exactly
+  like an `@mention`, even in channels set to *mentions only* (one per line).
+- **Per-channel notification modes** — the joined-channel list lets you switch
+  any channel between **All messages / Mentions only / Nothing**, the same
+  control as the 🔔 button in each channel's header.
+- **Send test notification** — fires a test push to this browser.
+
+#### How alerts behave
+
+- **In-app toasts** — new DMs, @mentions in other channels, invites and friend
+  events pop a card in the top-right (avatar, accent per kind, click-to-jump).
+  Toasts are suppressed when you're already reading that conversation.
+- **Badges** — red = someone needs you (unread mentions/DMs); the plain badge
+  on a channel means activity-only unread.
+- **Clicking any notification jumps to the exact message**, not just the
+  channel (the jump highlights the message in place).
+- **Muted channels never sound**: a channel set to *Nothing* is filtered
+  server-side from the background stream, so no client ever alerts for it.
+- **Do Not Disturb** silences sounds, toasts and OS notifications everywhere;
+  muting a person silences all of their surfaces at once.
 
 ### 7.3 Hide your online status
 
@@ -483,7 +622,11 @@ grouped below exactly as `/help` groups them. For one command's details run
 | `/nick <newnick>` | Change your username (2–32 IRC-safe chars) |
 | `/away [message]` | Mark yourself away |
 | `/back` | Return from being away |
-| `/whois <nick>` | Show user info (registration, last seen, channels; IP for ops) |
+| `/whois <nick>` | Show user info (registration, last seen, idle, channels; IP for ops) |
+| `/whowas <nick>` | Show the last-seen record for a nickname |
+| `/who [#channel\|mask]` | List online users matching a mask, or a channel's members |
+| `/names [#channel]` | List a channel's members with their mode prefixes |
+| `/userhost <nick>` | Show a user's `ident@host` |
 | `/list` / `/channels` | Open the public channel browser |
 | `/topic [#channel] [new topic]` | View or set the channel topic |
 | `/ping` | Ping the server — replies "Pong!" |
@@ -511,7 +654,7 @@ Use them from the member right-click menu or by typing:
 | `/voice <nick>` / `/devoice <nick>` | halfop+ | Grant / remove voice (speaks in `+m`) |
 | `/mode [+/-modes] [args]` | halfop+ | Change channel modes and bans (see §3.5) |
 | `/topiclock <on-off>` | halfop+ | Lock / unlock topic to ops |
-| `/clear <users-bans-ops-voices-topic-modes>` | founder/op | Clear channel state (bare `/clear` clears your window) |
+| `/clear [#channel] <users-bans-ops-voices-topic-modes>` | founder/op | Clear channel state (bare `/clear` clears your window) |
 
 **Operator rules:** you may only change users *below* your own level, and may
 only grant up to your own level (half-op grants voice; op grants voice/half-op/
@@ -533,6 +676,7 @@ anything.
 | `/info [nick]` | Server info, or your account info (you + admins) |
 | `/group` | Nicks and accounts are unified here — nothing to do |
 | `/rename <nick>` | Same as `/nick` |
+| `/passwd <newpassword>` | Change your password (same as `/set password`) |
 
 **ChanServ details:**
 
@@ -559,8 +703,8 @@ anything.
 | `/memo read [id]` | Read unread memos, or one by id |
 | `/memo list` | List your memos (with read/unread flags) |
 | `/memo del <id>` | Delete a memo |
-| `/memo summary` | Unread vs. total counts |
-| `/memo set <notify\|silent>` | Preferred notification mode |
+| `/memo summary` | Unread vs. total counts (also shows your notify mode) |
+| `/memo set <notify\|silent>` | Preferred notification mode (persisted) |
 | `/ms ...` | Alias of `/memo` |
 
 ### 9.5 HostServ
@@ -585,8 +729,9 @@ class). If you have one:
 
 You then operate with that class's permissions until you log out or run
 **`/deoper`**. Your nick must exactly match the o:line — there is no shared
-operator password. If you think you were banned in error, contact the server
-owner. See the **Admin Guide**.
+operator password. All OperServ commands can also be prefixed with **`/os`**
+(e.g. `/os kline *!*@1.2.3.4 1h spam`). If you think you were banned in error,
+contact the server owner. See the **Admin Guide**.
 
 ---
 

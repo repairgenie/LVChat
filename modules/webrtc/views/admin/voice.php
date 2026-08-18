@@ -99,6 +99,20 @@ $s = $settings;
       <input class="input font-mono text-xs" type="number" min="16000" max="64000" name="voice_bitrate" value="<?= h($s['voice_bitrate'] ?? '40000') ?>" placeholder="40000">
     </div>
 
+    <div class="flex items-center justify-between card p-4">
+      <div>
+        <div class="text-sm font-medium text-white">Allow meeting recording (egress)</div>
+        <div class="text-xs text-discord-400 mt-0.5">Lets hosts record calls/channel voice to <code class="text-discord-300">data/recordings</code>. Requires <code class="text-discord-300">livekit-egress</code> + Redis running (see module README).</div>
+      </div>
+      <input type="checkbox" name="recording_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($s['recording_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+    </div>
+
+    <div>
+      <label class="label">Recording path (optional)</label>
+      <input class="input font-mono text-xs" name="recording_path" value="<?= h($s['recording_path'] ?? '') ?>" placeholder="<?= h(ROOT . '/data/recordings') ?>" spellcheck="false" autocomplete="off">
+      <p class="text-xs text-discord-400 mt-1">Leave blank for the default (app <code>data/recordings/</code>). Applied when the directory exists and is writable.</p>
+    </div>
+
     <div class="pt-2">
       <button class="btn-primary">Save voice settings</button>
     </div>
@@ -159,6 +173,38 @@ $s = $settings;
         <code class="text-discord-300">docs/webrtc-implementation.md</code> and the module README for deployment
         (LiveKit + coturn install, ports, wss).
       </div>
+    </div>
+
+    <div class="card p-5 text-sm">
+      <div class="text-sm font-medium text-white mb-3">Live rooms (LiveKit admin API)</div>
+      <?php if (!$rooms): ?>
+        <p class="text-xs text-discord-400">No rooms (or the LiveKit admin API is unreachable — see the health dot above).</p>
+      <?php else: ?>
+        <ul class="space-y-2">
+          <?php foreach ($rooms as $r): ?>
+            <li class="flex items-center justify-between gap-2">
+              <span class="font-mono text-xs truncate" title="<?= h($r['name']) ?>"><?= h($r['name']) ?></span>
+              <span class="text-discord-300 font-mono"><?= (int) $r['num_participants'] ?> 👤</span>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
+    </div>
+
+    <div class="card p-5 text-sm">
+      <div class="text-sm font-medium text-white mb-3">Recordings</div>
+      <?php if (!$recordings): ?>
+        <p class="text-xs text-discord-400">No recordings yet. Hosts start them from the in-call controls when recording is enabled.</p>
+      <?php else: ?>
+        <ul class="space-y-2">
+          <?php foreach ($recordings as $rec): ?>
+            <li class="flex items-center justify-between gap-2">
+              <span class="text-xs truncate" title="<?= h($rec['room']) ?>"><?= h($rec['room']) ?></span>
+              <span class="text-discord-300 font-mono text-xs"><?= h($rec['status']) ?><?= $rec['size'] ? ' · ' . round($rec['size'] / 1048576, 1) . ' MB' : '' ?></span>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
     </div>
   </div>
 </div>

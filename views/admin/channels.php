@@ -17,42 +17,34 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Channels'; $active = 'channels'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Channels</h1>
-  <form method="get" action="/admin/channels" class="flex gap-2">
-    <input class="input w-56" name="q" placeholder="Search channels…" value="<?= h($term) ?>">
+ $title = 'Channels'; $active = 'channels';
+$pageActions = '<form method="get" action="/admin/channels" class="flex gap-2">
+    <input class="input w-56" name="q" placeholder="Search channels…" value="' . h($term) . '">
     <button class="btn-primary">Search</button>
-  </form>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
+  </form>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <div class="card overflow-x-auto">
-  <table class="w-full text-sm">
+  <table class="data-table">
     <thead>
-      <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-        <th class="px-4 py-2">Channel</th>
-        <th class="px-4 py-2">Topic</th>
-        <th class="px-4 py-2">Founder</th>
-        <th class="px-4 py-2">Members</th>
-        <th class="px-4 py-2">Visibility</th>
-        <th class="px-4 py-2 text-right">Actions</th>
-      </tr>
+      <tr><th>Channel</th><th>Topic</th><th>Founder</th><th>Members</th><th>Visibility</th><th class="text-right">Actions</th></tr>
     </thead>
     <tbody>
       <?php foreach ($channels as $c): ?>
-      <tr class="border-b border-discord-800 align-top">
-        <td class="px-4 py-2">
+      <tr class="align-top">
+        <td>
           <a href="/c/<?= h(rawurlencode($c['slug'])) ?>" class="font-medium text-white hover:underline"><?= h($c['name']) ?></a>
           <a href="/admin/logs?channel=<?= h(rawurlencode($c['name'])) ?>" class="ml-1 text-[10px] text-blurple hover:underline">logs</a>
           <?php if ($c['forbidden']): ?><span class="ml-1 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">FORBIDDEN</span><?php endif; ?>
         </td>
-        <td class="px-4 py-2 text-discord-300 max-w-60 truncate"><?= h($c['topic'] ?: '(none)') ?></td>
-        <td class="px-4 py-2 text-discord-300"><?= h($c['owner'] ?? 'none') ?></td>
-        <td class="px-4 py-2"><?= (int) $c['members'] ?></td>
-        <td class="px-4 py-2 text-discord-300"><?= h($c['visibility']) ?><?= $c['invite_only'] ? ' +i' : '' ?><?= $c['moderated'] ? ' +m' : '' ?></td>
-        <td class="px-4 py-2">
-          <details class="text-right">
+        <td class="text-discord-300 max-w-60 truncate"><?= h($c['topic'] ?: '(none)') ?></td>
+        <td class="text-discord-300"><?= h($c['owner'] ?? 'none') ?></td>
+        <td><?= (int) $c['members'] ?></td>
+        <td class="text-discord-300"><?= h($c['visibility']) ?><?= $c['invite_only'] ? ' +i' : '' ?><?= $c['moderated'] ? ' +m' : '' ?></td>
+        <td>
+          <details class="relative text-right">
             <summary class="btn-ghost text-xs !py-1 inline-flex cursor-pointer">Actions</summary>
             <div class="absolute right-0 mt-1 w-72 card p-3 space-y-2 z-20">
               <form method="post" action="/admin/action" class="flex gap-2">

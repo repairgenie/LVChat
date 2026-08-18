@@ -54,7 +54,7 @@ final class VoiceController
     }
 
     /** Insert/update the actor's live voice session (one per actor). */
-    private static function upsertSession(array $actor, string $room, string $kind, string $token): void
+    private static function upsertSession(array $actor, string $room, string $kind, ?string $token, bool $waiting = false): void
     {
         $isGuest = Auth::isGuest($actor);
         $col = $isGuest ? 'guest_id' : 'user_id';
@@ -62,9 +62,11 @@ final class VoiceController
             "DELETE FROM voice_sessions WHERE $col = ?",
             [(int) $actor['id']]
         );
+        // Waiting occupants have no LiveKit token yet (schema keeps token NOT
+        // NULL, so store an empty string for them — they're admitted via mint).
         Database::query(
-            "INSERT INTO voice_sessions ($col, room, kind, token) VALUES (?, ?, ?, ?)",
-            [(int) $actor['id'], $room, $kind, $token]
+            "INSERT INTO voice_sessions ($col, room, kind, token, waiting) VALUES (?, ?, ?, ?, ?)",
+            [(int) $actor['id'], $room, $kind, $token ?? '', $waiting ? 1 : 0]
         );
     }
 
@@ -98,12 +100,62 @@ final class VoiceController
 
         $status = LiveKitService::status();
 
-        // Touch this actor's session so the stale-pruner keeps them counted.
+        // Touch this actor's session so the stale-pruner keeps them counted
+        // (waiting occupants heartbeat too — they hold a session row while
+        // the host decides).
         if ($sess = self::currentSession($actor)) {
             Database::query(
                 'UPDATE voice_sessions SET last_seen = datetime("now") WHERE id = ?',
                 [(int) $sess['id']]
             );
+        }
+
+        // Session payload: room state + (for moderators) the roster so the host
+        // can kick/mute/admit straight from the UI. The roster is app-side
+        // (voice_sessions), so the 2s poll never touches LiveKit's admin API.
+        $session = null;
+        if ($sess) {
+            $room = (string) $sess['room'];
+            $session = [
+                'room' => $room,
+                'kind' => (string) $sess['kind'],
+                'waiting' => (int) ($sess['waiting'] ?? 0) === 1,
+                'locked' => LiveKitService::roomLocked($room),
+                'can_moderate' => ModerationController::canModerate($actor, $room),
+            ];
+            if ((int) ($sess['waiting'] ?? 0) === 1) {
+                // Waiting occupants skip the roster (they're not inside yet).
+                $session['roster'] = [];
+            } else {
+                $meIdentity = LiveKitService::identity($actor);
+                $roster = [];
+                foreach (LiveKitService::roster($room) as $r) {
+                    $roster[] = [
+                        'identity' => $r['identity'],
+                        'name' => $r['name'],
+                        'guest' => $r['guest'],
+                        'waiting' => $r['waiting'],
+                        'me' => $r['identity'] === $meIdentity,
+                    ];
+                }
+                $session['roster'] = $roster;
+            }
+            // Admission handoff: the host admitted us — hand over a freshly
+            // minted token exactly once. The token is regenerated on every
+            // poll while the mint is pending so a slow client never gets an
+            // expired one, then cleared after delivery.
+            if (!empty($sess['mint'])) {
+                $token = LiveKitService::token($room, $actor, LiveKitService::maxUsers());
+                Database::query(
+                    'UPDATE voice_sessions SET mint = NULL, token = ? WHERE id = ?',
+                    [$token, (int) $sess['id']]
+                );
+                $session['mint'] = [
+                    'url' => LiveKitService::url(),
+                    'token' => $token,
+                    'room' => $room,
+                ];
+            }
         }
 
         // Channels the actor is a member of, marked with their voice state.
@@ -146,6 +198,8 @@ final class VoiceController
                 'room' => $call['room'],
                 'status' => $call['status'],
                 'peer' => $peer,
+                'title' => (string) ($call['title'] ?? ''),
+                'group' => self::callIsGroup($call),
                 'incoming' => !$isCaller && $call['status'] === 'ringing',
                 'started' => (int) (strtotime((string) $call['created_at'] . ' UTC') * 1000),
             ];
@@ -161,6 +215,48 @@ final class VoiceController
                     continue;
                 }
                 $incoming[] = $row;
+            }
+        }
+
+        // Group-call invites: active calls this actor was added to (invited,
+        // not yet joined/declined). The callee columns above already cover the
+        // original 1:1 pair; this sweep picks up every later invitee.
+        foreach (Database::all(
+            'SELECT cs.*, cp.status AS invited_status, cp.role AS invited_role
+             FROM call_participants cp
+             JOIN call_sessions cs ON cs.id = cp.call_id
+             WHERE cp.status IN ("invited", "joined") AND cs.status = "active"
+               AND (cp.user_id = ? OR cp.guest_id = ?)
+             ORDER BY cs.id',
+            [$meId, $meId]
+        ) as $call) {
+            $seen = false;
+            if ($active !== null && (int) $active['call_id'] === (int) $call['id']) {
+                $seen = true;
+            }
+            foreach ($incoming as $c) {
+                if ((int) $c['call_id'] === (int) $call['id']) {
+                    $seen = true;
+                }
+            }
+            $base = [
+                'call_id' => (int) $call['id'],
+                'room' => $call['room'],
+                'status' => 'active',
+                'peer' => self::callPeer($call['caller_user_id'], $call['caller_guest_id']),
+                'title' => (string) ($call['title'] ?? ''),
+                'group' => true,
+                'started' => (int) (strtotime((string) $call['created_at'] . ' UTC') * 1000),
+            ];
+            if ($seen) {
+                continue;
+            }
+            if (($call['invited_status'] ?? '') === 'joined') {
+                // Already in the room: surface as the active call (page reload).
+                $active = $active === null ? $base : $active;
+            } else {
+                // Still ringing for us (invited, not yet accepted).
+                $incoming[] = array_merge($base, ['incoming' => true]);
             }
         }
 
@@ -186,6 +282,23 @@ final class VoiceController
             ];
         }
 
+        // Recording state for the UI (admin gate + whether this room is being recorded).
+        $recEnabled = (string) (config_get('recording_enabled', '0') ?? '0') === '1';
+        $recActive = null;
+        if ($sess && $recEnabled) {
+            $recRow = Database::row(
+                "SELECT * FROM recordings WHERE room = ? AND status IN ('starting', 'active') ORDER BY id DESC LIMIT 1",
+                [(string) $sess['room']]
+            );
+            if ($recRow) {
+                $recActive = [
+                    'room' => (string) $recRow['room'],
+                    'file' => (string) ($recRow['filename'] ?? ''),
+                    'started_at' => (string) ($recRow['started_at'] ?? ''),
+                ];
+            }
+        }
+
         json_out([
             'ok' => true,
             'enabled' => $status['enabled'],
@@ -195,8 +308,9 @@ final class VoiceController
             'talker_cap' => LiveKitService::talkerCap(),
             'bitrate' => LiveKitService::bitrate(),
             'ring_seconds' => LiveKitService::ringSeconds(),
+            'recording' => ['enabled' => $recEnabled, 'active' => $recActive],
             'channels' => $channels,
-            'session' => $sess ? ['room' => $sess['room'], 'kind' => $sess['kind']] : null,
+            'session' => $session,
             'calls' => ['incoming' => $incoming, 'outgoing' => $outgoing, 'active' => $active, 'recent' => $recent],
         ]);
     }
@@ -219,6 +333,9 @@ final class VoiceController
         if ($slug === '') {
             json_out(['error' => 'Missing channel.'], 400);
         }
+        if (!LiveKitService::rateLimit('voice-join:' . LiveKitService::identity($actor), 12, 60)) {
+            json_out(['error' => 'Too many join attempts. Please slow down.'], 429);
+        }
         $channel = Database::row('SELECT * FROM channels WHERE slug = ? COLLATE NOCASE', [$slug]);
         if (!$channel) {
             json_out(['error' => 'Unknown channel.'], 404);
@@ -230,13 +347,35 @@ final class VoiceController
             json_out(['error' => 'You are not a member of this channel.'], 403);
         }
 
+        $room = 'chan:' . $slug;
+
+        // Waiting room (Zoom-style lobby): the flag lives on the channel or on
+        // the linked event; occupants who can't moderate the room wait before
+        // entering. Locked rooms refuse new joins entirely (except moderators).
+        $moderator = ModerationController::canModerate($actor, $room);
+        $event = null;
+        if ((int) ($channel['event_id'] ?? 0)) {
+            $event = Database::row('SELECT * FROM events WHERE id = ?', [(int) $channel['event_id']]);
+        }
+        $waitingRoom = (int) ($channel['voice_waiting_room'] ?? 0) === 1
+            || ($event && (int) ($event['waiting_room'] ?? 0) === 1);
+
+        if (!$moderator && LiveKitService::roomLocked($room)) {
+            json_out(['error' => 'This voice room is locked by a moderator.'], 403);
+        }
+        if (!$moderator && $waitingRoom) {
+            // Wait: session row only (heartbeated by the status poll); the host
+            // admits later, and the fresh token is handed over via session.mint.
+            self::upsertSession($actor, $room, 'channel', null, true);
+            json_out(['ok' => true, 'waiting' => true, 'room' => $room]);
+        }
+
         LiveKitService::pruneStale();
         $status = LiveKitService::status();
         if ($status['full']) {
             json_out(['error' => "Voice is full ({$status['active']}/{$status['max']}). Try again later."], 409);
         }
 
-        $room = 'chan:' . $slug;
         $token = LiveKitService::token($room, $actor, LiveKitService::maxUsers());
         self::upsertSession($actor, $room, 'channel', $token);
 
@@ -247,6 +386,7 @@ final class VoiceController
             'room' => $room,
             'talker_cap' => LiveKitService::talkerCap($actor),
             'bitrate' => LiveKitService::bitrate($actor),
+            'can_moderate' => $moderator,
         ]);
     }
 
@@ -256,11 +396,33 @@ final class VoiceController
         $actor = self::requireActor();
         self::requireCsrf();
         $sess = self::deleteSession($actor);
-        if ($sess && $sess['kind'] === 'call') {
-            Database::query(
-                "UPDATE call_sessions SET status = 'ended' WHERE room = ? AND status != 'ended'",
-                [$sess['room']]
-            );
+        if ($sess && $sess['kind'] === 'call' && str_starts_with((string) $sess['room'], 'call_')) {
+            // Mark the leaver's participant row; only 1:1/host leaves end the
+            // whole call (group calls survive a single member hanging up).
+            $call = Database::row('SELECT * FROM call_sessions WHERE room = ?', [$sess['room']]);
+            if ($call) {
+                $me = (int) $actor['id'];
+                $isGuest = Auth::isGuest($actor);
+                if (!$isGuest && (int) ($call['caller_user_id'] ?? 0) === $me) {
+                    Database::query("UPDATE call_sessions SET status = 'ended' WHERE id = ?", [(int) $call['id']]);
+                } elseif ($isGuest && (int) ($call['caller_guest_id'] ?? 0) === $me) {
+                    Database::query("UPDATE call_sessions SET status = 'ended' WHERE id = ?", [(int) $call['id']]);
+                } else {
+                    Database::query(
+                        'UPDATE call_participants SET status = "left" WHERE call_id = ? AND '
+                            . ($isGuest ? 'guest_id = ? AND user_id IS NULL' : 'user_id = ? AND guest_id IS NULL'),
+                        [(int) $call['id'], $me]
+                    );
+                    // Last man out ends the call.
+                    $remaining = (int) Database::scalar(
+                        "SELECT COUNT(*) FROM call_participants WHERE call_id = ? AND status IN ('invited', 'joined')",
+                        [(int) $call['id']]
+                    );
+                    if ($remaining === 0 && $call['status'] !== 'ended') {
+                        Database::query("UPDATE call_sessions SET status = 'ended' WHERE id = ?", [(int) $call['id']]);
+                    }
+                }
+            }
         }
         json_out(['ok' => true]);
     }
@@ -296,6 +458,16 @@ final class VoiceController
             return $g ? (string) $g['nick'] : 'guest';
         }
         return 'unknown';
+    }
+
+    /** A call is a group call once anyone beyond the original 1:1 pair was invited. */
+    private static function callIsGroup(array $call): bool
+    {
+        $n = (int) Database::scalar(
+            "SELECT COUNT(*) FROM call_participants WHERE call_id = ? AND status IN ('invited', 'joined', 'declined')",
+            [(int) $call['id']]
+        );
+        return $n > 2;
     }
 
     /**

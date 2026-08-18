@@ -17,7 +17,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Terms & Privacy'; $active = 'legal'; ?>
+ $title = 'Terms & Privacy'; $active = 'legal';
+$pageTitle = 'Terms of Service &amp; Privacy Policy';
+$pageActions = '<a href="/terms" target="_blank" class="btn-ghost text-xs !py-1.5">Preview /terms</a>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 <style>
   .rt-shell { border: 1px solid var(--c-d-700); border-radius: 8px; background: var(--c-d-800); }
   .rt-toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--c-d-700); background: var(--c-d-850); border-radius: 8px 8px 0 0; }
@@ -45,12 +50,6 @@
   .rt-content .tiptap hr { border: none; border-top: 1px solid var(--c-d-600); margin: 12px 0; }
   .rt-content .tiptap mark { background-color: #fef08a; color: #000; padding: 0 2px; border-radius: 2px; }
 </style>
-
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Terms of Service &amp; Privacy Policy</h1>
-  <a href="/terms" target="_blank" class="btn-ghost text-xs">Preview /terms</a>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
 
 <div class="card p-5 mb-5 max-w-3xl">
   <p class="text-sm text-discord-400">Edit the site's legal pages with the full rich-text editor (headings, formatting, colours, tables, task lists, images, and more). They are linked from the account menu in the chat sidebar and from the login/register pages. Boilerplate is based on US federal law and Nevada statutes (NRS 597.790 / NRS 597.795).</p>

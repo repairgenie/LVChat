@@ -17,12 +17,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = $user['username'] . ' — Moderation'; $active = 'users'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Moderation history — <?= h($user['username']) ?></h1>
-  <a href="/admin/users" class="btn-ghost text-xs">← Back to users</a>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
+ $title = $user['username'] . ' — Moderation'; $active = 'users';
+$pageTitle = 'Moderation history — ' . $user['username'];
+$pageActions = '<a href="/admin/users" class="btn-ghost text-xs !py-1.5">← Back to users</a>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
   <div class="lg:col-span-1 space-y-5">
@@ -120,29 +120,24 @@
     </div>
 
     <div class="card overflow-x-auto">
-      <div class="px-4 py-3 border-b border-discord-700 text-sm font-semibold text-white">Timeline</div>
-      <table class="w-full text-sm">
+      <div class="px-5 py-3.5 border-b border-discord-700 text-sm font-semibold text-white">Timeline</div>
+      <table class="data-table">
         <thead>
-          <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-            <th class="px-4 py-2">When</th>
-            <th class="px-4 py-2">Action</th>
-            <th class="px-4 py-2">By</th>
-            <th class="px-4 py-2">Details</th>
-          </tr>
+          <tr><th>When</th><th>Action</th><th>By</th><th>Details</th></tr>
         </thead>
         <tbody>
           <?php foreach ($history as $n): ?>
-          <tr class="border-b border-discord-800 align-top">
-            <td class="px-4 py-2 text-discord-400 whitespace-nowrap"><?= h(gmdate('M j Y H:i', strtotime($n['created_at'] . ' UTC'))) ?></td>
-            <td class="px-4 py-2">
+          <tr class="align-top">
+            <td class="text-discord-400 whitespace-nowrap"><?= h(gmdate('M j Y H:i', strtotime($n['created_at'] . ' UTC'))) ?></td>
+            <td>
               <span class="px-1.5 py-0.5 rounded text-[11px] <?= $n['action'] === 'note' ? 'bg-discord-700 text-discord-300' : ($n['action'] === 'suspend' ? 'bg-red-500/20 text-red-400' : 'bg-blurple/20 text-blurple') ?>"><?= h(ModerationService::label($n['action'])) ?></span>
             </td>
-            <td class="px-4 py-2 text-discord-300"><?= h($n['actor_name'] ?? 'system') ?></td>
-            <td class="px-4 py-2 text-discord-200 whitespace-pre-wrap"><?= h($n['reason']) ?></td>
+            <td class="text-discord-300"><?= h($n['actor_name'] ?? 'system') ?></td>
+            <td class="text-discord-200 whitespace-pre-wrap"><?= h($n['reason']) ?></td>
           </tr>
           <?php endforeach; ?>
           <?php if (!$history): ?>
-          <tr><td colspan="4" class="px-4 py-4 text-discord-500">No moderation history yet.</td></tr>
+          <tr><td colspan="4" class="py-4 text-discord-500">No moderation history yet.</td></tr>
           <?php endif; ?>
         </tbody>
       </table>
@@ -150,25 +145,19 @@
 
     <?php if ($events): ?>
     <div class="card overflow-x-auto">
-      <div class="px-4 py-3 border-b border-discord-700 text-sm font-semibold text-white">Queue events for this account</div>
-      <table class="w-full text-sm">
+      <div class="px-5 py-3.5 border-b border-discord-700 text-sm font-semibold text-white">Queue events for this account</div>
+      <table class="data-table">
         <thead>
-          <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-            <th class="px-4 py-2">When</th>
-            <th class="px-4 py-2">Type</th>
-            <th class="px-4 py-2">Action</th>
-            <th class="px-4 py-2">Match</th>
-            <th class="px-4 py-2">Content</th>
-          </tr>
+          <tr><th>When</th><th>Type</th><th>Action</th><th>Match</th><th>Content</th></tr>
         </thead>
         <tbody>
           <?php foreach ($events as $e): ?>
-          <tr class="border-b border-discord-800 align-top">
-            <td class="px-4 py-2 text-discord-400 whitespace-nowrap"><?= h(gmdate('M j H:i', strtotime($e['created_at'] . ' UTC'))) ?></td>
-            <td class="px-4 py-2"><?= h($e['kind']) ?></td>
-            <td class="px-4 py-2"><?= h($e['action']) ?></td>
-            <td class="px-4 py-2 font-mono text-[11px] text-discord-300"><?= h($e['match']) ?></td>
-            <td class="px-4 py-2 text-discord-300"><?= h(mb_strimwidth($e['content'], 0, 80, '…')) ?></td>
+          <tr class="align-top">
+            <td class="text-discord-400 whitespace-nowrap"><?= h(gmdate('M j H:i', strtotime($e['created_at'] . ' UTC'))) ?></td>
+            <td><?= h($e['kind']) ?></td>
+            <td><?= h($e['action']) ?></td>
+            <td class="font-mono text-[11px] text-discord-300"><?= h($e['match']) ?></td>
+            <td class="text-discord-300"><?= h(mb_strimwidth($e['content'], 0, 80, '…')) ?></td>
           </tr>
           <?php endforeach; ?>
         </tbody>

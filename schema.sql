@@ -308,6 +308,7 @@ CREATE TABLE IF NOT EXISTS user_notify_prefs (
   quiet_hours_days TEXT NOT NULL DEFAULT '[]',
   highlight_keywords TEXT NOT NULL DEFAULT '[]',
   tz_offset_minutes INTEGER NOT NULL DEFAULT 0,
+  memo_notify TEXT NOT NULL DEFAULT 'notify',
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

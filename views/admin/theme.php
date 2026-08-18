@@ -26,11 +26,9 @@ $fit = $ov['chat_bg_fit'] ?? 'contain';
 $overlay = isset($ov['chat_bg_overlay']) ? (int) $ov['chat_bg_overlay'] : ThemeService::CHAT_BG_OVERLAY_DEFAULT;
 $bgColor = $ov['chat_bg_color'] ?? '';
 $bgImage = $ov['chat_bg_image'] ?? '';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
 ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Appearance</h1>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
 
 <form method="post" action="/admin/action" id="theme-form" class="space-y-5 max-w-4xl">
   <?= Csrf::field() ?>

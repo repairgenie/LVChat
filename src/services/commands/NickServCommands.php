@@ -99,6 +99,12 @@ CommandRegistry::register('register', [
             }
             return ['replies' => ["$name belongs to someone else and cannot be registered."]];
         }
+        if (Auth::isGuest($user)) {
+            return ['replies' => [
+                'Guests cannot register accounts in-chat. Create an account here: ' . url('/register'),
+                'Registered accounts unlock channels, memos, vhosts and nicknames.',
+            ]];
+        }
         return ['replies' => [
             'You already have an account (' . $user['username'] . ').',
             'To change your password use: /set password <newpassword>',
@@ -260,5 +266,15 @@ CommandRegistry::register('rename', [
     'run' => function (array $args, array $user, ?array $channel) {
         $reg = CommandRegistry::get('nick');
         return call_user_func($reg['run'], $args, $user, $channel);
+    },
+]);
+
+CommandRegistry::register('passwd', [
+    'group' => 'NickServ',
+    'desc' => 'Change your password (alias of /set password).',
+    'usage' => '/passwd <newpassword>',
+    'run' => function (array $args, array $user, ?array $channel) {
+        $reg = CommandRegistry::get('set');
+        return call_user_func($reg['run'], array_merge(['password'], $args), $user, $channel);
     },
 ]);

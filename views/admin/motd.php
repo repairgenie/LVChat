@@ -17,18 +17,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'MOTD'; $active = 'motd'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Message of the day</h1>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
-<form method="post" action="/admin/action" class="card p-6 space-y-4 flex flex-col" style="height:calc(100vh - 20rem);min-height:24rem">
+ $title = 'MOTD'; $active = 'motd'; require ROOT . '/views/admin/_nav.php'; ?>
+<?php $pageTitle = 'Message of the day'; $pageSubtitle = 'Shown at the top of every chat window. Blank lines are fine.'; require ROOT . '/views/admin/_page_header.php'; ?>
+<form method="post" action="/admin/action" class="card p-6 max-w-2xl space-y-4">
   <?= Csrf::field() ?>
   <input type="hidden" name="back" value="/admin/motd">
-  <div class="flex flex-col flex-1 min-h-0">
+  <div>
     <label class="label">MOTD text</label>
-    <textarea name="motd" class="input font-mono flex-1 min-h-[200px]" placeholder="Welcome…"><?= h($motd) ?></textarea>
-    <p class="text-xs text-discord-400 mt-1">Shown at the top of every chat window. Blank lines are fine.</p>
+    <textarea name="motd" class="input font-mono min-h-[220px]" placeholder="Welcome…"><?= h($motd) ?></textarea>
   </div>
   <button name="action" value="motd_save" class="btn-primary self-start">Save MOTD</button>
 </form>

@@ -141,9 +141,16 @@ A handler returns one of:
 | `me <action>` | Action message, `kind: action`. |
 | `msg` / `pm` / `query <nick> <message>` | Send a PM. |
 | `notice <nick> <message>` | PM with no notification created. |
-| `nick <newnick>` | Rename (system `nick` events in every joined channel). |
+| `nick <newnick>` | Rename (system `nick` events in every joined channel; o:lines follow the new nick). |
 | `away [message]` / `back` | Toggle away state. |
-| `whois <nick>` | User info. |
+| `whois <nick>` | User info — registered users and guests; idle + signon lines; IP for ops. |
+| `whowas <nick>` | Last-seen record (falls back to the chat archive). |
+| `who [#channel|<mask>]` | Online users matching a nick mask, or a channel's members. |
+| `names [#channel]` | Channel member list with mode prefixes (`~&@%+`). |
+| `userhost <nick>` | `nick=ident@host` line. |
+| `ping` / `pong` | Latency check (`Pong!` / `Ping!`). |
+| `version` | Server software and version. |
+| `time` | Server time (UTC). |
 | `list` / `channels` | `action: browse` — open the channel browser. |
 | `topic <text>` | Set topic (channel). |
 | `ping` | Latency check. |
@@ -157,14 +164,18 @@ A handler returns one of:
 ### Channel Ops
 
 `kick`, `kickban`, `ban`, `unban`, `quiet`, `op`, `deop`, `halfop`,
-`dehalfop`, `voice`, `devoice`, `mode`, `topiclock`, `clear <users|bans|ops|
-voices|topic|modes>`.
+`dehalfop`, `voice`, `devoice`, `mode`, `topiclock`, `clear [#channel] <users|
+bans|ops|voices|topic|modes>`.
 
 - `/mode` with no flags prints the full mode explanation inline.
 - Modes: `+i` invite-only, `+m` moderated, `+C` word filter, `+k` key,
-  `+l` limit, `+t` topic-lock, `+p`/`+s` visibility, `+b`/`-b` bans,
-  `+vhoaq` levels. Every mode change emits a `mode` system event and a
-  `log_audit` row.
+  `+l` limit, `+t` topic-lock, `+p`/`+s` visibility, `+b`/`-b` bans (a bare
+  nick resolves to `nick!*@*`), `+q`/`-q` per-user mutes, `+o`/`+h`/`+v`
+  per-user levels (prefix `-` to remove, e.g. `/mode #chan -o nick`),
+  `+L` no-log (opers only). `<mask|nick>` targets on `+b` resolve nicks.
+  Every mode change emits a `mode` system event and a `log_audit` row.
+- Staff (server admins and active o:lines) bypass channel-level mode guards —
+  this is what makes `/samode` work on any channel.
 
 ### ChanServ
 
@@ -174,11 +185,17 @@ voices|topic|modes>`.
 ### NickServ
 
 `register`, `identify`, `logout`, `set`, `ghost`, `release`, `recover`,
-`status`, `info`, `group`, `rename`, `ns`.
+`status`, `info`, `group`, `rename`, `passwd`, `ns`.
+
+- `/passwd <newpassword>` is an alias of `/set password`.
+- Non-channel `/register` for guests replies with the web registration link —
+  account creation happens on the web form.
 
 ### MemoServ
 
-`memo`, `ms` — send / read / list / del / summary / set.
+`memo`, `ms` — send / read / list / del / summary / set. The `/memo set
+notify|silent` preference is persisted per-user (`user_notify_prefs.memo_notify`)
+and shown in `/memo summary`.
 
 ### HostServ
 
@@ -189,7 +206,13 @@ voices|topic|modes>`.
 `oper`, `deoper`, `kline`, `gline`, `zline`, `shun` (+ `un*` variants), `kill`,
 `global`, `wallops`, `motd`, `sajoin`, `sapart`, `samode`, `sanick`,
 `sasethost`, `sqline`, `unsqline`, `sqlines`, `cqline`, `uncqline`, `cqlines`,
-`spamfilter`, `badword`, `clients`, `serverstats`, `rehash`, `notice`.
+`spamfilter`, `badword`, `serverstats`, `rehash`, `os`.
+
+- `/os <command> [args]` is the OperServ prefix alias (re-enters the parser, so
+  the target command's own gates still apply).
+- `/notice` is a **Core** command (open to everyone) — it is not OperServ.
+- `serverstats` is oper-restricted (like UnrealIRCd's `/stats`); `clients` and
+  `motd` remain public.
 
 - `/oper <nick> <password>` elevates against a per-user **o:line** (no shared
   operator password); the result is an oper-class permission set active for the

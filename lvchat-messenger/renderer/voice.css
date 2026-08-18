@@ -15,77 +15,115 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/* LVChat Messenger — voice UI styles (shared with messenger-web). */
+/* WebRTC Voice — module styles (loaded on the chat app page via module.json
+   assets.css). All selectors are prefixed #lvcvoice-* to avoid clashing with
+   the core app. */
 
-#lvcvoice-btn.lvcvoice-in-voice {
-  color: var(--green, #22c55e);
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.12);
-}
-#lvcvoice-btn.lvcvoice-in-call {
-  color: var(--red, #ef4444);
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.12);
-}
+#lvcvoice-btn { flex-shrink: 0; }
+#lvcvoice-btn.in-voice { background: rgba(34,197,94,.15); border-color: rgba(34,197,94,.4); color: #4ade80; }
+#lvcvoice-btn.disabled { opacity: .5; cursor: not-allowed; }
 
-/* Call pill in the header actions row. */
-.lvcvoice-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--muted, #9ca3af);
+.lvcvoice-dropdown { position: relative; flex-shrink: 0; }
+.lvcvoice-dd-trigger {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; cursor: pointer;
 }
-.lvcvoice-pill .lvcvoice-pill-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--green, #22c55e);
+.lvcvoice-dd-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #80848e; flex-shrink: 0;
 }
-.lvcvoice-pill.ringing .lvcvoice-pill-dot {
-  background: var(--amber, #f59e0b);
-  animation: lvcvoice-pulse 1s infinite;
+.lvcvoice-dd-icon { display: inline-flex; align-items: center; color: #dbdee1; }
+.lvcvoice-dd-arrow { font-size: 10px; color: #80848e; }
+.lvcvoice-dd-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 4px;
+  min-width: 190px; background: #2b2d31;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); z-index: 120;
+  padding: 4px 0; overflow: hidden;
 }
-@keyframes lvcvoice-pulse { 50% { opacity: 0.3; } }
+.lvcvoice-dd-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 12px; background: none; border: none;
+  color: #dbdee1; font-size: 13px; cursor: pointer; text-align: left;
+}
+.lvcvoice-dd-item:hover { background: rgba(255,255,255,.06); }
+.lvcvoice-dd-item-icon { display: inline-flex; align-items: center; width: 18px; justify-content: center; flex-shrink: 0; }
+.lvcvoice-dd-item-label { white-space: nowrap; }
+.lvcvoice-pill-hangup {
+  display: inline-flex; align-items: center; color: #ef4444;
+  padding: 4px 8px; border-color: rgba(239,68,68,.3);
+}
+.lvcvoice-pill-hangup:hover { background: rgba(239,68,68,.15); }
 
-/* Voice pane pinned to the bottom-right of the chat. */
-.lvcvoice-pane {
+/* Voice pane: pinned above the message list on the right side of the chat. */
+#lvcvoice-pane {
   position: fixed;
   right: 16px;
-  bottom: 64px;
+  bottom: 16px;
   width: 300px;
   max-width: calc(100vw - 32px);
-  z-index: 200;
-  background: var(--surface-1, #232428);
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  z-index: 90;
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.08);
   border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-  color: var(--text, #e5e7eb);
+  box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  color: #dbdee1;
   font-size: 13px;
   overflow: hidden;
 }
-.lvcvoice-pane-head {
+#lvcvoice-pane .pane-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
-  background: var(--surface-2, #2b2d31);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  background: #2b2d31;
   font-weight: 600;
+  color: #fff;
 }
-.lvcvoice-pane-body {
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.lvcvoice-pane-row { display: flex; align-items: center; gap: 8px; }
-.lvcvoice-pane-meta { color: var(--muted, #9ca3af); font-size: 12px; }
+#lvcvoice-pane .pane-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+#lvcvoice-pane .pane-row { display: flex; align-items: center; gap: 8px; }
+#lvcvoice-pane .pane-meta { color: #80848e; font-size: 12px; }
 
-/* Video grid + controls inside the voice pane. */
+/* Incoming call overlay (fixed, top center). */
+#lvcvoice-ring {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: #232428;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.6);
+  padding: 14px 18px;
+  min-width: 260px;
+  text-align: center;
+  color: #dbdee1;
+}
+#lvcvoice-ring .ring-title { font-weight: 700; color: #fff; margin-bottom: 2px; }
+#lvcvoice-ring .ring-sub { color: #80848e; font-size: 12px; margin-bottom: 12px; }
+#lvcvoice-ring .ring-actions { display: flex; justify-content: center; gap: 10px; }
+#lvcvoice-ring button {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+#lvcvoice-ring .ring-accept { background: #22c55e; color: #052e16; }
+#lvcvoice-ring .ring-decline { background: #ef4444; color: #450a0a; }
+
+/* In-call status pill (in the channel header when a call is active). */
+#lvcvoice-callpill { display: inline-flex; align-items: center; gap: 6px; }
+#lvcvoice-callpill.ringing .dot { animation: lvcvoice-pulse 1s infinite; }
+#lvcvoice-callpill .dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; }
+#lvcvoice-callpill.active .dot { background: #22c55e; }
+@keyframes lvcvoice-pulse { 50% { opacity: .3; } }
+
+/* Video grid + tiles inside the voice pane. */
 .lvcvoice-videos {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -97,14 +135,14 @@
   background: #000;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border: 1px solid rgba(255,255,255,.08);
 }
 .lvcvoice-tile video {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.lvcvoice-tile.muted { opacity: 0.5; }
+.lvcvoice-tile.muted { opacity: .5; }
 .lvcvoice-tile::after {
   content: attr(data-label);
   position: absolute;
@@ -112,69 +150,188 @@
   bottom: 4px;
   font-size: 10px;
   color: #fff;
-  background: rgba(0,0,0,0.55);
+  background: rgba(0,0,0,.55);
   border-radius: 4px;
   padding: 1px 6px;
 }
-.lvcvoice-tile.self { border-color: rgba(88,101,242,0.6); }
-.lvcvoice-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.lvcvoice-tile.self { border-color: rgba(88,101,242,.6); }
 
-/* Incoming call overlay (top center). */
-.lvcvoice-ring {
-  position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 300;
-  background: var(--surface-1, #232428);
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-  padding: 14px 18px;
-  min-width: 260px;
-  text-align: center;
-  color: var(--text, #e5e7eb);
-}
-.lvcvoice-ring-title { font-weight: 700; margin-bottom: 2px; }
-.lvcvoice-ring-peer { color: var(--muted, #9ca3af); font-size: 12px; margin-bottom: 12px; }
-.lvcvoice-ring-actions { display: flex; justify-content: center; gap: 10px; }
-
-/* Toast for voice errors / info. */
-.lvcvoice-toast {
-  position: fixed;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 400;
-  background: var(--surface-1, #232428);
-  border: 1px solid var(--border, rgba(255,255,255,0.12));
-  color: var(--text, #e5e7eb);
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-size: 13px;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+/* Voice pane controls row. */
+.pane-controls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-/* ── Voice & video settings modal ─────────────────────────────────────── */
-.lvcvoice-pane-head-actions { display: flex; align-items: center; gap: 6px; }
-.lvcvoice-settings-overlay {
+/* Meeting modal. */
+.lvcvoice-mtg-overlay {
   position: fixed;
   inset: 0;
-  z-index: 320;
-  background: rgba(0,0,0,0.6);
+  z-index: 110;
+  background: rgba(0,0,0,.6);
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.lvcvoice-settings-overlay[hidden] { display: none !important; }
+.lvcvoice-mtg-overlay.hidden { display: none; }
+.lvcvoice-mtg-card {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  color: #dbdee1;
+  font-size: 13px;
+  overflow: hidden;
+}
+.lvcvoice-mtg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #2b2d31;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  font-weight: 600;
+  color: #fff;
+}
+.lvcvoice-mtg-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.lvcvoice-mtg-hint { color: #9ba1a6; font-size: 12px; line-height: 1.5; }
+.lvcvoice-mtg-name { font-weight: 700; color: #fff; }
+.lvcvoice-mtg-urlrow { display: flex; gap: 6px; align-items: center; }
+.lvcvoice-mtg-urlrow .input { flex: 1; min-width: 0; color: #dbdee1; background: #1e1f22; border-color: rgba(255,255,255,.15); }
+.lvcvoice-mtg-urlrow .input:focus { border-color: #5865f2; outline: none; }
+.lvcvoice-mtg-result { color: #fbbf24; font-size: 12px; line-height: 1.5; }
+
+/* Toast. */
+#lvcvoice-toast {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.14);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+#lvcvoice-toast.show { opacity: 1; }
+
+/* Talking ring (active-speaker highlight) on a video tile. */
+.lvcvoice-tile.speaking { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34,197,94,.5); }
+
+/* Connection quality dot in the roster. */
+.lvcvoice-q { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.lvcvoice-q.q-good { background: #22c55e; }
+.lvcvoice-q.q-fair { background: #f59e0b; }
+.lvcvoice-q.q-poor { background: #ef4444; }
+.lvcvoice-hand { font-size: 11px; margin-right: 4px; }
+
+/* Roster rows inside the pane. */
+.pane-roster { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+.pane-roster-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 6px; }
+.pane-roster-row:hover { background: rgba(255,255,255,.04); }
+.pane-roster-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-roster-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.pane-roster-actions .lvcvoice-btn-ghost { padding: 3px 8px; font-size: 11px; }
+
+/* Waiting-room card. */
+.pane-waiting { text-align: center; padding: 18px 6px; }
+.pane-waiting-card {
+  background: #2b2d31; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px; padding: 16px 14px; display: flex;
+  flex-direction: column; gap: 8px; align-items: center;
+}
+.pane-waiting-title { font-weight: 700; color: #fff; }
+
+/* Reaction strip + floating bursts. */
+.pane-reactions { display: flex; gap: 4px; flex-wrap: wrap; }
+.pane-reactions.hidden { display: none; }
+.pane-reac-btn { padding: 3px 8px; font-size: 14px; }
+.pane-reaction-bursts { min-height: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.pane-reaction { font-size: 20px; animation: lvcvoice-pop .3s ease-out; }
+@keyframes lvcvoice-pop { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+/* Moderator bar + share-audio option. */
+.pane-mod { display: flex; gap: 6px; flex-wrap: wrap; }
+.pane-mod.hidden { display: none; }
+.pane-shareaudio-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9ba1a6; cursor: pointer; }
+.pane-record.recording { color: #f87171; border-color: rgba(239,68,68,.5); animation: lvcvoice-pulse 1.2s infinite; }
+
+/* Group-call invite row. */
+.pane-invite { display: flex; flex-direction: column; gap: 4px; }
+.pane-invite.hidden { display: none; }
+.pane-invite-row { display: flex; gap: 6px; align-items: center; }
+.pane-invite-row .input { flex: 1; min-width: 0; color: #dbdee1; background: #1e1f22; border-color: rgba(255,255,255,.15); }
+.pane-invite-row .input:focus { border-color: #5865f2; outline: none; }
+.pane-invite-result { color: #fbbf24; font-size: 11px; }
+
+/* Pane minimized: a floating video-only pill. */
+#lvcvoice-pane.minimized { width: 180px; }
+#lvcvoice-pane.minimized .pane-head { font-size: 11px; padding: 5px 8px; }
+#lvcvoice-pane.minimized .pane-body { padding: 4px; gap: 4px; }
+#lvcvoice-pane.minimized .pane-body > :not(#lvcvoice-videos) { display: none; }
+#lvcvoice-pane.minimized .lvcvoice-videos { grid-template-columns: 1fr; }
+#lvcvoice-pane.minimized .lvcvoice-tile { aspect-ratio: 4/3; }
+
+/* Layouts: speaker spotlight vs gallery grid. */
+#lvcvoice-pane.speaker .lvcvoice-videos {
+  grid-template-columns: 1fr;
+  grid-auto-rows: auto;
+}
+#lvcvoice-pane.speaker .lvcvoice-tile.speaking {
+  order: -1;
+  min-height: 140px;
+}
+#lvcvoice-pane.gallery .lvcvoice-videos {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
+/* Pane action states. */
+#lvcvoice-pane .pane-controls .lvcvoice-btn-ghost.active { background: #5865f2; border-color: #5865f2; color: #fff; }
+
+/* Event list rows in the events modal. */
+.evt-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+.evt-list-row {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  background: #2b2d31; border: 1px solid rgba(255,255,255,.07);
+  border-radius: 8px; padding: 6px 10px;
+}
+.evt-list-title { color: #dbdee1; font-size: 12px; min-width: 0; }
+.evt-list-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.evt-list-actions .lvcvoice-btn-ghost { padding: 3px 8px; font-size: 11px; }
+
+/* Small buttons used inside pane/overlay. */
+.lvcvoice-btn-ghost {
+  background: #2b2d31;
+  border: 1px solid rgba(255,255,255,.08);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lvcvoice-btn-ghost:hover { background: #35373c; }
+.lvcvoice-btn-danger { border-color: rgba(239,68,68,.4); color: #f87171; }
+
+/* Pane header actions (settings gear + leave). */
+.pane-head-actions { display: flex; align-items: center; gap: 6px; }
+
+/* ── Voice & video settings modal ─────────────────────────────────────── */
 .lvcvoice-settings-card {
   width: 460px;
   max-width: calc(100vw - 32px);
-  background: var(--surface-1, #232428);
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.1);
   border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
-  color: var(--text, #e5e7eb);
+  box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  color: #dbdee1;
   font-size: 13px;
   overflow: hidden;
 }
@@ -187,12 +344,12 @@
   overflow-y: auto;
 }
 .st-section { display: flex; flex-direction: column; gap: 8px; }
-.st-label { color: var(--muted, #9ca3af); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-.st-field { display: flex; flex-direction: column; gap: 4px; color: var(--text, #e5e7eb); font-size: 12px; }
+.st-label { color: #9ba1a6; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.st-field { display: flex; flex-direction: column; gap: 4px; color: #dbdee1; font-size: 12px; }
 .st-select {
-  background: var(--surface-2, #2b2d31);
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
-  color: var(--text, #e5e7eb);
+  background: #2b2d31;
+  border: 1px solid rgba(255,255,255,.1);
+  color: #dbdee1;
   border-radius: 8px;
   padding: 7px 10px;
   font-size: 12px;
@@ -206,21 +363,90 @@
   background: #000;
   border-radius: 8px;
   object-fit: cover;
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border: 1px solid rgba(255,255,255,.08);
 }
 .st-meter-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
 .st-meter-wrap meter { width: 120px; height: 14px; }
-.st-meter-val { color: var(--amber, #f59e0b); font-size: 11px; min-width: 32px; }
+.st-meter-val { color: #fbbf24; font-size: 11px; min-width: 32px; }
 .st-bg { flex: 1; }
-.st-bg.on { background: var(--blurple, #5865f2); border-color: var(--blurple, #5865f2); color: #fff; }
+.st-bg.on { background: #5865f2; border-color: #5865f2; color: #fff; }
 .st-imgprev {
   width: 100%;
   max-height: 160px;
   object-fit: cover;
   border-radius: 8px;
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border: 1px solid rgba(255,255,255,.1);
   margin-top: 4px;
 }
-.st-hint { color: var(--muted, #9ca3af); font-size: 11px; line-height: 1.5; }
-#lvcvoice-settings input[type="file"] { font-size: 12px; color: var(--muted, #9ca3af); }
+.st-hint { color: #9ba1a6; font-size: 11px; line-height: 1.5; }
+#lvcvoice-settings input[type="file"] { font-size: 12px; color: #9ba1a6; }
 #lvcvoice-settings input[type="range"] { width: 100%; }
+
+/* Small buttons used inside pane/overlay. */
+.lvcvoice-btn-ghost {
+  background: #2b2d31;
+  border: 1px solid rgba(255,255,255,.08);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lvcvoice-btn-ghost:hover { background: #35373c; }
+.lvcvoice-btn-danger { border-color: rgba(239,68,68,.4); color: #f87171; }
+
+/* Hidden utility: the web app depends on Tailwind's `.hidden`; the messenger
+   shells have their own CSS system, so provide it here for our own widgets. */
+.lvcvoice-mtg-overlay.hidden,
+.lvcvoice-settings-card.hidden,
+#lvcvoice-pane.hidden,
+#lvcvoice-ring.hidden,
+#lvcvoice-settings.hidden,
+#lvcvoice-toast.hidden,
+.lvcvoice-dd-menu.hidden,
+#lvcvoice-callpill.hidden,
+.lvcvoice-dropdown.hidden { display: none !important; }
+.pane-waiting.hidden, .pane-mod.hidden,
+.pane-reactions.hidden, .pane-shareaudio-label.hidden, .pane-invite.hidden,
+.lvcvoice-pill.hidden, .st-camtest.hidden, .st-blur.hidden, .st-image.hidden,
+.st-imgprev.hidden, .lvcvoice-mtg-result.hidden,
+#lvcvoice-evt-form.hidden, #lvcvoice-evt-view.hidden { display: none !important; }
+
+/* Form-ish inputs used by the event + settings modals (Tailwind supplies
+   these in the web app; messenger shells style them here so the modals are
+   usable standalone). */
+#lvcvoice-evt-modal .input, #lvcvoice-settings .input {
+  background: #1e1f22;
+  border: 1px solid rgba(255,255,255,.15);
+  color: #dbdee1;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+#lvcvoice-evt-modal .label, #lvcvoice-settings .label {
+  display: block;
+  color: #9ba1a6;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  margin-bottom: 4px;
+}
+#lvcvoice-evt-modal .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #5865f2;
+  border: 1px solid #5865f2;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#lvcvoice-evt-modal .btn-primary:hover { background: #4752c4; }
+#lvcvoice-evt-modal .text-xs, #lvcvoice-settings .text-xs { font-size: 12px; }
+#lvcvoice-evt-modal .text-discord-300, #lvcvoice-settings .text-discord-300 { color: #9ba1a6; }

@@ -13,6 +13,13 @@ settings** control panel (bans, registered ops & half-ops, topic, Channel URL)
 for ops and above, and render a **Channel URL** in a pane above the chat when
 one is set.
 
+It also ships the **shared WebRTC voice client** (same canonical
+`voice.js`/`voice.css` as the web app and Electron messenger): one-on-one and
+group calls, channel voice, video + screen share with background effects,
+waiting rooms, host moderation, recording, and meeting events — server-gated
+via `/api/webrtc/voice/status`. A tiny `src/voice-host.js` adapter binds the
+canonical client to this shell's `LvApi` transport and DOM.
+
 ## Requirements
 
 - Node.js (any recent version) **only for building** — the output is fully
@@ -120,6 +127,9 @@ src/                 client sources (adapted from lvchat-messenger/renderer)
   messenger.js       the IM client (reused, ~3k lines untouched)
   api.js emoji.js messenger.css   reused as-is
   web-bridge.js      window.msg web implementation (profiles, prefs, notify, push, logout)
+  voice.js voice.css voice-host.js vendor/livekit-client.umd.js vendor/selfie-segmentation/
+                     the shared WebRTC voice client (synced from modules/webrtc/assets;
+                     voice-host.js adapts it to LvApi + this DOM)
   sw.template.js     service worker (shell precache + push handler)
   manifest.template.json  PWA manifest (filled at build time)
   icons/             PWA icon set (regenerate: npm run icons)

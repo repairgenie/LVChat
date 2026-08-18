@@ -19,17 +19,12 @@
 
  $title = 'Updates'; $active = 'updates';
 $updaterOn = $enabled && $updaterUrl !== '';
+if ($updaterOn) {
+    $pageActions = '<form method="post" action="/admin/updates/check">' . Csrf::field() . '<button type="submit" class="btn-primary">Check for updates</button></form>';
+}
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
 ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Updates</h1>
-  <?php if ($updaterOn): ?>
-  <form method="post" action="/admin/updates/check">
-    <?= Csrf::field() ?>
-    <button type="submit" class="btn-primary text-sm">Check for updates</button>
-  </form>
-  <?php endif; ?>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
 
 <?php if (!$updaterOn): ?>
 <div class="card p-6 max-w-2xl">
@@ -42,7 +37,7 @@ $updaterOn = $enabled && $updaterUrl !== '';
   <a href="/admin/settings" class="btn-primary text-sm">Enable in Settings → Updates</a>
 </div>
 <?php else: ?>
-<div class="card p-4 mb-4 max-w-2xl">
+<div class="card p-5 mb-4 max-w-2xl">
   <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-discord-400">
     <span>Feed: <a class="text-blurple-300 hover:underline" href="<?= h($updaterUrl) ?>/manifest.json" target="_blank" rel="noopener"><?= h($updaterUrl) ?></a></span>
     <span>Cache: <?= $cachedAt ? relative_time(gmdate('Y-m-d H:i:s', $cachedAt)) : 'never fetched' ?></span>

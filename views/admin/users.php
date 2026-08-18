@@ -17,15 +17,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Users'; $active = 'users'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Users</h1>
-  <form method="get" action="/admin/users" class="flex gap-2">
-    <input class="input w-56" name="q" placeholder="Search username/email…" value="<?= h($term) ?>">
+ $title = 'Users'; $active = 'users';
+$pageSubtitle = 'Accounts, roles, suspensions and IP z-lines';
+$pageActions = '<form method="get" action="/admin/users" class="flex gap-2">
+    <input class="input w-56" name="q" placeholder="Search username/email…" value="' . h($term) . '">
     <button class="btn-primary">Search</button>
-  </form>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
+  </form>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <div class="card p-5 mb-5">
   <div class="flex items-center justify-between mb-3">
@@ -63,23 +63,14 @@
 </div>
 
 <div class="card overflow-x-auto">
-  <table class="w-full text-sm">
+  <table class="data-table">
     <thead>
-      <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-        <th class="px-4 py-2">User</th>
-        <th class="px-4 py-2">Email</th>
-        <th class="px-4 py-2">Role</th>
-        <th class="px-4 py-2">Channels</th>
-        <th class="px-4 py-2">Registered</th>
-        <th class="px-4 py-2">Last seen</th>
-        <th class="px-4 py-2">IP</th>
-        <th class="px-4 py-2 text-right">Actions</th>
-      </tr>
+      <tr><th>User</th><th>Email</th><th>Role</th><th>Channels</th><th>Registered</th><th>Last seen</th><th>IP</th><th class="text-right">Actions</th></tr>
     </thead>
     <tbody>
       <?php foreach ($users as $u): ?>
-      <tr class="border-b border-discord-800">
-        <td class="px-4 py-2">
+      <tr>
+        <td>
           <a href="/u/<?= h(rawurlencode($u['username'])) ?>" class="font-medium text-white hover:underline"><?= h($u['username']) ?></a>
           <?php if ($u['banned']): ?><span class="ml-1 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">BANNED</span><?php endif; ?>
           <?php if (($u['status'] ?? 'active') === 'suspended'): ?><span class="ml-1 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">SUSPENDED</span><?php endif; ?>
@@ -87,9 +78,9 @@
           <?php if (!empty($u['status_reason'])): ?><span class="ml-1 text-[10px] text-discord-500" title="<?= h($u['status_reason']) ?>">⚠</span><?php endif; ?>
           <div class="mt-0.5"><a href="/admin/users/<?= (int) $u['id'] ?>" class="text-[11px] text-blurple hover:underline">moderation history</a></div>
         </td>
-        <td class="px-4 py-2 text-discord-300"><?= h($u['email']) ?></td>
-        <td class="px-4 py-2"><?= $u['role'] === 'admin' ? '<span class="text-amber-400">admin</span>' : ($u['role'] === 'staff' ? '<span class="text-blurple">staff</span>' : 'user') ?></td>
-        <td class="px-4 py-2">
+        <td class="text-discord-300"><?= h($u['email']) ?></td>
+        <td><?= $u['role'] === 'admin' ? '<span class="text-amber-400">admin</span>' : ($u['role'] === 'staff' ? '<span class="text-blurple">staff</span>' : 'user') ?></td>
+        <td>
           <form method="post" action="/admin/action" class="flex items-center gap-1">
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/users">
@@ -103,11 +94,11 @@
             <input type="hidden" name="action" value="user_set_role">
           </form>
         </td>
-        <td class="px-4 py-2"><?= (int) $u['channel_count'] ?></td>
-        <td class="px-4 py-2 text-discord-400"><?= h(date('M j Y', strtotime($u['registered_at'] . ' UTC'))) ?></td>
-        <td class="px-4 py-2 text-discord-400"><?= h(relative_time($u['last_seen'])) ?></td>
-        <td class="px-4 py-2 font-mono text-[11px] text-discord-300"><?= h($u['last_ip'] ?? '—') ?></td>
-        <td class="px-4 py-2">
+        <td><?= (int) $u['channel_count'] ?></td>
+        <td class="text-discord-400"><?= h(date('M j Y', strtotime($u['registered_at'] . ' UTC'))) ?></td>
+        <td class="text-discord-400"><?= h(relative_time($u['last_seen'])) ?></td>
+        <td class="font-mono text-[11px] text-discord-300"><?= h($u['last_ip'] ?? '—') ?></td>
+        <td>
           <form method="post" action="/admin/action" class="flex flex-wrap gap-1 justify-end max-w-xs">
             <?= Csrf::field() ?>
             <input type="hidden" name="back" value="/admin/users">

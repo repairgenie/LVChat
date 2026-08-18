@@ -130,7 +130,9 @@ chat `<body>`:
 6. [commands.md](commands.md) — the slash-command protocol (parser,
    result/event shapes, command catalog)
 7. [presence.md](presence.md) — online/away/presence bookkeeping
-8. [errors.md](errors.md) — status codes, JSON error shapes, rate limits,
+8. [voice.md](voice.md) — the WebRTC module: webchat voice, calls, host
+   moderation, waiting room, recording (`/api/webrtc/*`, LiveKit JWT)
+9. [errors.md](errors.md) — status codes, JSON error shapes, rate limits,
    moderation gates
 
 ---
@@ -152,5 +154,11 @@ chat `<body>`:
 | React to a message | `POST /api/message/reaction` (`id`, `emoji`) |
 | Report a message | `POST /api/report` (`id`, `pm`, `reason`, `other`) |
 | Join / part / create a channel | `POST /api/join` / `POST /api/part` / `POST /api/channels` |
+| Check voice status | `GET /api/webrtc/voice/status` |
+| Join / leave channel voice | `POST /api/webrtc/voice/join` / `POST /api/webrtc/voice/leave` |
+| Call someone (1:1 or group) | `POST /api/webrtc/call/initiate` / `.../invite` / `.../accept` |
+| Moderate a voice room (kick/mute/lock/admit) | `POST /api/webrtc/moderate` |
+| Record / download a meeting | `POST /api/webrtc/record` · `GET /api/webrtc/recordings/{id}` |
+| Create a meeting event | `POST /api/events/create` (`title`, `is_public`, `event_type`) |
 | Manage channel settings (bans / ops / topic / URL) | `GET /api/channel/settings` · `POST /api/channel/settings` |
 | Check the session | `GET /api/me`, `GET /api/csrf` |

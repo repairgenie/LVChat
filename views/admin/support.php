@@ -17,7 +17,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Support'; $active = 'support'; ?>
+ $title = 'Support'; $active = 'support';
+$pageTitle = 'Support tickets';
+$pageActions = '<button id="new-ticket-toggle" class="btn-primary text-xs">＋ Open a ticket</button>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 <style>
   .rt-shell { border: 1px solid var(--c-d-700); border-radius: 8px; background: var(--c-d-800); }
   .rt-toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--c-d-700); background: var(--c-d-850); border-radius: 8px 8px 0 0; }
@@ -35,11 +40,6 @@
   .rt-content .tiptap code { background: var(--c-d-900); border: 1px solid var(--c-d-700); border-radius: 4px; padding: 1px 4px; }
   .rt-content .tiptap pre code { background: none; border: none; padding: 0; }
 </style>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Support tickets</h1>
-  <button id="new-ticket-toggle" class="btn-primary text-xs">＋ Open a ticket</button>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
 
 <div id="new-ticket-form" class="hidden card p-5 mb-5 max-w-3xl">
   <h2 class="font-semibold text-white mb-3">Open a ticket</h2>
@@ -106,37 +106,30 @@
 </div>
 
 <?php if (!$tickets): ?>
-<div class="card p-6 text-sm text-discord-400">No tickets<?= $status !== '' ? ' with status ' . h($status) : '' ?><?= $assignee !== '' ? ' (assignee: ' . h($assignee) . ')' : '' ?>.</div>
+<div class="empty-state">No tickets<?= $status !== '' ? ' with status ' . h($status) : '' ?><?= $assignee !== '' ? ' (assignee: ' . h($assignee) . ')' : '' ?>.</div>
 <?php endif; ?>
 
 <div class="card overflow-x-auto">
-  <table class="w-full text-sm">
+  <table class="data-table">
     <thead>
-      <tr class="text-left text-xs text-discord-400 border-b border-discord-700">
-        <th class="px-4 py-2">Ticket</th>
-        <th class="px-4 py-2">Subject</th>
-        <th class="px-4 py-2">Contact</th>
-        <th class="px-4 py-2">Status</th>
-        <th class="px-4 py-2">Assignee</th>
-        <th class="px-4 py-2">Updated</th>
-      </tr>
+      <tr><th>Ticket</th><th>Subject</th><th>Contact</th><th>Status</th><th>Assignee</th><th>Updated</th></tr>
     </thead>
     <tbody>
       <?php foreach ($tickets as $t): ?>
-      <tr class="border-b border-discord-800">
-        <td class="px-4 py-2"><a href="/admin/support/<?= (int) $t['id'] ?>" class="text-blurple hover:underline">#<?= (int) $t['id'] ?></a></td>
-        <td class="px-4 py-2 text-white"><?= h($t['subject']) ?></td>
-        <td class="px-4 py-2">
+      <tr>
+        <td><a href="/admin/support/<?= (int) $t['id'] ?>" class="text-blurple hover:underline">#<?= (int) $t['id'] ?></a></td>
+        <td class="text-white"><?= h($t['subject']) ?></td>
+        <td>
           <?php if ($t['user_id'] !== null): ?>
           <a href="/admin/users/<?= (int) $t['user_id'] ?>" class="hover:underline"><?= h($t['username']) ?></a>
           <?php else: ?>
           <span class="text-discord-300"><?= h($t['email']) ?: '<em class="text-discord-500">email only</em>' ?></span>
           <?php endif; ?>
         </td>
-        <td class="px-4 py-2">
+        <td>
           <span class="px-1.5 py-0.5 rounded text-[11px] <?= $t['status'] === 'open' ? 'bg-red-500/20 text-red-400' : ($t['status'] === 'answered' ? 'bg-amber-500/20 text-amber-300' : 'bg-discord-700 text-discord-400') ?>"><?= h($t['status']) ?></span>
         </td>
-        <td class="px-4 py-2">
+        <td>
           <form method="post" action="/admin/support/<?= (int) $t['id'] ?>/assign" class="flex items-center gap-1">
             <?= Csrf::field() ?>
             <select name="assigned_to" class="assign-select text-xs bg-discord-750 border border-discord-600 rounded px-1.5 py-0.5" onchange="this.form.submit()">
@@ -147,7 +140,7 @@
             </select>
           </form>
         </td>
-        <td class="px-4 py-2 text-discord-400"><?= h(relative_time($t['updated_at'])) ?></td>
+        <td class="text-discord-400"><?= h(relative_time($t['updated_at'])) ?></td>
       </tr>
       <?php endforeach; ?>
     </tbody>

@@ -81,7 +81,43 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
   </div>
   <?php endif; ?>
   <main class="flex-1 w-full <?= !empty($fullWidth) ? 'max-w-none px-4 md:px-8 py-6' : 'max-w-5xl mx-auto px-4 py-8' ?>">
+    <?php if (!empty($adminShell)): ?>
+    <div class="admin-layout">
+      <aside class="admin-sidebar scrollbar-thin" aria-label="Admin navigation">
+        <div class="flex items-center gap-2 px-2 pt-1.5 pb-2 mb-1 border-b border-discord-700">
+          <div class="w-7 h-7 rounded-lg bg-blurple/15 border border-blurple/30 flex items-center justify-center text-blurple"><?= icon('shield', 'w-4 h-4') ?></div>
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-discord-100 leading-tight truncate">Admin</div>
+            <div class="text-[10px] text-discord-400 leading-tight truncate"><?= h($user['username'] ?? $admin['username'] ?? '') ?></div>
+          </div>
+        </div>
+        <?= $adminSidebarHtml ?>
+      </aside>
+      <div class="admin-content">
+        <div class="lg:hidden sticky top-0 z-40 -mx-4 px-4 pb-2 pt-1 bg-discord-900/95 backdrop-blur-sm border-b border-discord-800 mb-3">
+          <button id="admin-nav-toggle" class="btn-ghost !py-1.5 text-sm" aria-expanded="false"><?= icon('menu', 'w-4 h-4') ?> Menu</button>
+        </div>
+        <?= $content ?>
+      </div>
+    </div>
+    <div class="admin-drawer-backdrop" id="admin-drawer-backdrop"></div>
+    <script>
+    (function () {
+      var toggle = document.getElementById('admin-nav-toggle');
+      var backdrop = document.getElementById('admin-drawer-backdrop');
+      if (!toggle || !backdrop) return;
+      function setOpen(open) {
+        document.body.classList.toggle('admin-drawer-open', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      toggle.addEventListener('click', function () { setOpen(!document.body.classList.contains('admin-drawer-open')); });
+      backdrop.addEventListener('click', function () { setOpen(false); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+    })();
+    </script>
+    <?php else: ?>
     <?= $content ?>
+    <?php endif; ?>
   </main>
   <?php if (!empty($donateFooter)): ?>
   <footer class="border-t border-discord-800">

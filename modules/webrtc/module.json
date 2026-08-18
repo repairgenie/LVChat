@@ -1,8 +1,8 @@
 {
   "id": "webrtc",
   "name": "WebRTC Voice (LiveKit)",
-  "version": "1.0.0",
-  "description": "One-on-one audio calls and per-channel voice via a self-hosted LiveKit SFU.",
+  "version": "1.1.0",
+  "description": "Calls, channel voice, video, group calls, waiting rooms, moderation and recording via a self-hosted LiveKit SFU.",
   "author": "LVChat",
   "requires": {
     "lvchat": ">=1.7.1",
@@ -21,7 +21,9 @@
     "voice_talker_cap": "8",
     "voice_bitrate": "40000",
     "voice_quality_preset": "moderate",
-    "call_ring_seconds": "20"
+    "call_ring_seconds": "20",
+    "recording_enabled": "0",
+    "recording_path": ""
   },
   "assets": {
     "css": ["css/voice.css"],

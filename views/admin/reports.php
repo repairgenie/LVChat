@@ -17,19 +17,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
- $title = 'Reports'; $active = 'reports'; ?>
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-2xl font-bold text-white">Message reports</h1>
-  <div class="flex gap-1">
-    <?php foreach (['open', 'investigated', 'resolved', 'dismissed', 'all'] as $s): ?>
-    <a href="/admin/reports<?= $s === 'all' ? '' : '?status=' . $s ?>" class="px-2.5 py-1 rounded-md text-sm <?= ($status === $s || ($s === 'all' && !in_array($status, ['open', 'investigated', 'resolved', 'dismissed'], true))) ? 'bg-blurple text-white' : 'bg-discord-750 text-discord-300 hover:text-white' ?>"><?= h(ucfirst($s)) ?></a>
-    <?php endforeach; ?>
-  </div>
-</div>
-<?php require ROOT . '/views/admin/_nav.php'; ?>
+ $title = 'Reports'; $active = 'reports';
+$pageTitle = 'Message reports';
+$pageActions = '<div class="flex gap-1 bg-discord-850 border border-discord-700 rounded-lg p-1 text-sm">
+    ' . implode('', array_map(function ($s) use ($status) {
+        $on = ($status === $s || ($s === 'all' && !in_array($status, ['open', 'investigated', 'resolved', 'dismissed'], true)))
+            ? 'bg-discord-700 text-white'
+            : 'text-discord-300 hover:bg-discord-750 hover:text-white';
+        return '<a href="/admin/reports' . ($s === 'all' ? '' : '?status=' . $s) . '" class="px-3 py-1 rounded-md ' . $on . '">' . h(ucfirst($s)) . '</a>';
+    }, ['open', 'investigated', 'resolved', 'dismissed', 'all'])) . '
+  </div>';
+require ROOT . '/views/admin/_nav.php';
+require ROOT . '/views/admin/_page_header.php';
+?>
 
 <?php if (!$reports): ?>
-<div class="card p-6 text-sm text-discord-400">No reports here.</div>
+<div class="empty-state"><span>No reports here.</span></div>
 <?php endif; ?>
 
 <?php foreach ($reports as $r):
