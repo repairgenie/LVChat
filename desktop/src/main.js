@@ -92,17 +92,18 @@ const HIDE_WEB_UI_CSS = `
   #push-row { display: none !important; }
 `
 
-// Injected into the chat page's main world. Delivers OS notifications by
-// watching the server directly, so it works on any server version and in any
-// realtime mode:
-//  1. The updated web app dispatches `lvchat:notify` for background-channel
-//     messages (the one thing the notifications feed never lists).
-//  2. The bridge polls GET /api/notifications itself — the web app only renders
-//     that feed when the bell is clicked, so we watch the source for real-time
-//     DM / mention / invite / friend alerts. New items are deduped by id and
-//     gated by the user's per-context push prefs (Profile → Push notifications).
-//  3. On older servers (no `data-push-prefs`), the bridge also watches
-//     /api/poll responses for background channel messages (polling realtime).
+// Injected into the chat page's main world. Delivers OS notifications.
+//
+// Modern server (has `data-notify-prefs`): the page's unified alert engine
+// makes every decision — per-context prefs, mutes, DND, quiet hours, focus and
+// viewing suppression — and dispatches `lvchat:notify` events with full conv
+// deep-link data. The bridge only forwards those to the main process, so the
+// desktop behaves identically to the web app, messenger and PWA.
+//
+// Legacy server (no `data-notify-prefs`): the bridge falls back to watching
+// the /api/notifications feed + /api/poll for background channel messages,
+// with DND/focus suppression applied here instead of the page.
+//
 // Notifications are always shown by the main process — the page's own
 // Notification API can't be relied on (its permission often reads as denied).
 const NOTIFY_BRIDGE = `
@@ -110,18 +111,8 @@ const NOTIFY_BRIDGE = `
     if (window.__lvchatNotifyBridge) return;
     window.__lvchatNotifyBridge = true;
 
-    var prefs = (function () {
-      try {
-        var p = JSON.parse(document.body.dataset.pushPrefs || '{}');
-        return { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 };
-      } catch (e) { return { channels: 1, dms: 1, invites: 1 }; }
-    })();
-    var serverHasBridge = !!(document.body.dataset.pushPrefs);
-
-    function strip (s) {
-      return String(s || '').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\\s+/g, ' ').trim();
-    }
-    function push (title, body, conv) {
+    var hasPrefs = !!(document.body.dataset.notifyPrefs || document.body.dataset.pushPrefs);
+    function notify (title, body, conv) {
       if (window.lvchatNative && window.lvchatNative.notify) {
         window.lvchatNative.notify({ title: title, body: body, conv: conv || null });
         return;
@@ -134,27 +125,36 @@ const NOTIFY_BRIDGE = `
         } catch (err) {}
       }
     }
-    // Listen for notification clicks from the main process: open the specific DM/channel.
+    // Listen for notification clicks from the main process: open (and jump to)
+    // the specific DM/channel the alert was about.
     if (window.lvchatNative && window.lvchatNative.onNotificationOpen) {
       window.lvchatNative.onNotificationOpen(function (conv) {
         if (!conv || !conv.type || !conv.id) return;
         try {
-          if (conv.type === 'dm') window.location.href = '/app?dm=' + encodeURIComponent(conv.id);
-          else if (conv.type === 'room') window.location.href = '/app?channel=' + encodeURIComponent(conv.id);
+          var jump = conv.msg_id ? '&jump=' + encodeURIComponent(conv.msg_id) : '';
+          if (conv.type === 'dm') window.location.href = '/app?dm=' + encodeURIComponent(conv.id) + jump;
+          else if (conv.type === 'room' || conv.type === 'channel') window.location.href = '/app?channel=' + encodeURIComponent(conv.id) + jump;
         } catch (err) {}
       });
     }
 
-    // 1. Events from the updated web app (background channel messages).
+    // Unified modern path: the page's alert engine drives everything.
     window.addEventListener('lvchat:notify', function (e) {
       var d = e.detail || {};
-      push(String(d.title || 'LVChat'), String(d.body || ''), d.conv || null);
+      notify(String(d.title || 'LVChat'), String(d.body || ''), d.conv || null);
     });
 
-    // 2. Feed notifications — poll the source directly so alerts are real time.
-    //    The first poll seeds the dedup set silently (pre-existing unread items
-    //    must not re-alert on every app start / page load); only items that
-    //    appear afterwards produce OS alerts.
+    // ── Legacy server fallbacks (old LVChat builds) ─────────────────────────
+    if (hasPrefs) return;
+
+    function dndNow () { return document.body.dataset.meStatus === 'dnd'; }
+    function focused () { return typeof document.hasFocus === 'function' ? document.hasFocus() : true; }
+
+    function strip (s) {
+      return String(s || '').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\\s+/g, ' ').trim();
+    }
+    // Feed notifications (friend invites, mentions; DM content comes from the
+    // poll below). First poll seeds the dedup set silently.
     var seen = {};
     var seeded = false;
     function handleFeed (list) {
@@ -164,36 +164,22 @@ const NOTIFY_BRIDGE = `
         if (!n || !n.id || seen[n.id]) continue;
         seen[n.id] = 1;
         if (!seeded) continue;
+        if (dndNow() || !focused()) continue;
         var kind = String(n.kind || '');
         var title = 'LVChat';
         var body = '';
-        if (kind === 'dm') {
-          if (prefs.dms !== 1) continue;
-          title = 'DM from ' + (n.sender || 'someone');
-          body = n.content ? strip(n.content) : 'New direct message';
-          push(title, body, { type: 'dm', id: n.sender || '' });
-        } else if (kind === 'mention') {
-          if (prefs.channels !== 1) continue;
+        if (kind === 'mention') {
           title = 'Mentioned you';
           body = (n.sender ? '@' + n.sender : 'Someone') + (n.channel_name ? ' in ' + n.channel_name : '');
-          push(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });
+          notify(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });
         } else if (kind === 'invite') {
-          if (prefs.invites !== 1) continue;
           title = 'Channel invite';
           body = 'You were invited to ' + (n.channel_name || 'a channel') + (n.sender ? ' by ' + n.sender : '');
-          push(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });
+          notify(title, body, { type: 'room', id: n.channel_slug || n.channel_name || '' });
         } else if (kind === 'friend_request') {
-          title = 'Friend request';
-          body = (n.sender || 'Someone') + ' sent you a friend request';
-          push(title, body, { type: 'dm', id: n.sender || '' });
+          notify('Friend request', (n.sender || 'Someone') + ' sent you a friend request', { type: 'dm', id: n.sender || '' });
         } else if (kind === 'friend_accepted') {
-          title = 'Friend request accepted';
-          body = (n.sender || 'Someone') + ' is now your friend';
-          push(title, body, { type: 'dm', id: n.sender || '' });
-        } else {
-          title = kind.charAt(0).toUpperCase() + kind.slice(1);
-          body = (n.sender ? n.sender + ': ' : '') + (n.channel_name ? n.channel_name : '');
-          push(title, body);
+          notify('Friend request accepted', (n.sender || 'Someone') + ' is now your friend', { type: 'dm', id: n.sender || '' });
         }
       }
     }
@@ -209,10 +195,8 @@ const NOTIFY_BRIDGE = `
     loadFeed();
     setInterval(loadFeed, 5000);
 
-    // 3. Older servers + polling realtime: watch /api/poll for background
-    //    channel messages (the feed never lists plain channel messages). Same
-    //    first-poll seeding so existing unread background messages stay silent.
-    if (!serverHasBridge && 'fetch' in window) {
+    // Background channel messages via the page's own /api/poll fetches.
+    if ('fetch' in window) {
       var bgSeen = {};
       var bgSeeded = false;
       var origFetch = window.fetch.bind(window);
@@ -228,8 +212,10 @@ const NOTIFY_BRIDGE = `
                     if (!m || !m.id || bgSeen[m.id]) continue;
                     bgSeen[m.id] = 1;
                     if (!bgSeeded) continue;
-                    if (prefs.channels !== 1) continue;
-                    push(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + strip(m.content || ''), { type: 'room', id: m.channel_slug || '' });
+                    if (dndNow() || !focused()) continue;
+                    var mode = m.notify_mode || 'all';
+                    if (mode === 'muted' || mode === 'mentions' || m.mentioned) continue;
+                    notify(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + strip(m.content || ''), { type: 'room', id: m.channel_slug || '', msg_id: m.id });
                   }
                   bgSeeded = true;
                 }
@@ -476,6 +462,14 @@ function connectProfile (profile) {
 
   const record = { id: webContentsId, win, kind: 'chat', profileId: profile.id, url: normalized, name: profile.name || normalized, partition }
   chatWindows.set(webContentsId, record)
+  // The app badge counts notifications received while the app was unread:
+  // seeing the chat clears it (the rings of the notification arrive via the
+  // page's own alert engine and sidebar badges instead).
+  win.on('focus', () => {
+    desktopNotifications = 0
+    try { if (app.setBadgeCount) app.setBadgeCount(0) } catch (err) {}
+    try { win.flashFrame(false) } catch (err) {}
+  })
   profiles.touch(profile.id)
   wireChatWindow(win, record, profile)
 
@@ -690,29 +684,48 @@ function registerIpc () {
 
   // Native OS notifications requested by the chat page's notify bridge. Showing
   // them from the main process works on every platform regardless of the
-  // page's Notification permission. Clicking focuses the originating window.
+  // page's Notification permission. Notifications for the same conversation
+  // coalesce (previous one is closed before the new one is shown, so a burst
+  // of DMs never stacks a wall of toasts), the app badge is kept fresh, and an
+  // unfocused window flashes so the alert is noticed.
+  const convNotifications = new Map() // convKey -> Notification
   ipcMain.on('desktop:notify', (event, payload) => {
     const record = chatWindows.get(event.sender.id)
     const conv = payload && payload.conv ? payload.conv : null
+    const convKey = conv && conv.type && conv.id ? conv.type + ':' + conv.id : null
+    // Coalesce: close any previous toast for this conversation.
+    if (convKey && convNotifications.has(convKey)) {
+      try { convNotifications.get(convKey).close() } catch (err) {}
+    }
     desktopNotifications++
+    try { if (app.setBadgeCount) app.setBadgeCount(desktopNotifications) } catch (err) {}
+    if (record && record.win && !record.win.isDestroyed() && !record.win.isFocused()) {
+      try { record.win.flashFrame(true) } catch (err) {}
+    }
     const notification = new Notification({
       title: String((payload && payload.title) || 'LVChat'),
       body: String((payload && payload.body) || ''),
-      icon: APP_ICON
+      icon: APP_ICON,
+      silent: true
     })
+    if (convKey) convNotifications.set(convKey, notification)
     notification.on('click', () => {
+      if (convKey) convNotifications.delete(convKey)
       if (record && record.win && !record.win.isDestroyed()) {
         if (record.win.isMinimized()) record.win.restore()
         record.win.show()
         record.win.focus()
+        try { record.win.flashFrame(false) } catch (err) {}
         if (conv && conv.type && conv.id && !record.win.isDestroyed()) {
           record.win.webContents.send('notification:open', conv)
         }
       }
     })
+    notification.on('close', () => { if (convKey) convNotifications.delete(convKey) })
     notification.show()
   })
 
+  // Clear the app badge when a chat window comes to the foreground.
   ipcMain.on('app:refresh-menus', () => {
     buildMenu()
     rebuildTrayMenu()

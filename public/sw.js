@@ -141,13 +141,15 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Clicking a notification opens (or focuses) the right place in the chat.
+// Clicking a notification opens (or focuses) the right place in the chat and
+// jumps straight to the message that triggered it when available.
 self.addEventListener('notificationclick', (event) => {
   const payload = event.notification.data || {};
   event.notification.close();
+  const jump = payload.msg_id ? '&jump=' + encodeURIComponent(payload.msg_id) : '';
   let url = '/app';
-  if (payload.type === 'channel' && payload.channel) url = '/app?channel=' + encodeURIComponent(payload.channel);
-  else if (payload.type === 'dm' && payload.username) url = '/app?dm=' + encodeURIComponent(payload.username);
+  if (payload.type === 'channel' && payload.channel) url = '/app?channel=' + encodeURIComponent(payload.channel) + jump;
+  else if (payload.type === 'dm' && payload.username) url = '/app?dm=' + encodeURIComponent(payload.username) + jump;
   else if (payload.type === 'invite' && payload.channel) url = '/app?channel=' + encodeURIComponent(payload.channel);
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {

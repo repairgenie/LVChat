@@ -72,18 +72,23 @@ const state = {
   _localId: 0, // counter for locally-pending (unsent) message ids
   flushing: false,
   sounds: null, // { list:{id:{name,url}}, dm:id|null, channel:id|null, overrides:{uid:id|null} }
-  audioEl: null
+  audioEl: null,
+  pendingJumpId: 0 // message id to highlight after a notification click
 }
 
 /* OS-notification engine state. Only the buddy-list window alerts; dedicated
  * conversation windows stay silent (their host window already notifies). */
 const notif = {
   prefs: { channels: 1, dms: 1, invites: 1 },
+  notifyPrefs: null, // unified prefs (masters / quiet hours / keywords / previews)
   seeded: false, // poll-derived alerts seeded (pre-existing state must not alert)
+  deltaSeeded: false, // unified `alerts` delta seeded
+  hasDelta: false, // the server sends the unified alerts delta
   feedSeeded: false, // /api/notifications feed seeded
   bgMax: 0, // highest background message id seen
   prevDm: {}, // username(lower) -> unread
   feedSeen: new Set(), // notification ids already surfaced
+  feedItems: [], // notifications feed (activity panel)
   feedTimer: null
 }
 
@@ -647,6 +652,17 @@ function mutedSender (id) {
 function checkAlerts (body) {
   if (state.chatWindow) return
   try { window.msg.setUnread(totalUnread()) } catch (err) { /* ignore */ }
+
+  // Unified path: the poll carries the `alerts` delta (DM / mention / invite /
+  // friend events with content + channel slug + message id). One decision
+  // engine serves every surface; the older per-list detection below is kept
+  // only for servers that don't send the delta yet.
+  if (Array.isArray(body.alerts)) {
+    notif.hasDelta = true
+    handleAlertsDelta(body.alerts)
+    return
+  }
+
   const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true
   const meDnd = !!(state.me && state.me.status_mode === 'dnd')
 
@@ -709,13 +725,17 @@ function checkAlerts (body) {
   }
 }
 
-/* Poll the notifications feed for friend requests/accepts, invites and
- * mentions — the poll payload never lists those with their content. First
- * successful read seeds the dedupe set silently. */
+/* The notifications feed powers the in-app Activity panel (and, on servers
+ * without the unified `alerts` delta, OS alerts for friend/invite events). */
 async function pollNotificationsFeed () {
   if (state.chatWindow) return
   const j = await LvApi.getJson('/api/notifications')
   if (!j.ok || !j.body || !Array.isArray(j.body.notifications)) { notif.feedSeeded = false; return }
+  notif.feedItems = j.body.notifications
+  renderActivityPanel()
+  // Legacy path only: on servers with the unified delta, alerts arrive via the
+  // poll and this feed purely fills the panel.
+  if (notif.hasDelta) return
   const seed = !notif.feedSeeded
   for (const n of j.body.notifications) {
     if (!n || !n.id) continue
@@ -742,16 +762,212 @@ async function pollNotificationsFeed () {
   notif.feedSeeded = true
 }
 
+/* ── Unified alert delta (the server's single source for new notifications) ── */
+
+const alertSeen = new Set()
+let alertSeeded = false
+const ALERT_LABELS = {
+  dm: 'Direct message',
+  mention: 'Mentioned you',
+  invite: 'Channel invite',
+  friend_request: 'Friend request',
+  friend_accepted: 'Friend request accepted'
+}
+
+function quietHoursLocal () {
+  const p = notif.notifyPrefs || {}
+  if (!p.quiet_hours_enabled) return false
+  const d = new Date()
+  const days = Array.isArray(p.quiet_hours_days) ? p.quiet_hours_days.map(Number) : []
+  if (days.length && !days.includes(d.getDay())) return false
+  const toMin = (t) => { const x = String(t || '').split(':'); return parseInt(x[0], 10) * 60 + parseInt(x[1], 10) }
+  const start = toMin(p.quiet_hours_start || '22:00')
+  const end = toMin(p.quiet_hours_end || '08:00')
+  if (start === end) return false
+  const now = d.getHours() * 60 + d.getMinutes()
+  return start < end ? (now >= start && now < end) : (now >= start || now < end)
+}
+
+function pushToast ({ title, text, kind, onOpen }) {
+  const stack = document.getElementById('messenger-toasts')
+  if (!stack) return
+  const t = document.createElement('div')
+  t.className = 'toast ' + (kind || 'system')
+  t.innerHTML = '<div class="toast-avatar">' + esc(String(title || '?').charAt(0).toUpperCase()) + '</div>'
+    + '<div class="toast-body">'
+    + '<div class="toast-title">' + esc(title || '') + '</div>'
+    + (text ? '<div class="toast-text">' + esc(text) + '</div>' : '')
+    + '</div><button type="button" class="toast-dismiss" title="Dismiss">×</button>'
+  const dismiss = () => t.remove()
+  t.addEventListener('click', (e) => {
+    if (e.target.closest('.toast-dismiss')) { dismiss(); return }
+    dismiss()
+    if (onOpen) onOpen()
+  })
+  stack.appendChild(t)
+  while (stack.children.length > 4) stack.firstElementChild.remove()
+  setTimeout(dismiss, 6000)
+}
+
+/* The single alert decision engine (mirrors the web app): sound + OS alert +
+ * in-app toast for each new notification, with the same focus/viewing/DND/
+ * quiet-hours/persistent suppression the web app applies. */
+function handleAlertsDelta (alerts) {
+  for (const a of alerts) {
+    if (!a || !a.id) continue
+    if (alertSeen.has(a.id)) continue
+    alertSeen.add(a.id)
+    if (!alertSeeded) continue
+    if (state.chatWindow) continue
+    if (state.me && state.me.status_mode === 'dnd') continue
+    const kind = String(a.kind || '')
+    const sender = a.sender || 'someone'
+    const chan = a.channel_name || (a.channel_slug ? '#' + a.channel_slug : '')
+    const excerpt = String(a.excerpt || a.content || '').trim().slice(0, 120)
+    const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true
+    const conv = kind === 'dm'
+      ? { type: 'dm', id: sender, msg_id: a.message_id || 0 }
+      : (kind === 'mention' || kind === 'invite')
+        ? { type: 'room', id: a.channel_slug || '', msg_id: a.message_id || 0 }
+        : (kind === 'friend_request' || kind === 'friend_accepted')
+          ? { type: 'dm', id: sender }
+          : null
+    // The message is already on screen: only the mention ping (open-chat
+    // sound) applies, everything else is suppressed.
+    if (kind === 'mention' || kind === 'invite') {
+      if (focused && state.open && state.open.type === 'room' && state.open.id === a.channel_slug) {
+        if (kind === 'mention') {
+          playSound(effectiveSound(a.sender_id, state.sounds && state.sounds.channel))
+        }
+        continue
+      }
+    }
+    if (kind === 'dm') {
+      if (focused && state.open && state.open.type === 'dm' && String(state.open.id).toLowerCase() === String(sender).toLowerCase()) {
+        continue
+      }
+    }
+    const p = notif.notifyPrefs || {}
+    if (p.sound_master !== 0) {
+      const ctx = kind === 'dm' ? (state.sounds && state.sounds.dm) : (state.sounds && state.sounds.channel)
+      playSound(effectiveSound(a.sender_id, ctx))
+    }
+    let title = ALERT_LABELS[kind] || sender
+    let body = excerpt || ''
+    if (kind === 'dm') { title = 'DM from ' + sender; body = excerpt || 'New direct message' }
+    else if (kind === 'mention') { title = (chan ? sender + ' mentioned you in ' + chan : '@' + sender + ' mentioned you'); body = excerpt }
+    else if (kind === 'invite') { title = 'Channel invite'; body = chan + (sender !== 'someone' ? ' by ' + sender : '') }
+    else if (kind === 'friend_request') { body = sender + ' sent you a friend request' }
+    else if (kind === 'friend_accepted') { body = sender + ' is now your friend' }
+    else body = excerpt ? sender + ': ' + excerpt : ''
+    // Preview toggle: hide message bodies, keep the summary lines.
+    if ((p.previews === 0 || p.previews === '0') && kind !== 'invite' && kind !== 'friend_request' && kind !== 'friend_accepted') {
+      body = kind === 'dm' ? 'New direct message' : kind === 'mention' ? 'Someone mentioned you' : ''
+    }
+    if (p.os_master !== 0 && !quietHoursLocal() && conv) {
+      notify({ title, body, conv })
+    }
+    const toastKind = kind === 'dm' ? 'dm' : kind === 'mention' ? 'mention' : 'system'
+    pushToast({
+      title,
+      text: body,
+      kind: toastKind,
+      onOpen: conv ? () => openConversationOrWindow(conv.type === 'dm' ? 'dm' : 'room', conv.id, conv.msg_id) : null
+    })
+  }
+  alertSeeded = true
+}
+
+/* ── Activity panel (the bell) ──────────────────────────────────────────── */
+
+function alertTime (s) {
+  if (!s) return ''
+  const d = new Date(String(s).replace(' ', 'T') + 'Z')
+  if (isNaN(d)) return ''
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+function renderActivityPanel () {
+  const list = document.getElementById('alerts-list')
+  if (!list) return
+  const items = notif.feedItems || []
+  const badge = document.getElementById('alert-badge')
+  if (badge) {
+    const unread = items.filter((n) => !n.read).length
+    badge.hidden = unread === 0
+    badge.textContent = unread > 99 ? '99+' : unread
+  }
+  if (!items.length) {
+    list.innerHTML = '<div class="alert-empty">No activity yet — mentions, DMs, invites and friend requests show up here.</div>'
+    return
+  }
+  list.replaceChildren()
+  for (const n of items) {
+    const kind = String(n.kind || '')
+    const sender = n.sender || 'someone'
+    let title = ALERT_LABELS[kind] || kind
+    let body = ''
+    if (kind === 'dm') { title = sender; body = String(n.content || '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'New direct message' }
+    else if (kind === 'mention') { title = '@' + sender; body = (n.channel_name ? 'mentioned you in ' + n.channel_name : 'mentioned you') }
+    else if (kind === 'invite') { body = 'You were invited to ' + (n.channel_name || 'a channel') + (sender !== 'someone' ? ' by ' + sender : '') }
+    else if (kind === 'friend_request') { body = sender + ' sent you a friend request' }
+    else if (kind === 'friend_accepted') { body = sender + ' is now your friend' }
+    else body = String(n.content || excerptOf(n)).replace(/\s+/g, ' ').trim().slice(0, 80)
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'alert-row alert-kind-' + (kind === 'dm' ? 'dm' : kind === 'mention' ? 'mention' : 'other')
+    row.innerHTML = '<div class="alert-title">' + esc(title) + '<span class="alert-time">' + esc(alertTime(n.created_at)) + '</span></div>'
+      + (body ? '<div class="alert-body">' + esc(body) + '</div>' : '')
+    const link = kind === 'dm'
+      ? ['dm', sender]
+      : (kind === 'mention' || kind === 'invite') ? ['room', n.channel_slug || ''] : null
+    const mid = kind === 'dm' || kind === 'mention' ? n.message_id : 0
+    row.addEventListener('click', () => {
+      if (link && link[1]) openConversationOrWindow(link[0], link[1], mid)
+      // Opening the panel means "I've seen these" — clear the unread badge.
+      try {
+        const fd = new FormData()
+        fd.append('csrf', state.csrf || '')
+        fetch('/api/notifications/read', { method: 'POST', body: fd }).catch(() => {})
+        renderActivityPanel()
+      } catch (err) {}
+    })
+    list.appendChild(row)
+  }
+}
+
+function excerptOf (n) {
+  return String(n.excerpt || n.content || '').slice(0, 80)
+}
+
 async function initNotifications () {
   let prefs = loadLocalNotifyPrefs()
+  notif.notifyPrefs = { sound_master: 1, os_master: 1, previews: 1, quiet_hours_enabled: 0, quiet_hours_start: '22:00', quiet_hours_end: '08:00', quiet_hours_days: [], highlight_keywords: [], tz_offset_minutes: 0 }
   try {
-    const j = await LvApi.getJson('/api/push/prefs')
+    const j = await LvApi.getJson('/api/notify/prefs')
     if (j.ok && j.body && j.body.prefs) {
-      const p = j.body.prefs
-      prefs = { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 }
-      persistLocalNotifyPrefs(prefs)
+      if (j.body.prefs.push) {
+        const p = j.body.prefs.push
+        prefs = { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 }
+        persistLocalNotifyPrefs(prefs)
+      }
+      if (j.body.prefs.notify) Object.assign(notif.notifyPrefs, j.body.prefs.notify)
     }
-  } catch (err) { /* server endpoint unavailable — local prefs stand */ }
+  } catch (err) {
+    // Older server: /api/push/prefs only.
+    try {
+      const j2 = await LvApi.getJson('/api/push/prefs')
+      if (j2.ok && j2.body && j2.body.prefs) {
+        const p = j2.body.prefs
+        prefs = { channels: p.channels === 0 ? 0 : 1, dms: p.dms === 0 ? 0 : 1, invites: p.invites === 0 ? 0 : 1 }
+        persistLocalNotifyPrefs(prefs)
+      }
+    } catch (err2) { /* local prefs stand */ }
+  }
   notif.prefs = prefs
   notif.feedTimer = setInterval(pollNotificationsFeed, 4000)
   pollNotificationsFeed()
@@ -1047,7 +1263,7 @@ function applyMessages (messages) {
 
 /* ── Conversation switching ───────────────────────────────── */
 
-async function openConversation (type, id) {
+async function openConversation (type, id, jump) {
   hidePickers()
   state.open = {
     type,
@@ -1069,21 +1285,39 @@ async function openConversation (type, id) {
   if (type === 'room') {
     await LvApi.postForm('/api/channel/read', { channel: id })
   }
+  if (jump) jumpToMessage(jump)
 }
 
-function openDm (username) {
-  openConversation('dm', username)
+/* Jump to (and briefly highlight) a specific message after a notification
+ * click. The highlight re-applies on subsequent renders so re-rendered polls
+ * don't wipe the flash mid-way. */
+function jumpToMessage (id) {
+  state.pendingJumpId = parseInt(id, 10) || 0
+  setTimeout(() => { if (Number(state.pendingJumpId) === Number(id)) state.pendingJumpId = 0 }, 4000)
+  applyJumpHighlight()
 }
 
-function openRoom (slug) {
-  openConversation('room', slug)
+function applyJumpHighlight () {
+  if (!state.pendingJumpId) return
+  const el = document.querySelector('#stream .msg[data-id="' + state.pendingJumpId + '"]')
+  if (!el) return
+  el.scrollIntoView({ block: 'center' })
+  el.classList.add('msg-highlight')
+}
+
+function openDm (username, jump) {
+  openConversation('dm', username, jump)
+}
+
+function openRoom (slug, jump) {
+  openConversation('room', slug, jump)
 }
 
 /* In Compact view, opening a conversation always means a dedicated window. In
  * Advanced view it opens in the in-window pane. */
-async function openConversationOrWindow (type, id) {
+async function openConversationOrWindow (type, id, jump) {
   if (state.viewMode === 'compact') return openChatWindow(type, id)
-  return type === 'dm' ? openDm(id) : openRoom(id)
+  return type === 'dm' ? openDm(id, jump) : openRoom(id, jump)
 }
 
 /* Ask the main process for a dedicated conversation window (Pidgin-style). */
@@ -1177,6 +1411,7 @@ function renderSidebar () {
   $('#tab-buddy').classList.toggle('active', state.tab === 'buddy')
   $('#tab-rooms').classList.toggle('active', state.tab === 'rooms')
   $('#tab-requests').classList.toggle('active', state.tab === 'requests')
+  $('#tab-alerts').classList.toggle('active', state.tab === 'alerts')
 
   const reqCount = state.incoming.length + state.channelInvites.length
   const badge = $('#req-badge')
@@ -1186,10 +1421,12 @@ function renderSidebar () {
   $('#panel-buddy').hidden = state.tab !== 'buddy' || searching
   $('#panel-rooms').hidden = state.tab !== 'rooms' || searching
   $('#panel-requests').hidden = state.tab !== 'requests' || searching
+  $('#panel-alerts').hidden = state.tab !== 'alerts'
 
   if (state.tab === 'buddy') renderBuddyList()
   if (state.tab === 'rooms') renderRoomsList()
   if (state.tab === 'requests') renderRequestsList()
+  if (state.tab === 'alerts') renderActivityPanel()
 }
 
 function renderBuddyList () {
@@ -2128,6 +2365,7 @@ function renderChat () {
   }
   composer.hidden = false
   renderStream()
+  applyJumpHighlight()
 }
 
 function hideUrlPane () {
@@ -3392,6 +3630,7 @@ function openSettings () {
   $('#set-notify-channels').checked = notif.prefs.channels === 1
   $('#set-notify-invites').checked = notif.prefs.invites === 1
   $('#settings-status').hidden = true
+  syncUnifiedPrefsUi()
   // Windows toasts depend on an OS-level toggle we can't read — always point
   // the user at the right place.
   const winHint = $('#win-notify-hint')
@@ -3420,6 +3659,76 @@ async function saveNotifyPrefs () {
   try {
     await LvApi.postForm('/api/push/prefs', { channels: String(prefs.channels), dms: String(prefs.dms), invites: String(prefs.invites) })
   } catch (err) { /* server endpoint unavailable — local prefs stand */ }
+}
+
+/* Unified pref fields in the Settings modal (masters / quiet hours / previews /
+ * keywords) — saved through /api/notify/prefs so every surface shares them. */
+function syncUnifiedPrefsUi () {
+  const p = notif.notifyPrefs || {}
+  const qh = $('#set-qh-enabled')
+  if (qh) qh.checked = !!p.quiet_hours_enabled
+  const qs = $('#set-qh-start')
+  if (qs) qs.value = p.quiet_hours_start || '22:00'
+  const qe = $('#set-qh-end')
+  if (qe) qe.value = p.quiet_hours_end || '08:00'
+  const days = Array.isArray(p.quiet_hours_days) ? p.quiet_hours_days.map(Number) : []
+  document.querySelectorAll('.m-qh-day').forEach((b) => {
+    const on = days.includes(parseInt(b.dataset.day, 10))
+    b.classList.toggle('on', on)
+    if (on) { b.style.background = 'var(--accent)'; b.style.color = 'var(--accent-fg)'; b.style.borderColor = 'var(--accent)'; }
+    else { b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; }
+  })
+  const sm = $('#set-master-sound')
+  if (sm) sm.checked = p.sound_master !== 0
+  const om = $('#set-master-os')
+  if (om) om.checked = p.os_master !== 0
+  const pv = $('#set-preview')
+  if (pv) pv.checked = p.previews !== 0
+  const kw = $('#set-keywords')
+  if (kw) kw.value = (Array.isArray(p.highlight_keywords) ? p.highlight_keywords : []).join('\n')
+}
+
+async function saveUnifiedPrefs () {
+  const days = [...document.querySelectorAll('.m-qh-day.on')].map((b) => parseInt(b.dataset.day, 10))
+  const payload = {
+    sound_master: $('#set-master-sound').checked ? '1' : '0',
+    os_master: $('#set-master-os').checked ? '1' : '0',
+    previews: $('#set-preview').checked ? '1' : '0',
+    quiet_hours_enabled: $('#set-qh-enabled').checked ? '1' : '0',
+    quiet_hours_start: $('#set-qh-start').value || '22:00',
+    quiet_hours_end: $('#set-qh-end').value || '08:00',
+    quiet_hours_days: JSON.stringify(days),
+    highlight_keywords: JSON.stringify((($('#set-keywords').value || '').split(/\n/).map((s) => s.trim()).filter(Boolean)).slice(0, 25)),
+    tz_offset_minutes: String(-new Date().getTimezoneOffset())
+  }
+  const merged = Object.assign({}, notif.notifyPrefs, {
+    sound_master: +payload.sound_master, os_master: +payload.os_master, previews: +payload.previews,
+    quiet_hours_enabled: +payload.quiet_hours_enabled, quiet_hours_start: payload.quiet_hours_start,
+    quiet_hours_end: payload.quiet_hours_end, quiet_hours_days: days,
+    highlight_keywords: JSON.parse(payload.highlight_keywords), tz_offset_minutes: -new Date().getTimezoneOffset()
+  })
+  notif.notifyPrefs = merged
+  try {
+    await LvApi.postForm('/api/notify/prefs', payload)
+  } catch (err) { /* older server — masters stay local-only for this session */ }
+}
+
+function wireUnifiedPrefs () {
+  const ids = ['set-master-sound', 'set-master-os', 'set-preview', 'set-qh-enabled', 'set-qh-start', 'set-qh-end', 'set-keywords']
+  for (const id of ids) {
+    const el = document.getElementById(id)
+    if (el) el.addEventListener('change', saveUnifiedPrefs)
+  }
+  document.querySelectorAll('.m-qh-day').forEach((b) => {
+    b.classList.toggle('on', b.classList.contains('on'))
+    b.addEventListener('click', () => {
+      const on = !b.classList.contains('on')
+      b.classList.toggle('on', on)
+      if (on) { b.style.background = 'var(--accent)'; b.style.color = 'var(--accent-fg)'; b.style.borderColor = 'var(--accent)'; }
+      else { b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; }
+      saveUnifiedPrefs()
+    })
+  })
 }
 
 async function saveSoundPrefs () {
@@ -3589,6 +3898,7 @@ function wireEvents () {
   $('#set-notify-dms').addEventListener('change', saveNotifyPrefs)
   $('#set-notify-channels').addEventListener('change', saveNotifyPrefs)
   $('#set-notify-invites').addEventListener('change', saveNotifyPrefs)
+  wireUnifiedPrefs()
   $('#set-sound-dm-on').addEventListener('change', () => {
     $('#set-sound-dm').disabled = !$('#set-sound-dm-on').checked
     saveSoundPrefs()
@@ -3653,6 +3963,7 @@ function wireEvents () {
   $('#tab-buddy').addEventListener('click', () => setTab('buddy'))
   $('#tab-rooms').addEventListener('click', () => setTab('rooms'))
   $('#tab-requests').addEventListener('click', () => setTab('requests'))
+  $('#tab-alerts').addEventListener('click', () => setTab('alerts'))
 
   $('#btn-new-group').addEventListener('click', () => promptNewGroupFor(null))
 
@@ -3784,7 +4095,7 @@ function wireOpenConversation () {
   try {
     if (window.msg.onOpenConversation) {
       window.msg.onOpenConversation((conv) => {
-        if (conv && conv.type && conv.id) openConversationOrWindow(conv.type, conv.id)
+        if (conv && conv.type && conv.id) openConversationOrWindow(conv.type, conv.id, conv.msg_id)
       })
     }
   } catch (err) { /* bridge missing */ }

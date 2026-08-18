@@ -71,7 +71,7 @@ final class MessageService
             [$recipient['id'], $sender['id'], $pmId]
         );
         $row = Database::row('SELECT content, kind FROM private_messages WHERE id = ?', [$pmId]);
-        PushService::dm($recipient, $sender, (string) ($row['content'] ?? ''), (string) ($row['kind'] ?? 'message'));
+        PushService::dm($recipient, $sender, (string) ($row['content'] ?? ''), (string) ($row['kind'] ?? 'message'), (int) $pmId);
     }
 
     /** [userColValue, guestColValue] — the side not in play is 0 so it never matches a real id. */
@@ -84,9 +84,11 @@ final class MessageService
     }
 
     /** Shared sender-resolution fragment for channel messages (senders may be users or guests). */
-    private static function msgSelect(): string
+    private static function msgSelect(?string $extraSel = null): string
     {
-        return 'SELECT m.*,
+        return 'SELECT m.*,'
+            . ($extraSel !== null ? ' ' . $extraSel : '')
+            . '
                     COALESCE((SELECT u.username FROM users u WHERE u.id = m.sender_id),
                              (SELECT g.nick FROM guests g WHERE g.id = m.sender_guest_id)) AS username,
                     (SELECT u.role FROM users u WHERE u.id = m.sender_id) AS role,
@@ -223,27 +225,62 @@ final class MessageService
      */
     public static function backgroundSince(array $actor, int $since, int $excludeChannelId = 0, int $limit = 50): array
     {
-        $memberJoin = self::isGuest($actor)
+        $isGuest = self::isGuest($actor);
+        $memberJoin = $isGuest
             ? 'JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.guest_id = ?'
             : 'JOIN channel_members cm ON cm.channel_id = m.channel_id AND cm.user_id = ?';
-        $kinds = implode('","', self::SYSTEM_KINDS);
-        $params = [$actor['id'], $since];
+        $kinds = implode("','", self::SYSTEM_KINDS);
+        // Params are appended in SQL-placeholder order (member join → mode
+        // join → m.id → exclude → limit).
+        $params = [$actor['id']];
+        // Noise reduction (registered users only): never stream background
+        // traffic from channels the actor muted ("muted" mode) or from senders
+        // they muted. The row still carries the per-channel notify mode + a
+        // mention flag so the alert engine (sounds/toasts) can behave exactly
+        // like the server's push tier.
+        $modeSelect = ' NULL AS notify_mode,';
+        $modeJoin = '';
+        $where = '';
+        if (!$isGuest) {
+            $modeSelect = ' COALESCE(cn.mode, \'all\') AS notify_mode,';
+            $modeJoin = " LEFT JOIN channel_notify cn
+                       ON cn.channel_id = m.channel_id AND cn.user_id = ?
+                       AND NOT EXISTS (SELECT 1 FROM user_mutes um
+                                       WHERE um.user_id = ? AND um.muted_user_id = m.sender_id)";
+            array_push($params, (int) $actor['id'], (int) $actor['id']);
+            $where = " AND COALESCE(cn.mode, 'all') != 'muted'";
+        }
+        $params[] = $since;
         $exclude = '';
         if ($excludeChannelId > 0) {
             $exclude = ' AND m.channel_id != ?';
             $params[] = $excludeChannelId;
         }
-        $params[] = $limit;
-        $rows = Database::all(
-            self::msgSelect() . "
+$params[] = $limit;
+        $sql = self::msgSelect($modeSelect) . "
              $memberJoin
+             $modeJoin
              WHERE m.id > ? AND m.deleted = 0
-               AND m.kind NOT IN (\"$kinds\")$exclude
+               AND m.kind NOT IN ('$kinds')$exclude$where
              ORDER BY m.id ASC
-             LIMIT ?",
-            $params
-        );
-        return array_map([self::class, 'present'], $rows);
+             LIMIT ?";
+        $rows = Database::all($sql, $params);
+        $out = array_map([self::class, 'present'], $rows);
+        for ($i = 0, $n = count($rows); $i < $n; $i++) {
+            $out[$i]['notify_mode'] = (string) ($rows[$i]['notify_mode'] ?? 'all');
+            $out[$i]['mentioned'] = self::mentionsActor((string) ($rows[$i]['content'] ?? ''), $actor);
+        }
+        return $out;
+    }
+
+    /** Did the message mention this actor? (registered users and guests both.) */
+    private static function mentionsActor(string $content, array $actor): bool
+    {
+        $me = mb_strtolower((string) ($actor['username'] ?? $actor['nick'] ?? ''));
+        if ($me === '') {
+            return false;
+        }
+        return preg_match('/@' . preg_quote($me, '/') . '(?![A-Za-z0-9_\-\[\]\\^`{|}])/i', $content) === 1;
     }
 
     /** Newest messages of a channel. $floorId (inclusive, when not null) clamps

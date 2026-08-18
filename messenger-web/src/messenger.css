@@ -691,6 +691,13 @@ textarea.cs-topic { width: 100%; min-height: 72px; padding: 8px 10px; border: 1p
   text-transform: uppercase;
 }
 
+/* Notification-click jump highlight. */
+.msg-highlight {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+  border-radius: 8px;
+}
+
 /* Composer */
 #composer { padding: 8px 12px 12px; background: var(--panel); border-top: 1px solid var(--border); }
 #composer[hidden] { display: none; }
@@ -831,6 +838,83 @@ textarea.cs-topic { width: 100%; min-height: 72px; padding: 8px 10px; border: 1p
   font-weight: 600;
 }
 .ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* ── Sidebar footer: reserved for tray/space ──────────────────────────────── */
+
+/* Activity feed rows (the bell panel) */
+.alert-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin: 1px 6px;
+  cursor: pointer;
+}
+.alert-row:hover { background: var(--hover); }
+.alert-row .alert-title { font-weight: 600; font-size: 12.5px; display: flex; align-items: baseline; gap: 6px; }
+.alert-row .alert-title .alert-time { color: var(--muted); font-size: 10.5px; margin-left: auto; flex: none; }
+.alert-row .alert-body { color: var(--muted); font-size: 12px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-kind-dm .alert-title { color: var(--text); }
+.alert-kind-mention .alert-title { color: var(--accent); }
+.alert-empty { padding: 14px; color: var(--muted); font-size: 12.5px; text-align: center; }
+
+/* In-app toast stack (modern IM style, top-right) */
+.messenger-toasts {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1900;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  pointer-events: none;
+}
+.messenger-toasts[hidden] { display: none; }
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.toast.dm { border-left-color: var(--accent); }
+.toast.mention { border-left-color: var(--away); }
+.toast.system { border-left-color: var(--offline); }
+.toast .toast-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  flex: none;
+}
+.toast .toast-body { min-width: 0; flex: 1; }
+.toast .toast-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast .toast-text { color: var(--muted); font-size: 12px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast .toast-dismiss {
+  background: transparent; border: none; color: var(--muted);
+  padding: 2px; flex: none; font-size: 14px; line-height: 1;
+}
+.toast .toast-dismiss:hover { color: var(--text); }
 
 /* Modal dialogs (replaces window.prompt/confirm/alert) — bottom-sheet on
  * narrow screens, centered card on wide ones. */

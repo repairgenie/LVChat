@@ -857,30 +857,42 @@
   // The web app's OS notifications normally ride Web Push, which Electron can't
   // receive, so the desktop app listens for `lvchat:notify` events and shows a
   // real OS notification itself. Browsers have no listener, so these events are
-  // no-ops there. The decision below mirrors the user's per-context push
-  // preferences (Profile → Push notifications) and their mutes, so opting out
-  // works the same on every platform.
-  const PUSH_PREFS = (() => {
-    try {
-      const p = JSON.parse(body.dataset.pushPrefs || '{}');
-      return {
-        channels: p.channels === 0 ? 0 : 1,
-        dms: p.dms === 0 ? 0 : 1,
-        invites: p.invites === 0 ? 0 : 1
-      };
-    } catch (e) { return { channels: 1, dms: 1, invites: 1 }; }
-  })();
+  // no-ops there. Alert decisions (per-context prefs, mutes, DND, quiet hours,
+  // focus) are all made here, so every surface behaves identically.
   function stripHtml(s) {
     return String(s || '')
       .replace(/<[^>]*>/g, '')
       .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
       .replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
   }
-  function notifyOS(title, body) {
+  // conv = { type: 'dm'|'channel', id: nick|slug, msg_id? } so clicking the OS
+  // notification opens (and jumps to) the exact message.
+  function notifyOS(title, body, conv) {
     try {
-      window.dispatchEvent(new CustomEvent('lvchat:notify', { detail: { title, body } }));
+      window.dispatchEvent(new CustomEvent('lvchat:notify', { detail: { title: title, body: body, conv: conv || null } }));
     } catch (e) {}
   }
+  // Clicking a desktop OS notification asks the app to open a conversation.
+  // The Electron bridge forwards the same conv object the alert was sent with.
+  try {
+    window.addEventListener('notification:open', (e) => {
+      const conv = e.detail || {};
+      if (!conv.type || !conv.id) return;
+      const jump = conv.msg_id ? '&jump=' + encodeURIComponent(conv.msg_id) : '';
+      if (conv.type === 'dm') window.location.href = '/app?dm=' + encodeURIComponent(conv.id) + jump;
+      else if (conv.type === 'channel') window.location.href = '/app?channel=' + encodeURIComponent(conv.id) + jump;
+    });
+  } catch (err) {}
+  // Tell the server our UTC offset once so server-side quiet-hours gating
+  // (Web Push) matches this browser's local time.
+  try {
+    if (!localStorage.getItem('lvc.tz.reported')) {
+      const off = -new Date().getTimezoneOffset();
+      post('/api/notify/prefs', { tz_offset_minutes: off }, () => {
+        try { localStorage.setItem('lvc.tz.reported', '1'); } catch (e) {}
+      });
+    }
+  } catch (e) {}
 
   const audioCache = {};
   // Sounds play through the Web Audio API: HTMLMediaElement output is
@@ -958,6 +970,10 @@
   // member channel except the one being viewed, using our global watermark.
   // The first payload seeds the watermark silently (no sounds for pre-existing
   // unread mail); `bgSeen` dedupes against SSE, whose query string is fixed.
+  // Each message carries the viewer's per-channel notify mode + a mention flag
+  // so this engine gates sounds/OS alerts exactly like the server's push tier;
+  // mentions in other channels are alerted via the `alerts` delta instead (so
+  // a mention never fires two different notifications).
   let bgLast = parseInt(body.dataset.bgLast || '0', 10) || 0;
   let bgSeeded = false;
   const bgSeen = new Set();
@@ -973,10 +989,19 @@
       if (parseInt(m.sender_id, 10) === MY_ID) return;
       if (m.username && m.username.toLowerCase() === MY_NICK) return;
       if (ME_DND) return;
-      const sid = resolveSound(parseInt(m.sender_id, 10) || null, SOUND_DATA.channel);
-      if (sid) playSound(sid);
-      if (PUSH_PREFS.channels) {
-        notifyOS(m.channel_slug ? '#' + m.channel_slug : 'New message', (m.username ? m.username + ': ' : '') + stripHtml(m.content));
+      // Mentioned messages are handled by the alerts delta — never double alert.
+      if (m.mentioned) return;
+      const mode = m.notify_mode || 'all';
+      if (mode === 'muted') return;
+      if (mode === 'mentions') return;
+      if (NOTIFY.sound_master !== 0) {
+        const sid = resolveSound(parseInt(m.sender_id, 10) || null, SOUND_DATA.channel);
+        if (sid) playSound(sid);
+      }
+      if (NOTIFY.os_master !== 0 && !quietHoursActiveLocal()) {
+        notifyOS(m.channel_slug ? '#' + m.channel_slug : 'New message',
+          (m.username ? m.username + ': ' : '') + stripHtml(m.content),
+          { type: 'channel', id: m.channel_slug || '', msg_id: id });
       }
     });
     if (maxId > bgLast) bgLast = maxId;
@@ -994,10 +1019,126 @@
       mentionSeen.add(id);
       if (!mentionSeeded || n.kind !== 'mention') return;
       if (ME_DND) return;
-      const sid = resolveSound(parseInt(n.sender_id, 10) || null, SOUND_DATA.channel);
-      if (sid) playSound(sid);
+      if (NOTIFY.sound_master !== 0) {
+        const sid = resolveSound(parseInt(n.sender_id, 10) || null, SOUND_DATA.channel);
+        if (sid) playSound(sid);
+      }
     });
     mentionSeeded = true;
+  }
+
+  // ── Unified alert engine (consumes the poll's `alerts` delta) ─────────────
+  // One source drives every surface: in-app toasts, sounds, and the OS/browser
+  // notification (via notifyOS for the Electron bridge or the service worker
+  // for Web Push). First poll seeds the watermark silently.
+  const NOTIFY = (() => {
+    try { return JSON.parse(body.dataset.notifyPrefs || 'null') || {}; } catch (e) { return {}; }
+  })();
+  let alertsSeeded = false;
+  const alertSeen = new Set();
+  function quietHoursActiveLocal() {
+    if (!(NOTIFY.quiet_hours_enabled === 1 || NOTIFY.quiet_hours_enabled === '1')) return false;
+    const d = new Date();
+    const days = Array.isArray(NOTIFY.quiet_hours_days) ? NOTIFY.quiet_hours_days.map(Number) : [];
+    if (days.length && !days.includes(d.getDay())) return false;
+    const toMin = (t) => { const p = String(t || '').split(':'); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); };
+    const start = toMin(NOTIFY.quiet_hours_start || '22:00');
+    const end = toMin(NOTIFY.quiet_hours_end || '08:00');
+    if (start === end) return false;
+    const now = d.getHours() * 60 + d.getMinutes();
+    return start < end ? (now >= start && now < end) : (now >= start || now < end);
+  }
+  function quietHoursNow() { return quietHoursActiveLocal(); }
+  function toastStack() {
+    let el = document.getElementById('toast-stack');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast-stack';
+      el.className = 'fixed top-3 right-3 z-[150] flex flex-col gap-2 w-80 max-w-[calc(100vw-1.5rem)] pointer-events-none';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function pushToast(opts) {
+    const stack = toastStack();
+    const t = document.createElement('div');
+    t.className = 'toast pointer-events-auto flex items-start gap-3 rounded-xl card px-3.5 py-3 shadow-2xl border-l-4 cursor-pointer transition-all duration-200 ' + (opts.accent || 'border-blurple');
+    t.innerHTML = (opts.avatar ? opts.avatar : '<span class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center font-bold text-white text-sm" style="background:linear-gradient(135deg,#677de8,#a855f7)">' + esc((opts.sender || '?').charAt(0).toUpperCase()) + '</span>')
+      + '<div class="min-w-0 flex-1">'
+      + '<div class="flex items-baseline gap-2">'
+      + '<span class="text-sm font-semibold text-white truncate">' + esc(opts.title || '') + '</span>'
+      + (opts.sub ? '<span class="text-[10px] text-discord-500 shrink-0">' + esc(opts.sub) + '</span>' : '')
+      + '</div>'
+      + (opts.body ? '<div class="text-xs text-discord-300 mt-0.5 truncate">' + esc(opts.body) + '</div>' : '')
+      + '</div>'
+      + '<button type="button" class="toast-dismiss text-discord-400 hover:text-white p-0.5 shrink-0" title="Dismiss">' + window.icon('x', 'w-3.5 h-3.5') + '</button>';
+    t.dataset.link = opts.link || '';
+    const click = () => { t.remove(); if (opts.link) window.location.href = opts.link; };
+    t.addEventListener('click', (e) => { if (e.target.closest('.toast-dismiss')) return; click(); });
+    t.querySelector('.toast-dismiss').addEventListener('click', (e) => { e.stopPropagation(); t.remove(); });
+    stack.appendChild(t);
+    // Keep at most 4 toasts; auto-dismiss after 6s.
+    while (stack.children.length > 4) stack.firstElementChild.remove();
+    setTimeout(() => t.remove(), 6000);
+  }
+  function handleAlerts(alerts) {
+    if (!Array.isArray(alerts)) return;
+    for (const a of alerts) {
+      if (!a || !a.id) continue;
+      if (alertSeen.has(a.id)) continue;
+      alertSeen.add(a.id);
+      if (!alertsSeeded) continue;
+      if (ME_DND) continue;
+      const kind = a.kind;
+      const sender = a.sender || 'someone';
+      const chan = a.channel_name || (a.channel_slug ? '#' + a.channel_slug : '');
+      const excerpt = String(a.excerpt || a.content || '').replace(/\s+/g, ' ').trim();
+      const conv = kind === 'dm' ? { type: 'dm', id: sender, msg_id: a.message_id || 0 }
+        : (kind === 'mention' || kind === 'invite') ? { type: 'channel', id: a.channel_slug || '', msg_id: a.message_id || 0 }
+        : null;
+      // Never alert for something already on screen.
+      if (conv && conv.type === 'dm' && DM && DM.toLowerCase() === String(sender).toLowerCase()) {
+        const focused = !document.hidden && document.hasFocus && document.hasFocus();
+        if (focused) continue;
+      }
+      if (conv && conv.type === 'channel' && CHANNEL && conv.id && CHANNEL === conv.id) {
+        // Mention in the channel you're reading: the message is visible, and
+        // the ping sound comes from handleMentions (the open-channel mention
+        // feed) — never double-fire from the alerts delta too.
+        continue;
+      }
+      // Sound (respects the per-context choice; per-user overrides too).
+      if (NOTIFY.sound_master !== 0) {
+        const ctx = kind === 'dm' ? SOUND_DATA.dm : SOUND_DATA.channel;
+        const sid = resolveSound(parseInt(a.sender_id, 10) || null, ctx);
+        if (sid) playSound(sid);
+      }
+      // OS / browser notification (only outside quiet hours).
+      const osOn = NOTIFY.os_master !== 0 && !quietHoursActiveLocal();
+      const title = kind === 'dm' ? 'DM from ' + sender
+        : kind === 'mention' ? (chan ? sender + ' mentioned you in ' + chan : '@' + sender + ' mentioned you')
+        : kind === 'invite' ? 'Channel invite'
+        : kind === 'friend_request' ? 'Friend request'
+        : kind === 'friend_accepted' ? 'Friend request accepted'
+        : sender;
+      const body = kind === 'dm' ? (excerpt || 'New direct message')
+        : kind === 'mention' ? (excerpt || '')
+        : kind === 'invite' ? (chan ? 'You were invited to ' + chan + (sender !== 'someone' ? ' by ' + sender : '') : '')
+        : kind === 'friend_request' ? sender + ' sent you a friend request'
+        : kind === 'friend_accepted' ? sender + ' is now your friend'
+        : excerpt;
+      if (osOn) notifyOS(title, body, conv);
+      // In-app toast (always when the alert isn't suppressed above).
+      pushToast({
+        accent: kind === 'mention' ? 'border-amber-400' : (kind === 'dm' ? 'border-blurple' : 'border-discord-500'),
+        sender: sender,
+        title: title,
+        sub: kind === 'dm' ? 'direct message' : (chan ? '#' + (a.channel_slug || chan.replace(/^#/, '')) : ''),
+        body: body,
+        link: conv ? (conv.type === 'dm' ? '/app?dm=' + encodeURIComponent(conv.id) + (conv.msg_id ? '&jump=' + conv.msg_id : '') : '/app?channel=' + encodeURIComponent(conv.id) + (conv.msg_id ? '&jump=' + conv.msg_id : '')) : '',
+      });
+    }
+    alertsSeeded = true;
   }
 
   // ── Polling ────────────────────────────────────────────────────────────────
@@ -1031,12 +1172,14 @@
     if (typeof j.notify_count === 'number') setBell(j.notify_count);
     if (j.dm_list) handleDmList(j.dm_list);
     if (j.channel_unread) updateChannelUnread(j.channel_unread);
+    if (j.channel_mentions) updateChannelMentions(j.channel_mentions);
     if (j.channel_presence) updateChannelPresence(j.channel_presence);
     if (j.online_users) updateOnlineSidebar(j.online_users);
     if (typeof j.channel_url !== 'undefined' && CHANNEL) applyChannelUrl(j.channel_url);
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
     if (j.msg_update) applyMsgUpdate(j.msg_update);
+    if (j.alerts) handleAlerts(j.alerts);
     if (j.typing) applyTyping(j.typing);
   }
   function poll() {
@@ -1261,7 +1404,6 @@
   let dmSig = '';
   let dmSeen = {};
   let dmInit = false;
-  let dmToastTimer = null;
 
   function dmItemHtml(d) {
     const cur = DM && d.username && d.username.toLowerCase() === DM.toLowerCase();
@@ -1300,19 +1442,14 @@
 
   function handleDmList(list) {
     if (!dmInit) {
-      // Seed toast-dedupe state without toasting for pre-existing unread mail.
+      // Seed unread-tracking state without alerting for pre-existing mail.
       list.forEach((d) => { dmSeen[d.user_id] = d.last_id; });
       dmInit = true;
     } else {
-      list.forEach((d) => {
-        const prev = dmSeen[d.user_id] || 0;
-        if (d.last_id > prev && d.unread > 0 && DM !== d.username && !d.muted && !ME_DND) {
-          showDmToast(d);
-          const sid = resolveSound(parseInt(d.user_id, 10) || null, SOUND_DATA.dm);
-          if (sid) playSound(sid);
-        }
-        dmSeen[d.user_id] = d.last_id;
-      });
+      // New-DM alerts (sound, OS toast, in-app toast) come from the unified
+      // `alerts` delta, not the sidebar summary — this list only drives the
+      // sidebar now.
+      list.forEach((d) => { dmSeen[d.user_id] = d.last_id; });
       Object.keys(dmSeen).forEach((id) => {
         if (!list.some((d) => String(d.user_id) === id)) delete dmSeen[id];
       });
@@ -1320,27 +1457,27 @@
     renderDmSidebar(list);
   }
 
-  function showDmToast(d) {
-    const t = document.getElementById('dm-toast');
-    if (!t) return;
-    const raw = d.last_content || '';
-    const preview = raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
-    t.innerHTML = `<a href="/app?dm=${encodeURIComponent(d.username)}" class="flex items-start gap-3 px-4 py-3 hover:bg-discord-750 transition-colors">
-      <span class="text-lg leading-none">💬</span>
-      <span class="min-w-0">
-        <span class="block text-sm font-semibold text-white truncate">New message from ${esc(d.username)}</span>
-        ${preview ? `<span class="block text-xs text-discord-300 truncate">${esc(preview)}</span>` : ''}
-      </span>
-    </a>`;
-    t.classList.remove('hidden');
-    clearTimeout(dmToastTimer);
-    dmToastTimer = setTimeout(() => t.classList.add('hidden'), 5000);
-  }
-  const dmToastEl = document.getElementById('dm-toast');
-  if (dmToastEl) dmToastEl.addEventListener('click', () => dmToastEl.classList.add('hidden'));
-
   // ── Live channel unread badges (sidebar) ───────────────────────────────────
+  // Highlights (unread @mentions) render a red badge — the Discord-style
+  // "someone needs you" signal; plain activity renders a subtle neutral badge.
   let chanUnreadSig = '';
+  let chanMentionMap = {};
+  function setBadgeHighlight(badge, slug) {
+    if (!badge) return;
+    const highlight = (chanMentionMap[slug] || 0) > 0;
+    badge.className = 'unread-badge ml-auto min-w-5 h-5 px-1 rounded-full text-[10px] flex items-center justify-center '
+      + (highlight ? 'bg-red-500 text-white' : 'bg-discord-500 text-white');
+  }
+  function updateChannelMentions(list) {
+    const next = {};
+    (list || []).forEach((c) => { if ((c.mentions || 0) > 0) next[c.slug] = c.mentions; });
+    const sig = JSON.stringify(next);
+    if (sig === JSON.stringify(chanMentionMap)) return;
+    chanMentionMap = next;
+    document.querySelectorAll('a[data-ctx-channel]').forEach((a) => {
+      setBadgeHighlight(a.querySelector('.unread-badge'), a.dataset.ctxChannel);
+    });
+  }
   function updateChannelUnread(list) {
     const map = {};
     list.forEach((c) => { map[c.slug] = c.unread; });
@@ -1359,9 +1496,10 @@
         if (visEl) visEl.classList.remove('ml-auto');
         if (!badge) {
           badge = document.createElement('span');
-          badge.className = 'unread-badge ml-auto min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center';
+          badge.className = 'unread-badge ml-auto min-w-5 h-5 px-1 rounded-full text-[10px] flex items-center justify-center';
           a.appendChild(badge);
         }
+        setBadgeHighlight(badge, slug);
         badge.textContent = n > 99 ? '99+' : n;
       } else {
         if (nameEl) {

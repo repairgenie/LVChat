@@ -268,6 +268,7 @@ final class PushService
             return;
         }
         $senderId = isset($msg['sender_id']) ? (int) $msg['sender_id'] : null;
+        $msgId = (int) ($msg['id'] ?? 0);
         $slug = (string) ($msg['channel_slug'] ?? '');
         $content = (string) ($msg['content'] ?? '');
         $senderName = (string) ($msg['username'] ?? '');
@@ -289,8 +290,10 @@ final class PushService
         if (!$rows) {
             return;
         }
-        $userIds = [];
-        $mention = [];
+        // Partition subscriptions by payload variant so per-user preferences
+        // (quiet hours, content previews, highlight keywords) each get the
+        // right title/body and urgency — one payload never fits all.
+        $groups = [];
         foreach ($rows as $r) {
             // Do Not Disturb silences push for channel messages too.
             if ((string) ($r['status_mode'] ?? '') === 'dnd') {
@@ -306,30 +309,45 @@ final class PushService
             )) {
                 continue;
             }
-            $userIds[$uid] = $uid;
-            if ((string) $r['notify_mode'] === 'mentions') {
-                $mention[$uid] = true;
+            $prefs = NotifyPrefs::get(['id' => $uid]);
+            if (!(int) ($prefs['os_master'] ?? 1)) {
+                continue;
             }
+            if (NotifyPrefs::quietHoursActive($prefs)) {
+                continue;
+            }
+            $highlight = self::mentioned($content, (string) $r['username'])
+                || NotifyPrefs::matchesKeywords($prefs, $content);
+            $urgent = $highlight ? 'high' : 'normal';
+            $prev = (int) ($prefs['previews'] ?? 1) === 1;
+            $key = $urgent . '|' . ($prev ? '1' : '0');
+            $groups[$key] ??= ['urgency' => $urgent, 'previews' => $prev, 'uids' => []];
+            $groups[$key]['uids'][] = $uid;
         }
-        if (!$userIds) {
+        if (!$groups) {
             return;
         }
-        $subs = self::subscriptionsFor($userIds);
-        if (!$subs) {
-            return;
+        foreach ($groups as $g) {
+            $subs = self::subscriptionsFor($g['uids']);
+            if (!$subs) {
+                continue;
+            }
+            $body = $g['previews']
+                ? self::excerpt($content, $kind)
+                : 'New message in #' . ($slug !== '' ? $slug : 'a channel');
+            $payload = [
+                'type' => 'channel',
+                'title' => ($slug !== '' ? '#' . $slug : 'Channel') . ' · ' . $senderName,
+                'body' => $body,
+                'tag' => 'channel:' . $slug,
+                'data' => ['type' => 'channel', 'channel' => $slug, 'msg_id' => $msgId],
+            ];
+            self::sendAll($subs, $payload, $g['urgency']);
         }
-        $payload = [
-            'type' => 'channel',
-            'title' => ($slug !== '' ? '#' . $slug : 'Channel') . ' · ' . $senderName,
-            'body' => self::excerpt($content, $kind),
-            'tag' => 'channel:' . $slug,
-            'data' => ['type' => 'channel', 'channel' => $slug],
-        ];
-        self::sendAll($subs, $payload, $mention ? 'high' : 'normal');
     }
 
     /** Push a DM to the recipient (called from MessageService::notifyDm). */
-    public static function dm(array $recipient, array $sender, string $content, string $kind = 'message'): void
+    public static function dm(array $recipient, array $sender, string $content, string $kind = 'message', ?int $pmId = null): void
     {
         if (MessageService::isGuest($recipient)) {
             return;
@@ -343,17 +361,25 @@ final class PushService
         if (!self::dmDecision($pref, self::isMuted($recipientId, $senderId))) {
             return;
         }
+        $notifyPrefs = NotifyPrefs::get(['id' => $recipientId]);
+        if (!(int) ($notifyPrefs['os_master'] ?? 1)) {
+            return;
+        }
+        if (NotifyPrefs::quietHoursActive($notifyPrefs)) {
+            return;
+        }
         $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [$recipientId]);
         if (!$subs) {
             return;
         }
         $senderName = (string) ($sender['username'] ?? '');
+        $previews = (int) ($notifyPrefs['previews'] ?? 1) === 1;
         $payload = [
             'type' => 'dm',
             'title' => $senderName !== '' ? $senderName : 'New message',
-            'body' => self::excerpt($content, $kind),
+            'body' => $previews ? self::excerpt($content, $kind) : 'You received a direct message',
             'tag' => 'dm:' . $senderName,
-            'data' => ['type' => 'dm', 'username' => $senderName],
+            'data' => ['type' => 'dm', 'username' => $senderName, 'msg_id' => $pmId],
         ];
         self::sendAll($subs, $payload, 'high');
     }
@@ -363,6 +389,13 @@ final class PushService
     {
         $pref = (int) (Database::scalar('SELECT invites FROM user_push_prefs WHERE user_id = ?', [$targetUserId]) ?? 1);
         if (!self::inviteDecision($pref, self::isMuted($targetUserId, $senderId))) {
+            return;
+        }
+        $notifyPrefs = NotifyPrefs::get(['id' => $targetUserId]);
+        if (!(int) ($notifyPrefs['os_master'] ?? 1)) {
+            return;
+        }
+        if (NotifyPrefs::quietHoursActive($notifyPrefs)) {
             return;
         }
         $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [$targetUserId]);

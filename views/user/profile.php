@@ -301,8 +301,74 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
       </div>
 
       <div class="mt-6 pt-5 border-t border-discord-700">
+        <div class="text-sm font-medium text-white mb-1">Alert preferences</div>
+        <p class="text-xs text-discord-400 mb-4">Applied to every surface — sounds, in-app toasts, and OS notifications.</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer">
+            <input type="checkbox" data-notify="sound_master" class="w-4 h-4 accent-blurple" <?= $notifyPrefs['sound_master'] ? 'checked' : '' ?>> Play sounds
+          </label>
+          <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer">
+            <input type="checkbox" data-notify="os_master" class="w-4 h-4 accent-blurple" <?= $notifyPrefs['os_master'] ? 'checked' : '' ?>> OS &amp; in-app alerts
+          </label>
+          <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer">
+            <input type="checkbox" data-notify="previews" class="w-4 h-4 accent-blurple" <?= $notifyPrefs['previews'] ? 'checked' : '' ?>> Show message previews
+          </label>
+        </div>
+        <button type="button" id="notify-test" class="btn-ghost text-xs !py-1.5">Send test notification</button>
+
+        <div class="mt-5 pt-5 border-t border-discord-700">
+          <div class="text-sm font-medium text-white mb-1">Quiet hours</div>
+          <p class="text-xs text-discord-400 mb-3">Suppress sounds and alerts between a start and end time. Evaluated in your local time; server push uses your saved UTC offset.</p>
+          <label class="flex items-center gap-2 text-sm text-discord-200 cursor-pointer mb-3">
+            <input type="checkbox" id="qh-enabled" class="w-4 h-4 accent-blurple" <?= $notifyPrefs['quiet_hours_enabled'] ? 'checked' : '' ?>> Enable quiet hours
+          </label>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="label mb-0">From
+              <input type="time" id="qh-start" value="<?= h($notifyPrefs['quiet_hours_start']) ?>" class="input !py-1.5 w-32">
+            </label>
+            <label class="label mb-0">To
+              <input type="time" id="qh-end" value="<?= h($notifyPrefs['quiet_hours_end']) ?>" class="input !py-1.5 w-32">
+            </label>
+          </div>
+          <div class="mt-3">
+            <div class="text-xs text-discord-400 mb-1">Apply on these days <span class="text-discord-500">(none = every day)</span></div>
+            <div class="flex flex-wrap gap-1.5" id="qh-days">
+              <?php $qhDays = array_map('intval', (array) $notifyPrefs['quiet_hours_days']); foreach ([['Sun', 0], ['Mon', 1], ['Tue', 2], ['Wed', 3], ['Thu', 4], ['Fri', 5], ['Sat', 6]] as [$dl, $dv]): ?>
+              <button type="button" data-day="<?= $dv ?>" class="qh-day px-2.5 py-1 rounded-md text-xs font-medium border transition-colors <?= in_array($dv, $qhDays, true) ? 'bg-blurple/20 border-blurple/50 text-white' : 'border-discord-600 text-discord-400 hover:text-discord-200' ?>"><?= $dl ?></button>
+              <?php endforeach; ?>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 pt-5 border-t border-discord-700">
+          <div class="text-sm font-medium text-white mb-1">Highlight keywords</div>
+          <p class="text-xs text-discord-400 mb-3">Messages containing these words alert you like an @mention — even in channels set to "mentions only". One per line, up to 25.</p>
+          <textarea id="kw-input" rows="3" class="input font-mono text-xs" placeholder="release&#10;deploy&#10;urgent"><?= h(implode("\n", array_map('strval', (array) $notifyPrefs['highlight_keywords']))) ?></textarea>
+        </div>
+        <p id="notify-prefs-msg" class="mt-3 text-sm text-green-400 hidden">Saved.</p>
+      </div>
+
+      <div class="mt-6 pt-5 border-t border-discord-700">
+        <div class="text-sm font-medium text-white mb-1">Per-channel notification modes</div>
+        <p class="text-xs text-discord-400 mb-3">All messages, mentions only, or nothing for each channel you've joined. The same control as the 🔔 button above each channel.</p>
+        <div class="space-y-1.5 max-h-64 overflow-y-auto scrollbar-thin">
+          <?php foreach ($chanModes as $cm): ?>
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-discord-200 w-40 truncate"><?= h($cm['name']) ?></span>
+            <select class="input !py-1 !text-xs chan-mode" data-slug="<?= h($cm['slug']) ?>">
+              <option value="all" <?= $cm['mode'] === 'all' ? 'selected' : '' ?>>All messages</option>
+              <option value="mentions" <?= $cm['mode'] === 'mentions' ? 'selected' : '' ?>>Mentions only</option>
+              <option value="muted" <?= $cm['mode'] === 'muted' ? 'selected' : '' ?>>Nothing</option>
+            </select>
+          </div>
+          <?php endforeach; ?>
+          <?php if (!$chanModes): ?><div class="text-xs text-discord-500">No channels joined yet.</div><?php endif; ?>
+        </div>
+      </div>
+
+      <div class="mt-6 pt-5 border-t border-discord-700">
         <div class="text-sm font-medium text-white mb-1">Muted users</div>
-        <p class="text-xs text-discord-400 mb-3">Muting someone silences every notification from them — push, the notification bell, sounds, and DM toasts. They can still message you.</p>
+        <p class="text-xs text-discord-400 mb-3">Muting someone silences every notification from them — push, the notification bell, sounds, and in-app toasts. They can still message you.</p>
         <div id="mute-list" class="space-y-2 mb-4">
           <?php foreach ($pushMutedUsers as $m): ?>
           <div class="flex items-center gap-2" data-mute="<?= (int) $m['muted_user_id'] ?>">
@@ -636,6 +702,72 @@ $stDot = match ($pMode) { 'dnd' => 'bg-red-500', 'away', 'custom' => 'bg-amber-4
   if (pushMuteForm) pushMuteForm.addEventListener('submit', e => {
     e.preventDefault();
     post('/api/push/mute', new FormData(pushMuteForm), () => location.reload());
+  });
+
+  // ── Unified notification preferences (masters / quiet hours / keywords) ────
+  const notifyMsg = document.getElementById('notify-prefs-msg');
+  let notifyTimer = 0;
+  function saveNotifyPrefs() {
+    clearTimeout(notifyTimer);
+    notifyTimer = setTimeout(() => {
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      document.querySelectorAll('[data-notify]').forEach((el) => {
+        fd.append(el.dataset.notify, el.checked ? '1' : '0');
+      });
+      fd.append('quiet_hours_enabled', document.getElementById('qh-enabled').checked ? '1' : '0');
+      fd.append('quiet_hours_start', document.getElementById('qh-start').value || '22:00');
+      fd.append('quiet_hours_end', document.getElementById('qh-end').value || '08:00');
+      fd.append('quiet_hours_days', JSON.stringify([...document.querySelectorAll('.qh-day.on')].map((b) => parseInt(b.dataset.day, 10))));
+      const kws = (document.getElementById('kw-input').value || '').split(/\n/).map((s) => s.trim()).filter(Boolean).slice(0, 25);
+      fd.append('highlight_keywords', JSON.stringify(kws));
+      const off = -new Date().getTimezoneOffset();
+      fd.append('tz_offset_minutes', String(off));
+      fetch('/api/notify/prefs', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+        .then((r) => r.json())
+        .then((j) => {
+          if (notifyMsg) { notifyMsg.classList.remove('hidden'); setTimeout(() => notifyMsg.classList.add('hidden'), 2000); }
+          const en = (j.prefs && j.prefs.notify && j.prefs.notify.quiet_hours_enabled);
+          ['qh-start', 'qh-end', '#qh-days', '#kw-input'].forEach(() => {});
+        })
+        .catch(() => {});
+    }, 400);
+  }
+  document.querySelectorAll('[data-notify]').forEach((el) => el.addEventListener('change', saveNotifyPrefs));
+  ['qh-enabled', 'qh-start', 'qh-end'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveNotifyPrefs);
+  });
+  document.querySelectorAll('.qh-day').forEach((b) => {
+    b.classList.toggle('on', b.classList.contains('bg-blurple/20'));
+    b.addEventListener('click', () => {
+      if (b.classList.contains('on')) {
+        b.classList.remove('on');
+        b.className = 'qh-day px-2.5 py-1 rounded-md text-xs font-medium border transition-colors border-discord-600 text-discord-400 hover:text-discord-200';
+      } else {
+        b.className = 'qh-day on px-2.5 py-1 rounded-md text-xs font-medium border transition-colors bg-blurple/20 border-blurple/50 text-white';
+      }
+      saveNotifyPrefs();
+    });
+  });
+  const kwInput = document.getElementById('kw-input');
+  if (kwInput) kwInput.addEventListener('change', saveNotifyPrefs);
+  const notifyTest = document.getElementById('notify-test');
+  if (notifyTest) notifyTest.addEventListener('click', () => {
+    const fd = new FormData();
+    fetch('/api/push/test', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } })
+      .then(() => { notifyTest.textContent = 'Test sent'; setTimeout(() => { notifyTest.textContent = 'Send test notification'; }, 2000); })
+      .catch(() => { notifyTest.textContent = 'Test failed'; });
+  });
+  // Per-channel notification modes (mirrors the 🔔 button in the chat header).
+  document.querySelectorAll('.chan-mode').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      const fd = new FormData();
+      fd.append('csrf', csrf);
+      fd.append('channel', sel.dataset.slug);
+      fd.append('mode', sel.value);
+      fetch('/api/channel/notify', { method: 'POST', body: fd, headers: { 'X-CSRF': csrf } }).catch(() => {});
+    });
   });
 
   const themeBtn = document.getElementById('profile-theme-toggle');

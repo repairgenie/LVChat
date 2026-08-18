@@ -374,6 +374,7 @@ function presence_label(array $u): string {
       data-sounds="<?= h(json_encode($sounds['sounds'])) ?>"
       data-sound-prefs="<?= h(json_encode(['dm_sound_id' => $sounds['dm_sound_id'], 'channel_sound_id' => $sounds['channel_sound_id']])) ?>"
       data-sound-overrides="<?= h(json_encode($sounds['overrides'])) ?>"
+      data-notify-prefs="<?= h(json_encode($notifyPrefs)) ?>"
       data-bg-last="<?= (int) $bgLast ?>">
 
   <!-- ── Left: channel sidebar ── -->
@@ -1202,7 +1203,7 @@ function presence_label(array $u): string {
   <div id="js-warning" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] card px-4 py-2.5 text-xs text-amber-300 border border-amber-500/40 shadow-2xl max-w-md"></div>
 
   <!-- DM arrival toast (shown when a DM lands while you are elsewhere) -->
-  <div id="dm-toast" class="hidden fixed bottom-4 right-4 z-[150] w-80 max-w-[calc(100vw-2rem)] card border border-blurple/40 shadow-2xl"></div>
+  <div id="toast-stack" class="fixed top-3 right-3 z-[150] flex flex-col gap-2 w-80 max-w-[calc(100vw-1.5rem)] pointer-events-none"></div>
 
   <!-- Offline banner (shown while the connection is down; PWA offline reading) -->
   <div id="offline-banner" class="hidden fixed top-0 inset-x-0 z-[250] bg-amber-500/90 text-amber-950 text-center text-xs font-semibold py-1.5 px-4" role="status">

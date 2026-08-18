@@ -227,6 +227,7 @@ final class ChatController
             'joinModal' => $joinModal,
             'notifyMode' => $notifyMode,
             'sounds' => SoundService::soundsForClient($user),
+            'notifyPrefs' => NotifyPrefs::get($user),
             'bgLast' => $bgLast,
             'pushPrefs' => PushService::prefs($user),
             'friends' => (int) ($user['guest'] ?? 0) !== 1 ? FriendService::getFriendsWithStatus((int) $user['id']) : [],
@@ -644,6 +645,11 @@ final class ChatController
             [$user['id']]
         );
         $out['notify_count'] = $notifyCount;
+        // Unread alert delta since this session's watermark. One array feeds
+        // every surface (web toasts, desktop bridge, messenger) so alerts are
+        // decided identically everywhere; each client also silently seeds its
+        // first poll so pre-existing unread items never fire an alert.
+        $out['alerts'] = self::alertDelta($user);
         // Live DM sidebar data — returned on every poll regardless of which page
         // the user is on, so a DM sent to someone sitting in a channel surfaces.
         $out['dm_list'] = MessageService::dmSummaries($user);
@@ -653,6 +659,16 @@ final class ChatController
         $out['channel_unread'] = array_map(
             fn ($c) => ['slug' => $c['slug'], 'unread' => (int) $c['unread']],
             $joined
+        );
+        // Unread @mention counts per channel — drives the "highlight" badge
+        // (red) vs the plain-activity badge (subtle) in the sidebar.
+        $mentionCol = MessageService::isGuest($user) ? 'n.guest_user_id' : 'n.user_id';
+        $out['channel_mentions'] = Database::all(
+            "SELECT c.slug, COUNT(*) AS mentions
+             FROM notifications n JOIN channels c ON c.id = n.channel_id
+             WHERE $mentionCol = ? AND n.kind = 'mention' AND n.read = 0
+             GROUP BY c.slug",
+            [(int) $user['id']]
         );
         // Live "active chatters" count for each sidebar channel.
         $out['channel_presence'] = array_map(
@@ -1160,7 +1176,10 @@ final class ChatController
     {
         $user = self::requireUser();
         $rows = Database::all(
-            'SELECT n.*, COALESCE(s.username, gs.nick) AS sender, c.name AS channel_name FROM notifications n
+            'SELECT n.*, COALESCE(s.username, gs.nick) AS sender, c.name AS channel_name, c.slug AS channel_slug,
+                    COALESCE((SELECT m.content FROM messages m WHERE m.id = n.message_id),
+                             (SELECT pm.content FROM private_messages pm WHERE pm.id = n.message_id)) AS content
+             FROM notifications n
              LEFT JOIN users s ON s.id = n.sender_id
              LEFT JOIN guests gs ON gs.id = n.sender_guest_id
              LEFT JOIN channels c ON c.id = n.channel_id
@@ -1171,6 +1190,44 @@ final class ChatController
             $r['created_at'] = relative_time($r['created_at']);
         }
         json_out(['ok' => true, 'notifications' => $rows]);
+    }
+
+    /** New unread notifications since this session's watermark (see poll). */
+    private static function alertDelta(array $user, int $limit = 20): array
+    {
+        $col = MessageService::isGuest($user) ? 'guest_user_id' : 'user_id';
+        $uid = (int) $user['id'];
+        // Fresh session (expired cookies, new device): seed silently so
+        // long-past unread items never re-alert on first load.
+        if (!isset($_SESSION['lvc_alert_seen'])) {
+            $_SESSION['lvc_alert_seen'] = (int) (Database::scalar("SELECT COALESCE(MAX(id),0) FROM notifications WHERE $col = ?", [$uid]) ?? 0);
+            return [];
+        }
+        $watermark = (int) $_SESSION['lvc_alert_seen'];
+        $rows = Database::all(
+            "SELECT n.id, n.kind, n.channel_id, n.message_id, n.created_at,
+                    COALESCE(s.username, gs.nick) AS sender,
+                    c.name AS channel_name, c.slug AS channel_slug,
+                    COALESCE((SELECT m.content FROM messages m WHERE m.id = n.message_id),
+                             (SELECT pm.content FROM private_messages pm WHERE pm.id = n.message_id)) AS content
+             FROM notifications n
+             LEFT JOIN users s ON s.id = n.sender_id
+             LEFT JOIN guests gs ON gs.id = n.sender_guest_id
+             LEFT JOIN channels c ON c.id = n.channel_id
+             WHERE n.$col = ? AND n.id > ?
+             ORDER BY n.id ASC
+             LIMIT " . max(1, min($limit, 30)),
+            [$uid, $watermark]
+        );
+        $max = $watermark;
+        foreach ($rows as $r) {
+            $max = max($max, (int) $r['id']);
+        }
+        $_SESSION['lvc_alert_seen'] = $max;
+        foreach ($rows as &$r) {
+            $r['excerpt'] = mb_substr((string) ($r['content'] ?? ''), 0, 140);
+        }
+        return $rows;
     }
 
     public static function readNotifications(): void

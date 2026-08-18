@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '38';
+    private const SCHEMA_VERSION = '39';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -144,6 +144,14 @@ final class Database
             $pdo->exec('CREATE TABLE pinned_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, pinned_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")), UNIQUE (message_id))');
             $pdo->exec('CREATE INDEX idx_pinned_messages_channel ON pinned_messages(channel_id, id)');
         }
+        // Per-user notification preferences (schema v39): master toggles, quiet
+        // hours, highlight keywords and content previews.
+        if (!in_array('user_notify_prefs', $tables, true)) {
+            $pdo->exec('CREATE TABLE user_notify_prefs (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, sound_master INTEGER NOT NULL DEFAULT 1, os_master INTEGER NOT NULL DEFAULT 1, previews INTEGER NOT NULL DEFAULT 1, quiet_hours_enabled INTEGER NOT NULL DEFAULT 0, quiet_hours_start TEXT NOT NULL DEFAULT "22:00", quiet_hours_end TEXT NOT NULL DEFAULT "08:00", quiet_hours_days TEXT NOT NULL DEFAULT "[]", highlight_keywords TEXT NOT NULL DEFAULT "[]", tz_offset_minutes INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT (datetime("now")))');
+        }
+        // Alert-delta watermark scan index (per-user, id-ordered) for the poll.
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_notif_user_id ON notifications(user_id, id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_notif_guest_user_id ON notifications(guest_user_id, id)');
         // Sound alerts + per-user sound preferences/overrides (schema v13).
         if (!in_array('sound_alerts', $tables, true)) {
             $pdo->exec('CREATE TABLE sound_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, file TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');

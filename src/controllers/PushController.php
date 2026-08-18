@@ -87,6 +87,87 @@ final class PushController
         json_out(['ok' => true, 'prefs' => PushService::prefs($user)]);
     }
 
+    /**
+     * GET /api/notify/prefs — the full per-user notification preference set
+     * (per-context push toggles + master toggles, quiet hours, keywords,
+     * previews). Shared by the web profile, desktop bridge and messenger.
+     */
+    public static function notifyPrefsGet(): void
+    {
+        $user = self::requireUser();
+        json_out(['ok' => true, 'prefs' => [
+            'push' => PushService::prefs($user),
+            'notify' => NotifyPrefs::get($user),
+        ]]);
+    }
+
+    /** POST /api/notify/prefs — save any subset of the preference set. */
+    public static function notifyPrefs(): void
+    {
+        $user = self::requireUser();
+        Csrf::verify();
+        $pushChanged = false;
+        foreach (['channels', 'dms', 'invites'] as $k) {
+            if (isset($_POST[$k])) {
+                $pushChanged = true;
+                break;
+            }
+        }
+        if ($pushChanged) {
+            [$ch, $dm, $inv] = self::pushBits($user, $_POST);
+            PushService::savePrefs($user, $ch, $dm, $inv);
+        }
+        $err = NotifyPrefs::save($user, $_POST);
+        if ($err !== null) {
+            json_out(['error' => $err], 400);
+        }
+        if (isset($_POST['tz_offset_minutes'])) {
+            // Remember the client's UTC offset so server-side quiet-hours
+            // gating (Web Push) matches the user's local time.
+            NotifyPrefs::save($user, ['tz_offset_minutes' => (int) $_POST['tz_offset_minutes']]);
+        }
+        json_out(['ok' => true, 'prefs' => self::notifyPrefsPayload($user)]);
+    }
+
+    private static function notifyPrefsPayload(array $user): array
+    {
+        return [
+            'push' => PushService::prefs($user),
+            'notify' => NotifyPrefs::get($user),
+        ];
+    }
+
+    /** Keep the legacy push-bits save signature happy with partial posts. */
+    private static function pushBits(array $user, array $in): array
+    {
+        $cur = PushService::prefs($user);
+        return [
+            isset($in['channels']) ? ($in['channels'] === '1' ? 1 : 0) : (int) $cur['channels'],
+            isset($in['dms']) ? ($in['dms'] === '1' ? 1 : 0) : (int) $cur['dms'],
+            isset($in['invites']) ? ($in['invites'] === '1' ? 1 : 0) : (int) $cur['invites'],
+        ];
+    }
+
+    /** POST /api/push/test — send a test Web Push to the caller's browsers. */
+    public static function test(): void
+    {
+        $user = self::requireUser();
+        Csrf::verify();
+        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [(int) $user['id']]);
+        if (!$subs) {
+            json_out(['error' => 'No push subscription on this browser — enable push first.'], 400);
+        }
+        $payload = [
+            'type' => 'test',
+            'title' => 'LVChat',
+            'body' => 'Test notification — alerts are working.',
+            'tag' => 'test:' . time(),
+            'data' => ['type' => 'test'],
+        ];
+        self::sendAll($subs, $payload, 'normal');
+        json_out(['ok' => true]);
+    }
+
     /** POST /api/push/mute — mute a user across every notification surface. */
     public static function mute(): void
     {

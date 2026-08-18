@@ -83,6 +83,7 @@ require ROOT . '/src/services/UploadService.php';
 require ROOT . '/src/services/GifService.php';
 require ROOT . '/src/services/SoundService.php';
 require ROOT . '/src/services/TypingService.php';
+require ROOT . '/src/services/NotifyPrefs.php';
 require ROOT . '/src/services/ThemeService.php';
 require ROOT . '/src/services/WebhookService.php';
 require ROOT . '/src/services/OpenClawBotService.php';

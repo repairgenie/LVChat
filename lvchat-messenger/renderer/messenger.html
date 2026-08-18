@@ -80,6 +80,7 @@
 
   <!-- Main app -->
   <div id="view-main" class="view" hidden>
+    <div id="messenger-toasts" class="messenger-toasts"></div>
     <div id="offline-banner" hidden>Offline — messages you send will be queued and delivered when you reconnect.</div>
     <div id="app-row">
       <aside id="sidebar">
@@ -112,6 +113,7 @@
         <button id="tab-buddy" class="nav-tab active">Friends</button>
         <button id="tab-rooms" class="nav-tab">Rooms</button>
         <button id="tab-requests" class="nav-tab">Requests<span id="req-badge" class="badge" hidden></span></button>
+        <button id="tab-alerts" class="nav-tab">Activity<span id="alert-badge" class="badge" hidden></span></button>
       </nav>
 
       <div id="panel-buddy" class="panel">
@@ -137,6 +139,10 @@
       <div id="panel-directory" class="panel" hidden>
         <div class="panel-title">Search results</div>
         <div id="directory-list"></div>
+      </div>
+
+      <div id="panel-alerts" class="panel" hidden>
+        <div id="alerts-list"></div>
       </div>
     </aside>
 
@@ -239,6 +245,38 @@
         </div>
         <div class="settings-hint">Sounds play for new messages while the chat is in the background. Muting a person in your web profile silences their messages too.</div>
         <button type="button" id="set-sound-test" class="ghost small">Test sound</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">Alert preferences</div>
+        <label class="check"><input type="checkbox" id="set-master-sound" /> Play sounds</label>
+        <label class="check"><input type="checkbox" id="set-master-os" /> OS &amp; in-app alerts</label>
+        <label class="check"><input type="checkbox" id="set-preview" /> Show message previews</label>
+        <div class="settings-hint">Applied everywhere — this app, the web chat and push. Quiet hours and keywords follow.</div>
+
+        <div class="settings-label" style="margin-top:12px">Quiet hours</div>
+        <label class="check"><input type="checkbox" id="set-qh-enabled" /> Enable quiet hours</label>
+        <div class="settings-row">
+          <label class="check">From <input type="time" id="set-qh-start" /></label>
+          <label class="check">To <input type="time" id="set-qh-end" /></label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-hint" style="margin:0">Days: </span>
+          <div class="m-qh-days" style="display:flex;flex-wrap:wrap;gap:4px">
+            <button type="button" class="ghost small m-qh-day" data-day="0">Sun</button>
+            <button type="button" class="ghost small m-qh-day" data-day="1">Mon</button>
+            <button type="button" class="ghost small m-qh-day" data-day="2">Tue</button>
+            <button type="button" class="ghost small m-qh-day" data-day="3">Wed</button>
+            <button type="button" class="ghost small m-qh-day" data-day="4">Thu</button>
+            <button type="button" class="ghost small m-qh-day" data-day="5">Fri</button>
+            <button type="button" class="ghost small m-qh-day" data-day="6">Sat</button>
+          </div>
+        </div>
+        <div class="settings-hint">No days selected = every day. Evaluated in your local time.</div>
+
+        <div class="settings-label" style="margin-top:12px">Highlight keywords</div>
+        <textarea id="set-keywords" class="cs-topic" placeholder="release&#10;deploy&#10;urgent" style="min-height:56px"></textarea>
+        <div class="settings-hint">Messages containing these words alert you like an @mention. One per line.</div>
       </div>
 
       <div id="settings-status" class="settings-status" hidden></div>

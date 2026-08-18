@@ -297,6 +297,20 @@ CREATE TABLE IF NOT EXISTS typing_indicators (
   PRIMARY KEY (channel_id, actor_type, actor_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_notify_prefs (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  sound_master INTEGER NOT NULL DEFAULT 1,
+  os_master INTEGER NOT NULL DEFAULT 1,
+  previews INTEGER NOT NULL DEFAULT 1,
+  quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
+  quiet_hours_start TEXT NOT NULL DEFAULT '22:00',
+  quiet_hours_end TEXT NOT NULL DEFAULT '08:00',
+  quiet_hours_days TEXT NOT NULL DEFAULT '[]',
+  highlight_keywords TEXT NOT NULL DEFAULT '[]',
+  tz_offset_minutes INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS pinned_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -504,6 +518,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_member_actor ON channel_members(channel_id
 CREATE INDEX IF NOT EXISTS idx_bans_active ON bans(active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read);
 CREATE INDEX IF NOT EXISTS idx_notif_guest_user ON notifications(guest_user_id, read);
+CREATE INDEX IF NOT EXISTS idx_notif_user_id ON notifications(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_notif_guest_user_id ON notifications(guest_user_id, id);
 
 CREATE TABLE IF NOT EXISTS friendships (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

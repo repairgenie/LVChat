@@ -146,8 +146,11 @@ $router->post('/api/push/subscribe', [PushController::class, 'subscribe']);
 $router->post('/api/push/unsubscribe', [PushController::class, 'unsubscribe']);
 $router->get('/api/push/prefs', [PushController::class, 'prefsGet']);
 $router->post('/api/push/prefs', [PushController::class, 'prefs']);
+$router->get('/api/notify/prefs', [PushController::class, 'notifyPrefsGet']);
+$router->post('/api/notify/prefs', [PushController::class, 'notifyPrefs']);
 $router->post('/api/push/mute', [PushController::class, 'mute']);
 $router->post('/api/push/unmute', [PushController::class, 'unmute']);
+$router->post('/api/push/test', [PushController::class, 'test']);
 
 // Theme settings (per-user) + live CSS preview
 $router->get('/api/theme/css', [ThemeController::class, 'css']);

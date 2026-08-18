@@ -85,6 +85,14 @@ nod to IRC rather than an implementation of it.
   a pinned bar above the composer shows the count and a jumpable list (header menu → **Pinned messages**)
 - **Typing indicators** — "X is typing…" with animated dots above the composer in channels and DMs,
   polled server-side so they work over polling, SSE and WebSocket alike
+- **Unified notifications** — one alert engine across the web app, PWA, desktop client and
+  Messenger: **in-app toasts** (top-right stack with avatar, per-kind accent, click-to-jump),
+  **mention-aware badges** (red = you're needed, subtle = activity), **quiet hours** (local time,
+  per-day, used server-side for push via your UTC offset), **highlight keywords** (alert like an
+  @mention even in "mentions only" channels), **content-preview toggle**, and master sound/OS
+  switches — all shared through `/api/notify/prefs`. Muted channels never sound; DND and
+  "already looking at it" suppress alerts on every surface; clicking any notification deep-links
+  to the exact message
 - **Quick switcher** — **Ctrl+K / ⌘K** jumps to any channel or DM from a fuzzy overlay
 - **Emoji shortcodes** — type `:smile:`-style codes for autocompleted emoji insertion, and hover any
   message for a one-shot reaction popover

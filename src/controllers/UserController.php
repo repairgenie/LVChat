@@ -164,6 +164,19 @@ final class UserController
             'userThemeJson' => ThemeService::userTheme($user),
             'effectiveTheme' => ThemeService::effectiveForView($user),
             'pushPrefs' => $isSelf && !(int) ($user['guest'] ?? 0) ? PushService::prefs($user) : ['channels' => 1, 'dms' => 1, 'invites' => 1],
+            'notifyPrefs' => NotifyPrefs::get($user),
+            // Joined channels + each one's notification mode, for the per-channel list.
+            'chanModes' => $isSelf && !(int) ($user['guest'] ?? 0)
+                ? Database::all(
+                    'SELECT c.name, c.slug, COALESCE(cn.mode, "all") AS mode
+                     FROM channel_members cm
+                     JOIN channels c ON c.id = cm.channel_id
+                     LEFT JOIN channel_notify cn ON cn.channel_id = c.id AND cn.user_id = ?
+                     WHERE cm.user_id = ? AND cm.guest_id IS NULL
+                     ORDER BY c.name COLLATE NOCASE LIMIT 200',
+                    [(int) $user['id'], (int) $user['id']]
+                )
+                : [],
             'pushMutedUsers' => $isSelf && !(int) ($user['guest'] ?? 0) ? PushService::mutedList($user) : [],
             'vapidPublicKey' => PushService::publicKey(),
         ]);
