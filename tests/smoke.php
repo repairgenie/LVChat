@@ -634,8 +634,9 @@ check('/mode -v removes voice', AccessService::effectiveLevel($ch['id'], (int) $
 $res = CommandParser::run('/mode #test +b erin', $alice, $ch);
 check('/mode +b nick resolves to a mask', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
 check('mode +b ban stored as nick!*@*', (int) Database::scalar('SELECT COUNT(*) FROM bans WHERE kind = "channel_ban" AND channel_id = ? AND mask = "erin!*@*"', [$ch['id']]) === 1);
-$res = CommandParser::run('/mode #test -b erin!*@*', $alice, $ch);
-check('/mode -b removes the ban', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+$res = CommandParser::run('/mode #test -b erin', $alice, $ch);
+check('/mode -b nick removes the ban', $res['replies'][0] === 'Modes updated.', $res['replies'][0] ?? '');
+check('mode -b cleared the ban row', (int) Database::scalar('SELECT COUNT(*) FROM bans WHERE kind = "channel_ban" AND channel_id = ? AND mask = "erin!*@*"', [$ch['id']]) === 0);
 $res = CommandParser::run('/clear #test bans', $alice, $ch);
 check('/clear #chan bans', str_contains($res['replies'][0] ?? '', 'bans'), $res['replies'][0] ?? '');
 check('/clear clears the bans it promises', (int) Database::scalar('SELECT COUNT(*) FROM bans WHERE channel_id = ? AND kind IN ("channel_ban","quiet")', [$ch['id']]) === 0);

@@ -528,8 +528,9 @@ final class OpCommands
                 if (!$mask) {
                     return 'Usage: /mode +b <mask> or /mode -b <mask>';
                 }
-                // Resolve a bare nick to a full mask so /mode +b nick bans the user.
-                if ($add && !preg_match('/[*!@?]/', $mask)) {
+                // Resolve a bare nick to a full mask on both +b and -b, so
+                // /mode ±b nick round-trips with the stored nick!*@* ban.
+                if (!preg_match('/[*!@?]/', $mask)) {
                     $u = self::targetUser($mask);
                     if ($u) {
                         $mask = strtolower($u['username']) . '!*@*';

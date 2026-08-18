@@ -3372,7 +3372,8 @@ async function sendMessage (content) {
 /* ── Slash commands ──────────────────────────────────────────
  * Leading '/' input is a command delivered to /api/command. Replies render as
  * system lines in the stream; /clear empties the local view; a redirect
- * (e.g. leaving a channel) surfaces its reason. */
+ * (e.g. joining or leaving a channel) is acted on in-app the same way the web
+ * app navigates, instead of surfacing a generic alert. */
 async function runCommand (text) {
   const data = { text }
   if (state.open && state.open.type === 'room') data.channel = state.open.id
@@ -3382,19 +3383,77 @@ async function runCommand (text) {
     return
   }
   const b = r.body
-  if (b.redirect) {
-    await appAlert(b.reason || 'Command completed.')
-    return
-  }
+  const cmd = String(text).trim().split(/\s+/)[0].toLowerCase()
+  if (b.redirect) await handleCommandRedirect(cmd, b.redirect)
   if (b.action === 'clear') {
     state.messages = []
     renderStream()
+  }
+  if (b.action === 'browse') {
+    closeBrowse()
+    setTab('rooms')
+    browseRooms()
+  }
+  if (b.copy) {
+    try { await window.msg.copyText(String(b.copy)) } catch (err) { /* no clipboard in this shell */ }
+  }
+  if (b.topic_channel && typeof b.topic_set === 'string') {
+    if (state.open && state.open.type === 'room' && state.open.id === b.topic_channel) {
+      state.open.topic = b.topic_set
+      renderChat()
+    }
   }
   if (Array.isArray(b.replies)) {
     for (const line of b.replies) {
       if (line) appendCommandReply(line)
     }
   }
+}
+
+/* Act on a command redirect the way the web app's window.location does:
+ *  - /c/<slug>        → open the channel (join/register/identify results)
+ *  - /app?join=<slug> → keyed join: prompt for the room key
+ *  - /app?dm=<nick>   → open a DM
+ *  - /logout          → sign out (/quit and /logout)
+ *  - /app             → leave the current room (/part, /drop) or refresh
+ */
+async function handleCommandRedirect (cmd, redirect) {
+  const url = String(redirect)
+  const m = url.match(/^\/c\/([^?]+)/)
+  if (m) {
+    const slug = decodeURIComponent(m[1])
+    await refreshRooms()
+    openRoom(slug)
+    return
+  }
+  const q = url.indexOf('?')
+  const path = q === -1 ? url : url.slice(0, q)
+  const params = q === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(q + 1))
+  if (path === '/app' && params.get('join')) {
+    const slug = String(params.get('join'))
+    await refreshRooms()
+    const cached = browseCache && (browseCache.channels || []).concat(browseCache.myChannels || [])
+    const ch = Array.isArray(cached) ? cached.find((c) => c.slug === slug) : null
+    joinChannel(ch || { name: '#' + slug, slug })
+    return
+  }
+  if (path === '/app' && params.get('dm')) {
+    openDm(String(params.get('dm')))
+    return
+  }
+  if (path === '/logout') {
+    await doLogout()
+    return
+  }
+  if (path === '/app') {
+    if (['part', 'drop', 'unregister', 'quit'].includes(cmd.slice(1))) {
+      leaveRoomForRemoval('')
+      return
+    }
+    await refreshRooms()
+    return
+  }
+  await appAlert('Command completed.')
 }
 
 function appendCommandReply (text) {

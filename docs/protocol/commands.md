@@ -206,7 +206,7 @@ and shown in `/memo summary`.
 `oper`, `deoper`, `kline`, `gline`, `zline`, `shun` (+ `un*` variants), `kill`,
 `global`, `wallops`, `motd`, `sajoin`, `sapart`, `samode`, `sanick`,
 `sasethost`, `sqline`, `unsqline`, `sqlines`, `cqline`, `uncqline`, `cqlines`,
-`spamfilter`, `badword`, `serverstats`, `rehash`, `os`.
+`spamfilter`, `badword`, `serverstats`, `clients`, `rehash`, `os`.
 
 - `/os <command> [args]` is the OperServ prefix alias (re-enters the parser, so
   the target command's own gates still apply).

@@ -21,7 +21,7 @@
  * drives the messenger window: login → MFA → friends/groups render →
  * directory add-friend → DM send/receive → GIF + image → room members → theme.
  */
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, shell, clipboard } = require('electron')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -38,6 +38,12 @@ const profiles = require('../src/profiles')
 // launching a real browser. main.js references the same `shell` singleton.
 let openedExternal = null
 shell.openExternal = async (url) => { openedExternal = String(url) }
+
+// Intercept clipboard writes (the /share slash command copies through the
+// preload's ipc → main clipboard). The preload bridge object is frozen, so the
+// spy lives here in the main process.
+let copiedText = null
+clipboard.writeText = (t) => { copiedText = String(t) }
 
 let failures = 0
 function check (name, cond, extra) {
@@ -172,6 +178,23 @@ function mockLvchatServer () {
     onlineFriends: new Set(['bob']), // usernames currently online
     friendModes: {}, // username -> status_mode override (issue #6)
     friendStatus: {}, // username -> custom_status override
+    voiceEnabled: false,
+    sessionWaiting: false,   // voice join returns {ok, waiting:true} when true
+    session: null,           // status session payload (waiting/lobby/host states)
+    recording: { enabled: false, active: null },
+    voiceFull: false,
+    lastVoiceJoin: null,
+    lastModeration: null,
+    lastInvite: null,
+    lastRecord: null,
+    alerts: [], // unified `alerts` delta rows served on the next poll
+    feed: [], // /api/notifications rows (Activity panel)
+    notifyPrefs: {
+      sound_master: 1, os_master: 1, previews: 1,
+      quiet_hours_enabled: 0, quiet_hours_start: '22:00', quiet_hours_end: '08:00',
+      quiet_hours_days: [], highlight_keywords: [], tz_offset_minutes: 0
+    },
+    lastNotifyPrefs: null,
     invites: [
       { id: 5, channel_id: 9, channel_name: 'Dev Lounge', slug: 'dev', inviter: 'bob', created_at: '2026-08-06 07:00:00' },
       { id: 6, channel_id: 10, channel_name: 'Gamers Den', slug: 'gamers', inviter: 'carol', created_at: '2026-08-06 07:05:00' }
@@ -225,6 +248,7 @@ function mockLvchatServer () {
       messages: [],
       presence: [],
       notify_count: 1,
+      alerts: state.alerts,
       dm_list: [{ user_id: 3, username: 'carol', role: 'user', guest: 0, away: null, last_seen: '2026-08-01 00:00:00', unread: state.dmUnread, last_content: 'hey', last_id: 3, muted: state.mutedUsers.has(3) ? 1 : 0 }],
       friends: friends(),
       friend_requests: incoming(),
@@ -576,6 +600,31 @@ function mockLvchatServer () {
           json(200, { ok: true, action: 'clear' })
           return
         }
+        if (text.startsWith('/list')) {
+          json(200, { ok: true, action: 'browse', replies: ['Opening channel browser...'] })
+          return
+        }
+        if (text.startsWith('/share')) {
+          json(200, { ok: true, copy: 'https://chat.test/c/arcade', replies: ['Shareable link for #arcade:', 'https://chat.test/c/arcade'] })
+          return
+        }
+        if (text.startsWith('/join')) {
+          const slug = String((text.split(/\s+/)[1] || '').replace(/^#/, '') || 'arcade')
+          json(200, { ok: true, redirect: '/c/' + slug, replies: ['Joined #' + slug + '.'] })
+          return
+        }
+        if (text.startsWith('/topic #gaming')) {
+          json(200, { ok: true, topic_set: 'A shiny new topic', topic_channel: 'gaming', replies: ['Topic set to: A shiny new topic'] })
+          return
+        }
+        if (text.startsWith('/part')) {
+          json(200, { ok: true, redirect: '/app', replies: ['You have left #gaming.'] })
+          return
+        }
+        if (text.startsWith('/quit')) {
+          json(200, { ok: true, redirect: '/logout', replies: ['Goodbye!'] })
+          return
+        }
         json(200, { ok: true, replies: ['Command reply: ' + text] })
       })
       return
@@ -646,7 +695,34 @@ function mockLvchatServer () {
       return
     }
     if (url.pathname === '/api/notifications') {
-      json(200, { ok: true, notifications: [] })
+      json(200, { ok: true, notifications: state.feed })
+      return
+    }
+    if (url.pathname === '/api/notify/prefs') {
+      if (req.method === 'POST') {
+        let body = ''
+        req.on('data', (c) => { body += c })
+        req.on('end', () => {
+          const p = new URLSearchParams(body)
+          state.lastNotifyPrefs = Object.fromEntries(p)
+          const days = JSON.parse(p.get('quiet_hours_days') || '[]')
+          const kws = JSON.parse(p.get('highlight_keywords') || '[]')
+          state.notifyPrefs = {
+            sound_master: p.get('sound_master') === '0' ? 0 : 1,
+            os_master: p.get('os_master') === '0' ? 0 : 1,
+            previews: p.get('previews') === '0' ? 0 : 1,
+            quiet_hours_enabled: p.get('quiet_hours_enabled') === '1' ? 1 : 0,
+            quiet_hours_start: p.get('quiet_hours_start') || '22:00',
+            quiet_hours_end: p.get('quiet_hours_end') || '08:00',
+            quiet_hours_days: Array.isArray(days) ? days : [],
+            highlight_keywords: Array.isArray(kws) ? kws : [],
+            tz_offset_minutes: Number(p.get('tz_offset_minutes') || 0)
+          }
+          json(200, { ok: true, prefs: { push: { channels: 1, dms: 1, invites: 1 }, notify: state.notifyPrefs } })
+        })
+        return
+      }
+      json(200, { ok: true, prefs: { push: { channels: 1, dms: 1, invites: 1 }, notify: state.notifyPrefs } })
       return
     }
     if (url.pathname === '/api/ws/ticket') {
@@ -657,9 +733,10 @@ function mockLvchatServer () {
     if (url.pathname === '/api/webrtc/voice/status') {
       const voice = state.voiceEnabled === undefined ? false : !!state.voiceEnabled
       json(200, {
-        ok: true, enabled: voice, active: 0, max: 50, full: false, talker_cap: 8, bitrate: 40000,
+        ok: true, enabled: voice, active: 0, max: 50, full: !!state.voiceFull, talker_cap: 8, bitrate: 40000,
         channels: [{ slug: 'gaming', name: '#gaming', voice_enabled: voice }],
-        session: null,
+        session: state.session,
+        recording: state.recording,
         calls: { incoming: [], outgoing: [], active: null }
       })
       return
@@ -670,7 +747,49 @@ function mockLvchatServer () {
       req.on('end', () => {
         const p = new URLSearchParams(body)
         state.lastVoiceJoin = { channel: p.get('channel') || '' }
+        if (state.sessionWaiting) {
+          // Waiting-room lobby: no token until the host admits (status.mint).
+          json(200, { ok: true, waiting: true, room: 'chan:' + (p.get('channel') || '') })
+          return
+        }
         json(200, { ok: true, url: 'ws://127.0.0.1:1/', token: 'a.b.c', room: 'chan:' + (p.get('channel') || ''), talker_cap: 8, bitrate: 40000 })
+      })
+      return
+    }
+    // Host controls + group-invite + recording: record the calls so the e2e
+    // can assert the canonical client posts the right room/action/identity.
+    if (url.pathname === '/api/webrtc/moderate' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        state.lastModeration = {
+          room: p.get('room') || '',
+          action: p.get('action') || '',
+          identity: p.get('identity') || '',
+          value: p.get('value') || ''
+        }
+        json(200, { ok: true })
+      })
+      return
+    }
+    if (url.pathname === '/api/webrtc/call/invite' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        state.lastInvite = { call_id: p.get('call_id') || '', users: p.get('users') || '' }
+        json(200, { ok: true, added: ['carol'], unknown: [], busy: [] })
+      })
+      return
+    }
+    if (url.pathname === '/api/webrtc/record' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c })
+      req.on('end', () => {
+        const p = new URLSearchParams(body)
+        state.lastRecord = { room: p.get('room') || '', action: p.get('action') || '' }
+        json(200, { ok: true })
       })
       return
     }
@@ -775,14 +894,30 @@ async function main () {
   check('group node "Friends" + ungrouped render', (buddyText || '').includes('Friends') && (buddyText || '').includes('Ungrouped'), String(buddyText).slice(0, 200))
   check('carol unread badge shows 2', await waitJs(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); return c && c.querySelector('.unread') && c.querySelector('.unread').textContent === '2' })()`))
 
-  // A DM arriving while on the buddy list fires a native OS notification via
-  // the main process (seeding on the first poll must not alert).
+  // A DM arriving while on the buddy list fires a native OS notification +
+  // an in-app toast, both driven by the unified `alerts` delta (the first poll
+  // seeds silently so pre-existing state never re-alerts).
   const n0 = await js(win, `window.msg.notifyStats()`)
-  mock.state.dmUnread = 3
+  mock.state.alerts = [{ id: 9001, kind: 'dm', sender: 'bob', message_id: 7, channel_slug: null, content: 'delta dm', excerpt: 'delta dm', created_at: '2026-08-06 10:00:00' }]
   await new Promise((r) => setTimeout(r, 3500))
   const n1 = await js(win, `window.msg.notifyStats()`)
-  check('new DM unread triggers a native notification', (n1.count || 0) > (n0.count || 0), `${JSON.stringify(n0)} -> ${JSON.stringify(n1)}`)
-  mock.state.dmUnread = 2
+  check('delta DM triggers a native notification', (n1.count || 0) > (n0.count || 0), `${JSON.stringify(n0)} -> ${JSON.stringify(n1)}`)
+  check('delta DM shows an in-app toast', await waitJs(win, `(() => { const t = [...document.querySelectorAll('#messenger-toasts .toast')].find((x) => x.textContent.includes('DM from bob')); return !!t && 'ok' })()`))
+  mock.state.alerts = []
+
+  // The Activity tab renders the notifications feed + an unread badge.
+  await js(win, `document.getElementById('tab-alerts').click()`)
+  check('activity tab opens', await waitJs(win, `!document.getElementById('panel-alerts').hidden && 'ok'`))
+  mock.state.feed = [
+    { id: 9001, kind: 'mention', sender: 'bob', channel_name: '#gaming', message_id: 10, read: 0, created_at: '2026-08-06 10:00:00' },
+    { id: 9000, kind: 'friend_accepted', sender: 'carol', channel_name: null, message_id: 0, read: 1, created_at: '2026-08-06 09:00:00' }
+  ]
+  await new Promise((r) => setTimeout(r, 4200)) // the feed polls every 4s
+  check('activity tab lists feed rows', await waitJs(win, `document.getElementById('alerts-list').textContent.includes('bob') && document.getElementById('alerts-list').textContent.includes('carol') && 'ok'`))
+  check('activity unread badge counts unread items', await waitJs(win, `document.getElementById('alert-badge').textContent === '1' && 'ok'`))
+  await js(win, `document.getElementById('tab-buddy').click()`)
+  check('activity tab hides on another tab', await waitJs(win, `document.getElementById('panel-alerts').hidden && 'ok'`))
+  mock.state.feed = []
 
   // Directory search → add friend.
   await js(win, `document.getElementById('directory-search').value = 'dan'; document.getElementById('directory-search').dispatchEvent(new Event('input'))`)
@@ -933,6 +1068,26 @@ async function main () {
   check('queued message delivered after reconnect', await waitJs(win, `(() => { const m = [...document.querySelectorAll('#stream .msg')].find((x) => x.textContent.includes('queued while offline')); return !!m && !m.textContent.includes('Pending') && 'ok' })()`))
   check('offline banner hidden after reconnect', await waitJs(win, `document.getElementById('offline-banner').hidden && 'ok'`))
 
+  // A mention alert in a room you're NOT currently viewing → toast; clicking
+  // it opens the room and highlights the exact message (msg_id deep-link).
+  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((x) => x.textContent.includes('gaming')); if (c) c.click(); return !!c })()`)
+  check('room opens in advanced', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
+  // Navigate to a DM first so the room is not the conversation on screen —
+  // alerts for the room you're reading are deliberately suppressed.
+  await js(win, `document.getElementById('tab-buddy').click()`)
+  await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (c) c.click(); return !!c })()`)
+  check('navigated to a DM before the room alert', await waitJs(win, `document.getElementById('chat-title').textContent === 'bob' && 'ok'`))
+  mock.state.alerts = [{ id: 9002, kind: 'mention', sender: 'carol', message_id: 10, channel_slug: 'gaming', channel_name: '#gaming', content: 'welcome to gaming', excerpt: 'welcome to gaming', created_at: '2026-08-06 10:05:00' }]
+  const deltaN2 = await js(win, `window.msg.notifyStats()`)
+  await new Promise((r) => setTimeout(r, 3500))
+  const deltaN3 = await js(win, `window.msg.notifyStats()`)
+  check('room mention delta triggers an alert', (deltaN3.count || 0) > (deltaN2.count || 0), `${JSON.stringify(deltaN2)} -> ${JSON.stringify(deltaN3)}`)
+  check('room mention toast has the mention accent', await waitJs(win, `(() => { const t = [...document.querySelectorAll('#messenger-toasts .toast')].find((x) => x.textContent.includes('carol')); return !!t && (t.classList.contains('mention') || t.classList.contains('dm')) && 'ok' })()`))
+  await js(win, `(() => { const t = [...document.querySelectorAll('#messenger-toasts .toast')].find((x) => x.textContent.includes('carol')); if (t) t.click(); return !!t })()`)
+  check('toast click jumps to the mentioned message', await waitJs(win, `(() => { const m = document.querySelector('#stream .msg[data-id="10"]'); return !!m && m.classList.contains('msg-highlight') && 'ok' })()`))
+  mock.state.alerts = []
+
   // Settings modal: notification + sound preferences.
   await js(win, `document.getElementById('menu-btn').click()`)
   await js(win, `(() => { const m = document.getElementById('head-menu'); const b = [...m.querySelectorAll('button')].find((x) => x.textContent.includes('Settings')); if (b) b.click(); return !!b })()`)
@@ -947,6 +1102,14 @@ async function main () {
   await js(win, `(() => { const c = document.getElementById('set-sound-dm-on'); c.checked = false; c.dispatchEvent(new Event('change')); return 'ok' })()`)
   await new Promise((r) => setTimeout(r, 400))
   check('DM sound toggle posts sound prefs', !!mock.state.soundPrefs && mock.state.soundPrefs.dm_sound === '0' && mock.state.soundPrefs.channel_sound === '1', JSON.stringify(mock.state.soundPrefs))
+  // Unified alert preferences (masters / quiet hours / keywords / previews).
+  check('settings load unified prefs', await waitJs(win, `document.getElementById('set-master-sound').checked && document.getElementById('set-master-os').checked && document.getElementById('set-preview').checked && !document.getElementById('set-qh-enabled').checked && document.getElementById('set-qh-start').value === '22:00' && 'ok'`))
+  await js(win, `(() => { const c = document.getElementById('set-master-sound'); c.checked = false; c.dispatchEvent(new Event('change')); return 'ok' })()`)
+  await new Promise((r) => setTimeout(r, 400))
+  check('master sound toggle posts /api/notify/prefs', !!mock.state.lastNotifyPrefs && mock.state.lastNotifyPrefs.sound_master === '0', JSON.stringify(mock.state.lastNotifyPrefs))
+  await js(win, `(() => { const q = document.getElementById('set-qh-enabled'); q.checked = true; q.dispatchEvent(new Event('change')); return 'ok' })()`)
+  await new Promise((r) => setTimeout(r, 400))
+  check('quiet hours toggle posts /api/notify/prefs', !!mock.state.lastNotifyPrefs && mock.state.lastNotifyPrefs.quiet_hours_enabled === '1', JSON.stringify(mock.state.lastNotifyPrefs))
   await js(win, `document.getElementById('settings-close').click()`)
   check('settings modal closes', await waitJs(win, `document.getElementById('settings-modal').hidden && 'ok'`))
 
@@ -979,7 +1142,7 @@ async function main () {
   mock.state.onlineFriends.add('carol')
   mock.state.friendModes['carol'] = 'custom'
   mock.state.friendStatus['carol'] = 'streaming'
-  check('custom-status friend shows the away dot', await waitJs(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); return !!c && c.querySelector('.dot').classList.contains('away') && 'ok' })()`))
+  check('custom-status friend shows the away dot', await waitJs(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('carol')); if (!c) return 'no-row'; const d = c.querySelector('.dot'); return (d && d.classList.contains('away')) ? 'ok' : 'dot=' + (d ? d.className : 'none') + '|' + (c.querySelector('.contact-status') ? c.querySelector('.contact-status').textContent : '') })()`))
   mock.state.onlineFriends.delete('carol')
   mock.state.friendModes['carol'] = 'online'
   mock.state.friendStatus['carol'] = ''
@@ -1026,10 +1189,16 @@ async function main () {
   await new Promise((r) => setTimeout(r, 800))
   check('block posted /api/friend/block', mock.state.blockedUsers.has('carol'), [...mock.state.blockedUsers])
   check('blocked friend moves to the Blocked users group', await waitJs(win, `(() => { const t = document.getElementById('buddy-list'); const g = [...t.querySelectorAll('.group')].find((x) => x.querySelector('.group-head') && x.querySelector('.group-head').textContent.includes('Blocked users')); return !!g && g.textContent.includes('carol') && 'ok' })()`))
-  await js(win, `(() => { const b = [...document.querySelectorAll('#buddy-list button')].find((x) => x.textContent === 'Unblock'); if (b) b.click(); return !!b })()`)
-  await new Promise((r) => setTimeout(r, 800))
+  await js(win, `(() => { const b = [...document.querySelectorAll('#buddy-list button')].find((x) => x.textContent.trim() === 'Unblock'); if (b) b.click(); return !!b })()`)
+  // Deterministic: the mock only clears blockedUsers once the unblock POST lands.
+  const unStart = Date.now()
+  let unObserved = false
+  while (Date.now() - unStart < 15000 && !unObserved) {
+    if (!mock.state.blockedUsers.has('carol')) unObserved = true
+    else await new Promise((r) => setTimeout(r, 100))
+  }
+  check('unblock posted /api/friend/unblock', unObserved, [...mock.state.blockedUsers])
   check('unblock restores carol to the buddy list', await waitJs(win, `(() => { const t = document.getElementById('buddy-list'); const g = [...t.querySelectorAll('.group')].find((x) => x.querySelector('.group-head') && x.querySelector('.group-head').textContent.includes('Blocked users')); return !g && t.textContent.includes('carol') && 'ok' })()`))
-  check('unblock posted /api/friend/unblock', !mock.state.blockedUsers.has('carol'), [...mock.state.blockedUsers])
 
   // Room view: gaming with members.
   await js(win, `document.getElementById('tab-rooms').click()`)
@@ -1043,13 +1212,80 @@ async function main () {
   // and a join button once the module reports voice enabled on the channel.
   mock.state.voiceEnabled = false
   await new Promise((r) => setTimeout(r, 700))
-  check('no voice button while the module is disabled', await waitJs(win, `!document.getElementById('lvcvoice-btn') || document.getElementById('lvcvoice-btn').hidden ? 'ok' : 'visible'`))
+  check('no voice button while the module is disabled', await waitJs(win, `!document.getElementById('lvcvoice-dd-trigger') || document.getElementById('lvcvoice-dropdown').classList.contains('hidden') ? 'ok' : 'visible'`))
   mock.state.voiceEnabled = true
   await new Promise((r) => setTimeout(r, 700))
-  check('voice button appears when the module is enabled', await waitJs(win, `(() => { const b = document.getElementById('lvcvoice-btn'); return !!b && !b.hidden && b.textContent === 'Voice' && 'ok' })()`))
-  await js(win, `document.getElementById('lvcvoice-btn').click()`)
+  check('voice button appears when the module is enabled', await waitJs(win, `(() => { const b = document.getElementById('lvcvoice-dd-trigger'); return !!b && !document.getElementById('lvcvoice-dropdown').classList.contains('hidden') && 'ok' })()`))
+  await js(win, `document.getElementById('lvcvoice-dd-trigger').click()`)
+  await new Promise((r) => setTimeout(r, 300))
+  check('voice menu opens', await waitJs(win, `!document.getElementById('lvcvoice-dd-menu').classList.contains('hidden') && 'ok'`))
+  await js(win, `document.querySelector('.lvcvoice-dd-item').click()`)
   await new Promise((r) => setTimeout(r, 700))
   check('voice button join posts /api/webrtc/voice/join with the channel', mock.state.lastVoiceJoin && mock.state.lastVoiceJoin.channel === 'gaming', JSON.stringify(mock.state.lastVoiceJoin))
+  mock.state.voiceEnabled = false
+
+  // ── Voice parity: waiting room, admit/deny, full-state label ─────────────
+  // The pane's moderation/record controls only render after a real LiveKit
+  // connection (Room.Connected), which the mock cannot provide — these tests
+  // cover every voice state reachable over the plain HTTP contract.
+  const joinVoice = async () => {
+    // A previous dead-end connect attempt (the mock ws never opens) can leave
+    // the client with connecting=true for a while; the join button is inert
+    // until it settles. Wait for the label to leave "Connecting…" first.
+    const settled = await waitJs(win, `(() => { const b = document.querySelector('#lvcvoice-dd-menu .lvcvoice-dd-item-label'); return (!b || b.textContent !== 'Connecting…') ? 'ok' : 'connecting' })()`, 8000)
+    if (!settled) return false
+    mock.state.lastVoiceJoin = null
+    await js(win, `document.getElementById('lvcvoice-dd-trigger').click()`)
+    await new Promise((r) => setTimeout(r, 300))
+    await js(win, `document.querySelector('.lvcvoice-dd-item').click()`)
+    const start = Date.now()
+    for (;;) {
+      if (mock.state.lastVoiceJoin) return true
+      if (Date.now() - start > 8000) {
+        const dbg = await js(win, `(() => ({ label: (document.querySelector('#lvcvoice-dd-menu .lvcvoice-dd-item-label') || {}).textContent, menuHidden: document.getElementById('lvcvoice-dd-menu').classList.contains('hidden'), toast: (document.getElementById('lvcvoice-toast') || {}).textContent || '' }))()`)
+        return 'timeout ' + JSON.stringify(dbg)
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  const lobbyVisible = () => `(() => { const p = document.getElementById('lvcvoice-pane'); const w = p && p.querySelector('.pane-waiting'); return (p && !p.classList.contains('hidden') && w && !w.classList.contains('hidden')) ? 'ok' : 'hidden' })()`
+
+  // (1) Waiting room: join returns {ok, waiting:true} → lobby UI in the pane.
+  // Note: the join click must happen while session is null — if the status
+  // poll already reports a waiting session the client is already "in the
+  // lobby" and the join button short-circuits (toggleVoice checks waitingRoom).
+  mock.state.voiceEnabled = true
+  mock.state.sessionWaiting = true
+  mock.state.session = null
+  check('waiting-room join posts the channel too', await joinVoice(), JSON.stringify(mock.state.lastVoiceJoin))
+  mock.state.session = { room: 'chan:gaming', kind: 'channel', waiting: true, can_moderate: false, locked: false, roster: [], mint: null }
+  check('waiting room shows the lobby banner', await waitJs(win, lobbyVisible()))
+  // (2) Admit: session.mint delivered once → lobby gone + graceful connect fail.
+  mock.state.sessionWaiting = false
+  mock.state.session = {
+    room: 'chan:gaming', kind: 'channel', waiting: false, can_moderate: false, locked: false,
+    roster: [], mint: { url: 'ws://127.0.0.1:1/', token: 'a.b.c', room: 'chan:gaming' }
+  }
+  check('admitted user leaves the waiting room (mint handoff consumed)',
+    await waitJs(win, `(() => { const p = document.getElementById('lvcvoice-pane'); const w = p && p.querySelector('.pane-waiting'); return (!p || p.classList.contains('hidden') || (w && w.classList.contains('hidden'))) ? 'ok' : 'still-waiting' })()`))
+  check('failed LiveKit connect is reported gracefully',
+    await waitJs(win, `(() => { const t = document.getElementById('lvcvoice-toast'); return (t && t.textContent.indexOf('Could not connect to voice') !== -1) ? 'ok' : 'no-toast' })()`))
+  // (3) Deny: a waiting session row disappears → host-declined toast.
+  mock.state.sessionWaiting = true
+  mock.state.session = null
+  await joinVoice()
+  mock.state.session = { room: 'chan:gaming', kind: 'channel', waiting: true, can_moderate: false, locked: false, roster: [], mint: null }
+  await new Promise((r) => setTimeout(r, 300))
+  mock.state.session = null
+  check('denied occupant sees the host-declined toast',
+    await waitJs(win, `(() => { const t = document.getElementById('lvcvoice-toast'); return (t && t.textContent.indexOf('host declined') !== -1) ? 'ok' : 'no-toast' })()`))
+  // (4) Full state: status reports full → the dropdown label tells the user.
+  mock.state.session = null
+  mock.state.sessionWaiting = false
+  mock.state.voiceFull = true
+  check('voice-full state surfaces in the dropdown label',
+    await waitJs(win, `(() => { const b = document.querySelector('#lvcvoice-dd-menu .lvcvoice-dd-item-label'); return b && b.textContent.indexOf('Voice full (0/50)') !== -1 ? 'ok' : (b ? b.textContent : 'no-label') })()`))
+  mock.state.voiceFull = false
   mock.state.voiceEnabled = false
 
   // Slash commands route to /api/command and render their reply in the stream.
@@ -1061,6 +1297,34 @@ async function main () {
   // /clear wipes the local stream (a real server also echoes "Chat cleared.").
   await js(win, `document.getElementById('composer-input').value = '/clear'; document.getElementById('composer-send').click()`)
   check('clear command empties the stream', await waitJs(win, `!document.getElementById('stream').textContent.includes('Command reply: /kick bob too spammy') && 'ok'`))
+
+  // Slash-command client actions mirror the web app: /list opens the room
+  // browser, /share copies the link, /topic refreshes the header topic, and
+  // /join + /part act on the redirect instead of a bare alert.
+  await js(win, `document.getElementById('composer-input').value = '/list'; document.getElementById('composer-send').click()`)
+  check('slash /list opens the room browser', await waitJs(win, `(() => { const l = document.getElementById('browse-list'); return !!l && !l.hidden && l.textContent.includes('arcade') && 'ok' })()`))
+  await js(win, `document.getElementById('btn-browse-back').click()`)
+  check('slash /list back returns to rooms', await waitJs(win, `document.getElementById('browse-list').hidden && 'ok'`))
+  await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((x) => x.textContent.includes('gaming')); if (c) c.click(); return !!c })()`)
+  check('back in #gaming for the action tests', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
+
+  await js(win, `document.getElementById('composer-input').value = '/share #arcade'; document.getElementById('composer-send').click()`)
+  await new Promise((r) => setTimeout(r, 1200))
+  check('slash /share copies the link', copiedText === 'https://chat.test/c/arcade', String(copiedText))
+  check('slash /share renders the link reply', await waitJs(win, `document.getElementById('stream').textContent.includes('https://chat.test/c/arcade') && 'ok'`))
+
+  await js(win, `document.getElementById('composer-input').value = '/topic #gaming A shiny new topic'; document.getElementById('composer-send').click()`)
+  check('slash /topic refreshes the header topic', await waitJs(win, `document.getElementById('chat-sub').textContent.includes('A shiny new topic') && 'ok'`))
+
+  await js(win, `document.getElementById('composer-input').value = '/join #arcade'; document.getElementById('composer-send').click()`)
+  check('slash /join opens the joined room', await waitJs(win, `document.getElementById('chat-title').textContent === '#arcade' && 'ok'`))
+  await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((x) => x.textContent.includes('gaming')); if (c) c.click(); return !!c })()`)
+  check('back in #gaming after the join test', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
+
+  await js(win, `document.getElementById('composer-input').value = '/part'; document.getElementById('composer-send').click()`)
+  check('slash /part closes the open room', await waitJs(win, `document.getElementById('chat-title').textContent !== '#gaming' && 'ok'`))
+  await js(win, `document.getElementById('composer-input').value = '/join #gaming'; document.getElementById('composer-send').click()`)
+  check('slash /join reopens the room after /part', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
 
   // Slash-command autocomplete mirrors the web app (fed by GET /api/commands).
   await js(win, `(() => { const i = document.getElementById('composer-input'); i.value = '/sa'; i.dispatchEvent(new Event('input', { bubbles: true })); return 'ok' })()`)
@@ -1113,10 +1377,11 @@ async function main () {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
   check('packaged files ship build/icon.png', Array.isArray(pkg.build.files) && pkg.build.files.includes('build/icon.png'), JSON.stringify(pkg.build.files))
 
-  // Logout wipes the session cookie; because the login form saved the password
-  // (keychain), the reload auto-logins with saved credentials → MFA gate.
-  await js(win, `document.getElementById('logout-btn').click()`)
-  check('logout hides the main view', await waitJs(win, `document.getElementById('view-main').hidden && 'ok'`))
+  // Logout via the /quit slash command (redirect: /logout → full sign-out) —
+  // wipes the session; because the login form saved the password (keychain),
+  // the reload auto-logins with saved credentials → MFA gate.
+  await js(win, `document.getElementById('composer-input').value = '/quit'; document.getElementById('composer-send').click()`)
+  check('/quit redirect signs out (view-main hidden)', await waitJs(win, `document.getElementById('view-main').hidden && 'ok'`))
   check('auto-login with saved creds reaches MFA', await waitJs(win, `!document.getElementById('view-mfa').hidden`))
   await js(win, `document.getElementById('mfa-code').value = '123456'; document.getElementById('mfa-form').requestSubmit()`)
   check('auto-login completes back to main', await waitJs(win, `!document.getElementById('view-main').hidden`))
