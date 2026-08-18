@@ -210,7 +210,7 @@ async function main () {
   // Sign in inside the messenger window — lands on the friends list.
   await js(win, `document.getElementById('login-username').value = 'alice'; document.getElementById('login-password').value = 'password123'; document.getElementById('login-form').requestSubmit()`)
   check('main view shown after sign-in', await waitJs(win, `!document.getElementById('view-main').hidden && 'ok'`))
-  check('friends tab is the active tab', await waitJs(win, `document.getElementById('tab-buddy').classList.contains('active') && 'ok'`))
+  check('friends is the default view', await waitJs(win, `document.getElementById('tab-select-label').textContent === 'Friends' && !document.getElementById('panel-buddy').hidden && 'ok'`))
   check('friends list renders (bob)', await waitJs(win, `document.getElementById('buddy-list').textContent.includes('bob') && 'ok'`))
   check('still no profile manager window', launcherWindow() === undefined, '')
 

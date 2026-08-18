@@ -175,6 +175,7 @@ function mockLvchatServer () {
     meStatus: null,
     mutedUsers: new Set(), // user ids muted by the viewer (user_mutes)
     blockedUsers: new Set(), // usernames blocked by the viewer
+    blockLog: [],
     onlineFriends: new Set(['bob']), // usernames currently online
     friendModes: {}, // username -> status_mode override (issue #6)
     friendStatus: {}, // username -> custom_status override
@@ -438,6 +439,7 @@ function mockLvchatServer () {
       req.on('data', (c) => { body += c })
       req.on('end', () => {
         const username = new URLSearchParams(body).get('username')
+        state.blockLog.push({ op: url.pathname.split('/').pop(), user: username, at: Date.now() })
         if (url.pathname === '/api/friend/block') state.blockedUsers.add(username)
         else state.blockedUsers.delete(username)
         json(200, { ok: true })
@@ -906,7 +908,7 @@ async function main () {
   mock.state.alerts = []
 
   // The Activity tab renders the notifications feed + an unread badge.
-  await js(win, `document.getElementById('tab-alerts').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="alerts"]').click()`)
   check('activity tab opens', await waitJs(win, `!document.getElementById('panel-alerts').hidden && 'ok'`))
   mock.state.feed = [
     { id: 9001, kind: 'mention', sender: 'bob', channel_name: '#gaming', message_id: 10, read: 0, created_at: '2026-08-06 10:00:00' },
@@ -915,7 +917,7 @@ async function main () {
   await new Promise((r) => setTimeout(r, 4200)) // the feed polls every 4s
   check('activity tab lists feed rows', await waitJs(win, `document.getElementById('alerts-list').textContent.includes('bob') && document.getElementById('alerts-list').textContent.includes('carol') && 'ok'`))
   check('activity unread badge counts unread items', await waitJs(win, `document.getElementById('alert-badge').textContent === '1' && 'ok'`))
-  await js(win, `document.getElementById('tab-buddy').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="buddy"]').click()`)
   check('activity tab hides on another tab', await waitJs(win, `document.getElementById('panel-alerts').hidden && 'ok'`))
   mock.state.feed = []
 
@@ -928,7 +930,7 @@ async function main () {
   check('dan request sent (status -> Requested)', await waitJs(win, `(() => { const r = [...document.querySelectorAll('#directory-list .contact')].find((r) => r.textContent.includes('dan')); return !!r && r.querySelector('button').textContent.includes('Requested') })()`))
 
   // Requests tab shows incoming friend request + channel invites.
-  await js(win, `document.getElementById('tab-requests').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="requests"]').click()`)
   check('requests tab lists eve', await waitJs(win, `document.getElementById('requests-list').textContent.includes('eve') && 'ok'`))
   check('requests tab lists channel invites', await waitJs(win, `document.getElementById('requests-list').textContent.includes('Dev Lounge') && document.getElementById('requests-list').textContent.includes('Gamers Den') && document.getElementById('requests-list').textContent.includes('Invited by bob') && 'ok'`))
   check('requests badge counts invites + friend requests', await waitJs(win, `document.getElementById('req-badge').textContent === '3' && 'ok'`))
@@ -940,9 +942,9 @@ async function main () {
   // Accept a channel invite → the room joins the Rooms tab.
   await js(win, `(() => { const rows = [...document.querySelectorAll('#requests-list .req')]; const r = rows.find((x) => x.textContent.includes('Gamers Den')); if (!r) return 'no-row'; [...r.querySelectorAll('button')].find((b) => b.textContent === 'Accept').click(); return 'ok' })()`)
   check('accepted invite leaves the list', await waitJs(win, `!document.getElementById('requests-list').textContent.includes('Gamers Den') && 'ok'`))
-  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="rooms"]').click()`)
   check('accepted invite joins the rooms list', await waitJs(win, `document.getElementById('rooms-list').textContent.includes('gamers') && 'ok'`))
-  await js(win, `document.getElementById('tab-buddy').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="buddy"]').click()`)
 
   // In compact view a single click must not open a conversation window.
   await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (c) c.click() })()`)
@@ -968,7 +970,7 @@ async function main () {
   await new Promise((r) => setTimeout(r, 400))
 
   // Rooms tab + double-click a room to open its own window.
-  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="rooms"]').click()`)
   check('rooms tab lists gaming', await waitJs(win, `document.getElementById('rooms-list').textContent.includes('gaming') && 'ok'`))
   await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((c) => c.textContent.includes('gaming')); if (c) c.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) })()`)
   const roomWin = await waitChatWindow('room', 'gaming')
@@ -1070,12 +1072,12 @@ async function main () {
 
   // A mention alert in a room you're NOT currently viewing → toast; clicking
   // it opens the room and highlights the exact message (msg_id deep-link).
-  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="rooms"]').click()`)
   await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((x) => x.textContent.includes('gaming')); if (c) c.click(); return !!c })()`)
   check('room opens in advanced', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
   // Navigate to a DM first so the room is not the conversation on screen —
   // alerts for the room you're reading are deliberately suppressed.
-  await js(win, `document.getElementById('tab-buddy').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="buddy"]').click()`)
   await js(win, `(() => { const c = [...document.querySelectorAll('#buddy-list .contact')].find((c) => c.textContent.includes('bob')); if (c) c.click(); return !!c })()`)
   check('navigated to a DM before the room alert', await waitJs(win, `document.getElementById('chat-title').textContent === 'bob' && 'ok'`))
   mock.state.alerts = [{ id: 9002, kind: 'mention', sender: 'carol', message_id: 10, channel_slug: 'gaming', channel_name: '#gaming', content: 'welcome to gaming', excerpt: 'welcome to gaming', created_at: '2026-08-06 10:05:00' }]
@@ -1191,17 +1193,12 @@ async function main () {
   check('blocked friend moves to the Blocked users group', await waitJs(win, `(() => { const t = document.getElementById('buddy-list'); const g = [...t.querySelectorAll('.group')].find((x) => x.querySelector('.group-head') && x.querySelector('.group-head').textContent.includes('Blocked users')); return !!g && g.textContent.includes('carol') && 'ok' })()`))
   await js(win, `(() => { const b = [...document.querySelectorAll('#buddy-list button')].find((x) => x.textContent.trim() === 'Unblock'); if (b) b.click(); return !!b })()`)
   // Deterministic: the mock only clears blockedUsers once the unblock POST lands.
-  const unStart = Date.now()
-  let unObserved = false
-  while (Date.now() - unStart < 15000 && !unObserved) {
-    if (!mock.state.blockedUsers.has('carol')) unObserved = true
-    else await new Promise((r) => setTimeout(r, 100))
-  }
-  check('unblock posted /api/friend/unblock', unObserved, [...mock.state.blockedUsers])
+  await new Promise((r) => setTimeout(r, 1000))
+  check('unblock posted /api/friend/unblock', !mock.state.blockedUsers.has('carol'), 'log=' + JSON.stringify(mock.state.blockLog.slice(-8)) + ' set=' + [...mock.state.blockedUsers])
   check('unblock restores carol to the buddy list', await waitJs(win, `(() => { const t = document.getElementById('buddy-list'); const g = [...t.querySelectorAll('.group')].find((x) => x.querySelector('.group-head') && x.querySelector('.group-head').textContent.includes('Blocked users')); return !g && t.textContent.includes('carol') && 'ok' })()`))
 
   // Room view: gaming with members.
-  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="rooms"]').click()`)
   check('rooms tab lists gaming', await waitJs(win, `document.getElementById('rooms-list').textContent.includes('gaming') && 'ok'`))
   await js(win, `(() => { const c = [...document.querySelectorAll('#rooms-list .contact')].find((c) => c.textContent.includes('gaming')); if (c) c.click() })()`)
   check('room opens with #gaming title', await waitJs(win, `document.getElementById('chat-title').textContent === '#gaming' && 'ok'`))
@@ -1348,7 +1345,7 @@ async function main () {
   check('message context menu has mute + block', await waitJs(win, `(() => { const m = document.querySelector('.ctx-menu'); return !!m && m.textContent.includes('Mute notifications') && m.textContent.includes('Block') && 'ok' })()`))
 
   // Room browsing: list public rooms, join one by name.
-  await js(win, `document.getElementById('tab-rooms').click()`)
+  await js(win, `document.querySelector('#tab-select-menu [data-tab="rooms"]').click()`)
   await js(win, `document.getElementById('btn-browse-rooms').click()`)
   check('browse list shows arcade with member counts', await waitJs(win, `!document.getElementById('browse-list').hidden && document.getElementById('browse-list').textContent.includes('arcade') && document.getElementById('browse-list').textContent.includes('3 members') && 'ok'`))
   check('browse shows Open for my joined room', await waitJs(win, `(() => { const rows = [...document.querySelectorAll('#browse-list .contact')]; const g = rows.find((r) => r.textContent.includes('gaming')); return !!g && [...g.querySelectorAll('button')].some((b) => b.textContent === 'Open') && 'ok' })()`))

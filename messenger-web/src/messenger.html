@@ -113,12 +113,18 @@
         <input id="directory-search" type="text" spellcheck="false" placeholder="Search people to add…" />
       </div>
 
-      <nav class="nav">
-        <button id="tab-buddy" class="nav-tab active">Friends</button>
-        <button id="tab-rooms" class="nav-tab">Rooms</button>
-        <button id="tab-requests" class="nav-tab">Requests<span id="req-badge" class="badge" hidden></span></button>
-        <button id="tab-alerts" class="nav-tab">Activity<span id="alert-badge" class="badge" hidden></span></button>
-      </nav>
+      <div class="nav-select">
+        <button id="tab-select-btn" class="nav-select-btn" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="tab-select-label">Friends</span>
+          <span class="nav-select-caret" aria-hidden="true">&#9662;</span>
+        </button>
+        <div id="tab-select-menu" class="nav-select-menu" hidden>
+          <button type="button" class="nav-item" data-tab="buddy">Friends</button>
+          <button type="button" class="nav-item" data-tab="rooms">Rooms</button>
+          <button type="button" class="nav-item" data-tab="requests">Requests<span id="req-badge" class="badge" hidden></span></button>
+          <button type="button" class="nav-item" data-tab="alerts">Activity<span id="alert-badge" class="badge" hidden></span></button>
+        </div>
+      </div>
 
       <div id="panel-buddy" class="panel">
         <div class="buddy-actions">

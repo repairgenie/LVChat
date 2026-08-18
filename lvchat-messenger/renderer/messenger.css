@@ -417,21 +417,57 @@ body.chat-window #sidebar-resizer { display: none; }
 .search-row input::placeholder { color: var(--muted); }
 .search-row input:focus { outline: none; border-color: var(--accent); background: var(--input-bg); box-shadow: 0 0 0 3px var(--accent-soft); }
 
-.nav { display: flex; border-bottom: 1px solid var(--border); gap: 2px; padding: 6px 8px 0; }
-.nav-tab {
-  flex: 1;
-  padding: 8px 4px 9px;
+.nav-select { position: relative; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); }
+.nav-select-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.nav-select-btn:hover { border-color: var(--accent-soft); }
+.nav-select-btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.nav-select-caret { color: var(--muted); font-size: 10px; line-height: 1; }
+.nav-select-menu {
+  position: absolute;
+  top: calc(100% - 4px);
+  left: 10px;
+  right: 10px;
+  z-index: 1100;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  padding: 6px;
+  animation: pop-in 0.12s ease-out;
+}
+.nav-select-menu[hidden] { display: none; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 13px;
   font-weight: 600;
-  font-size: 12.5px;
-  border-radius: 6px 6px 0 0;
-  transition: color 0.12s ease;
+  cursor: pointer;
 }
-.nav-tab:hover { color: var(--text); }
-.nav-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.nav-item:hover { background: var(--hover); }
+.nav-item.checked { color: var(--accent); }
 .badge {
   display: inline-block;
   min-width: 16px;

@@ -1408,10 +1408,11 @@ function renderSidebar () {
   const searching = $('#directory-search').value.trim() !== ''
   $('#panel-directory').hidden = !searching
 
-  $('#tab-buddy').classList.toggle('active', state.tab === 'buddy')
-  $('#tab-rooms').classList.toggle('active', state.tab === 'rooms')
-  $('#tab-requests').classList.toggle('active', state.tab === 'requests')
-  $('#tab-alerts').classList.toggle('active', state.tab === 'alerts')
+  const TAB_LABELS = { buddy: 'Friends', rooms: 'Rooms', requests: 'Requests', alerts: 'Activity' }
+  $('#tab-select-label').textContent = TAB_LABELS[state.tab] || 'Friends'
+  document.querySelectorAll('#tab-select-menu .nav-item').forEach((item) => {
+    item.classList.toggle('checked', item.dataset.tab === state.tab)
+  })
 
   const reqCount = state.incoming.length + state.channelInvites.length
   const badge = $('#req-badge')
@@ -1575,6 +1576,7 @@ function renderBlockedGroup () {
     un.title = 'Unblock ' + b.username
     un.addEventListener('click', (e) => {
       e.stopPropagation()
+      console.log('[lvc-dbg] unblock button clicked for', b.username)
       unblockUser(b)
     })
     row.append(dot, avatar, info, un)
@@ -4019,10 +4021,21 @@ function wireEvents () {
     }
   })
 
-  $('#tab-buddy').addEventListener('click', () => setTab('buddy'))
-  $('#tab-rooms').addEventListener('click', () => setTab('rooms'))
-  $('#tab-requests').addEventListener('click', () => setTab('requests'))
-  $('#tab-alerts').addEventListener('click', () => setTab('alerts'))
+  const tabSelectBtn = $('#tab-select-btn')
+  const tabSelectMenu = $('#tab-select-menu')
+  tabSelectBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const willOpen = tabSelectMenu.hidden
+    tabSelectMenu.hidden = !willOpen
+    tabSelectBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false')
+  })
+  tabSelectMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.nav-item')
+    if (!item) return
+    setTab(item.dataset.tab)
+    tabSelectMenu.hidden = true
+    tabSelectBtn.setAttribute('aria-expanded', 'false')
+  })
 
   $('#btn-new-group').addEventListener('click', () => promptNewGroupFor(null))
 
@@ -4139,6 +4152,7 @@ function wireEvents () {
     if (ctxMenu && !e.target.closest('.ctx-menu')) closeContextMenu()
     if (!e.target.closest('#head-menu') && !e.target.closest('#menu-btn')) $('#head-menu').hidden = true
     if (!e.target.closest('#status-menu') && !e.target.closest('#me-status')) $('#status-menu').hidden = true
+    if (!e.target.closest('#tab-select-menu') && !e.target.closest('#tab-select-btn')) $('#tab-select-menu').hidden = true
     if (!e.target.closest('#emoji-panel') && !e.target.closest('#btn-emoji')) $('#emoji-panel').hidden = true
     if (!e.target.closest('#gif-panel') && !e.target.closest('#btn-gif') && !e.target.closest('#gif-search-input')) $('#gif-panel').hidden = true
     if (!e.target.closest('#mention-ac') && !e.target.closest('#slash-ac') && !e.target.closest('#composer-input')) {
