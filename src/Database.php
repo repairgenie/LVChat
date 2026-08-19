@@ -442,6 +442,11 @@ final class Database
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_users_last_ip ON users(last_ip)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_chat_logs_channel ON chat_logs(channel_name, created_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_bans_active_kind_channel ON bans(active, kind, channel_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_akick_channel ON akick(channel_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_spamfilters_enabled ON spamfilters(enabled)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_user ON channel_members(user_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_guest ON channel_members(guest_id)');
 
         self::seedOperclasses($pdo);
         self::seedSoundAlerts($pdo);

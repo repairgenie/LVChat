@@ -40,10 +40,12 @@
     style();
     modal = document.createElement('div');
     modal.id = 'lvc-dialog';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
     modal.innerHTML =
       '<div class="lvc-dialog-backdrop"></div>' +
       '<div class="lvc-dialog-box card p-6 shadow-2xl">' +
-        '<div class="lvc-dialog-title text-lg font-bold text-white mb-2"></div>' +
+        '<div id="lvc-dialog-title" class="lvc-dialog-title text-lg font-bold text-white mb-2"></div>' +
         '<div class="lvc-dialog-message text-sm text-discord-400 mb-3"></div>' +
         '<input class="lvc-dialog-input input w-full mb-3" type="text" autocomplete="off" spellcheck="false">' +
         '<div class="flex gap-2 justify-end">' +
@@ -51,6 +53,7 @@
           '<button type="button" class="lvc-dialog-ok btn-primary">OK</button>' +
         '</div>' +
       '</div>';
+    modal.setAttribute('aria-labelledby', 'lvc-dialog-title');
     document.body.appendChild(modal);
     modal.querySelector('.lvc-dialog-backdrop').addEventListener('click', settleFalse);
     modal.querySelector('.lvc-dialog-cancel').addEventListener('click', settleFalse);
@@ -59,7 +62,18 @@
       settle(input.style.display !== 'none' ? input.value : true);
     });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') settleFalse();
+      if (e.key === 'Escape') { settleFalse(); return; }
+      // Focus trap: cycle Tab between the interactive elements inside the dialog.
+      if (e.key === 'Tab' && modal && modal.style.display === 'flex') {
+        var input = modal.querySelector('.lvc-dialog-input');
+        var ok = modal.querySelector('.lvc-dialog-ok');
+        var cancel = modal.querySelector('.lvc-dialog-cancel');
+        var focusable = [cancel, ok];
+        if (input.style.display !== 'none') focusable.unshift(input);
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
     });
     return modal;
   }

@@ -196,7 +196,7 @@ final class FriendController
                                  OR (fb.user_id = users.id AND fb.friend_id = ?)))
              ORDER BY (last_seen >= datetime('now', '-30 seconds')) DESC, username COLLATE NOCASE
              LIMIT ?",
-            [(int) $user['id'], '%' . $q . '%', (int) $user['id'], (int) $user['id'], (int) $user['id'], $limit]
+            [(int) $user['id'], '%' . addcslashes($q, '%_\\') . '%', (int) $user['id'], (int) $user['id'], (int) $user['id'], $limit]
         );
         $results = [];
         foreach ($rows as $r) {

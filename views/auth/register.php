@@ -76,7 +76,7 @@
         <span>I certify that I am at least 18 years of age. This service is not intended for minors.</span>
       </label>
       <label class="flex items-start gap-2 text-sm text-discord-300 cursor-pointer">
-        <input type="checkbox" required class="w-4 h-4 mt-0.5 accent-blurple">
+        <input type="checkbox" name="terms" required class="w-4 h-4 mt-0.5 accent-blurple">
         <span>I have read and agree to the <a class="text-blurple hover:underline" href="/terms" target="_blank">Terms of Service</a> and <a class="text-blurple hover:underline" href="/privacy" target="_blank">Privacy Policy</a>.</span>
       </label>
       <?php if ($requires_approval): ?>

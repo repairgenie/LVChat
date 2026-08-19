@@ -73,7 +73,7 @@
           <?= Csrf::field() ?>
           <input type="hidden" name="next" value="<?= h($next) ?>">
           <div class="flex gap-2">
-            <input class="input flex-1" name="nick" placeholder="Your nickname" maxlength="32" required autocomplete="off">
+            <input class="input flex-1" name="nick" placeholder="Your nickname" maxlength="32" required autocomplete="off" aria-label="Guest nickname">
             <button class="btn-ghost">Join as guest</button>
           </div>
           <label class="flex items-start gap-2 text-xs text-discord-400 cursor-pointer">

@@ -93,7 +93,7 @@
 
 @layer components {
   .mention { background: rgb(var(--c-blurple) / .18); border-radius: 3px; padding: 0 2px; }
-  .btn { @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors; }
+  .btn { @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blurple focus-visible:ring-offset-2 focus-visible:ring-offset-discord-800; }
   .btn-primary { @apply btn bg-blurple hover:bg-blurple-dark text-white; }
   .btn-ghost { @apply btn hover:bg-discord-750 text-discord-200; }
   .input { @apply w-full rounded-md bg-discord-750 border border-discord-600 px-3 py-2 text-sm placeholder-discord-400 focus:outline-none focus:ring-1 focus:ring-blurple; }

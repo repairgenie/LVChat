@@ -228,8 +228,9 @@ final class AdminController
                 FROM channels c LEFT JOIN users u ON u.id = c.owner_id';
         $params = [];
         if ($term !== '') {
+            $safeTerm = addcslashes($term, '%_\\');
             $sql .= ' WHERE c.name LIKE ? COLLATE NOCASE';
-            $params = ["%$term%"];
+            $params = ["%$safeTerm%"];
         }
         $sql .= ' ORDER BY members DESC, c.name COLLATE NOCASE LIMIT 300';
         $channels = Database::all($sql, $params);
