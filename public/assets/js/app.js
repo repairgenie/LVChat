@@ -1564,7 +1564,7 @@
       const st = presenceStatus(m);
       return `<a href="/app?dm=${encodeURIComponent(m.username)}" class="member flex items-center gap-2 px-2 py-1 rounded hover:bg-discord-600/40 text-sm ${cc}"${rs} data-username="${esc(m.username)}" data-level="${esc(m.level || 'normal')}" title="${esc(contactTitle(m))}">
         <span class="text-[10px] font-bold w-3">${SYMBOL[m.level] || ''}</span>
-        ${m.avatar ? `<img src="${esc(m.avatar)}" alt="" loading="lazy" class="w-6 h-6 rounded-full object-cover">` : ''}
+        ${m.avatar ? `<img src="${esc(m.avatar)}" alt="${esc(m.username)}" loading="lazy" class="w-6 h-6 rounded-full object-cover">` : ''}
         <span class="w-2 h-2 rounded-full shrink-0 ${presenceDot(m)}"></span>
         <span class="min-w-0"><span class="block truncate">${esc(m.username)}</span>${st ? `<span class="block truncate text-[11px] text-discord-500">${esc(st)}</span>` : ''}</span>${m.role === 'admin' ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-400">admin</span>' : (m.role === 'staff' ? '<span class="text-[9px] px-1 rounded bg-blurple/20 text-blurple">staff</span>' : '')}</a>`;
     }).join('');
@@ -1601,7 +1601,7 @@
   let friendsSig = '';
 
   function friendAvatar(f) {
-    if (f.avatar) return '<img src="' + esc(f.avatar) + '" alt="" loading="lazy" class="w-6 h-6 rounded-full object-cover">';
+    if (f.avatar) return '<img src="' + esc(f.avatar) + '" alt="' + esc(f.username) + '" loading="lazy" class="w-6 h-6 rounded-full object-cover">';
     const initial = (f.username || '?').charAt(0).toUpperCase();
     return '<div class="w-6 h-6 rounded-full bg-discord-500 flex items-center justify-center text-sm font-bold text-white border border-discord-600 shrink-0">' + esc(initial) + '</div>';
   }
@@ -2604,7 +2604,7 @@
     attachPreviewCleanup = url;
     const wrap = document.createElement('div');
     wrap.className = 'flex items-center gap-2 rounded-lg border border-discord-600 bg-discord-850 p-1.5 pr-2 max-w-xs';
-    wrap.innerHTML = '<img src="' + url + '" alt="" class="w-9 h-9 rounded-md object-cover shrink-0">'
+    wrap.innerHTML = '<img src="' + url + '" alt="' + esc(file.name || 'image') + '" class="w-9 h-9 rounded-md object-cover shrink-0">'
       + '<span class="min-w-0 flex-1"><span class="block text-xs text-discord-200 truncate">' + esc(file.name || 'image') + '</span>'
       + '<span class="block text-[10px] text-discord-500">' + (file.size ? Math.round(file.size / 1024) + ' KB' : '') + '</span></span>'
       + '<button type="button" class="text-discord-400 hover:text-white p-1 shrink-0" title="Remove attachment">' + window.icon('x', 'w-3.5 h-3.5') + '</button>';
@@ -2626,15 +2626,16 @@
   // ── Image lightbox ─────────────────────────────────────────────────────────
   const lightbox = document.getElementById('lightbox');
   const lightboxImg = document.getElementById('lightbox-img');
-  function openLightbox(src) {
+  function openLightbox(src, alt) {
     if (!lightbox || !lightboxImg) return;
     lightboxImg.src = src;
+    lightboxImg.alt = alt || '';
     lightbox.classList.remove('hidden');
   }
   function closeLightbox() { if (lightbox) lightbox.classList.add('hidden'); }
   document.addEventListener('click', (e) => {
     const t = e.target.closest('[data-lightbox]');
-    if (t) { e.preventDefault(); openLightbox(t.getAttribute('href') || t.dataset.lightbox); }
+    if (t) { e.preventDefault(); openLightbox(t.getAttribute('href') || t.dataset.lightbox, t.alt || t.dataset.alt || ''); }
   });
   if (lightbox) {
     lightbox.querySelectorAll('[data-lightbox-close]').forEach((el) => el.addEventListener('click', closeLightbox));

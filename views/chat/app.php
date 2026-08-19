@@ -879,7 +879,7 @@ function presence_label(array $u): string {
         <?= Csrf::field() ?>
         <input type="hidden" name="channel" value="<?= h($joinModal['slug']) ?>">
         <input id="join-key" type="password" name="key" class="input" placeholder="Channel password" required autofocus>
-        <div id="join-error" class="hidden text-xs text-red-400"></div>
+        <div id="join-error" class="hidden text-xs text-red-400" aria-live="polite"></div>
         <div class="flex gap-2">
           <button type="submit" class="btn-primary flex-1 justify-center">Enter channel</button>
           <a href="/app" class="btn-ghost">Cancel</a>
@@ -980,7 +980,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Quick switcher (Ctrl+K / ⌘K) -->
-  <div id="switcher-modal" class="hidden fixed inset-0 z-[350] flex items-start justify-center pt-[14vh] p-4">
+  <div id="switcher-modal" class="hidden fixed inset-0 z-[350] flex items-start justify-center pt-[14vh] p-4" role="dialog" aria-modal="true" aria-labelledby="switcher-modal-title">
     <div class="absolute inset-0 bg-black/70" data-switcher-close></div>
     <div class="relative card shadow-2xl w-[min(94vw,560px)] overflow-hidden modal-card">
       <div class="flex items-center gap-2.5 px-4 py-3 border-b border-discord-700 bg-discord-850">
@@ -1054,7 +1054,7 @@ function presence_label(array $u): string {
             <span class="block text-[11px] text-discord-500">Keeps the channel even when it's empty; you become the founder.</span>
           </span>
         </label>
-        <div id="create-error" class="hidden text-xs text-red-400"></div>
+        <div id="create-error" class="hidden text-xs text-red-400" aria-live="polite"></div>
         <div class="flex gap-2 pt-1">
           <button type="submit" id="create-submit" class="btn-primary flex-1 justify-center">Create channel</button>
           <button type="button" data-create-close class="btn-ghost">Cancel</button>
@@ -1104,7 +1104,7 @@ function presence_label(array $u): string {
         <?php endforeach; ?>
       </div>
       <textarea id="report-other" class="input mt-3 hidden" rows="3" maxlength="500" placeholder="Tell us what happened…"></textarea>
-      <div id="report-error" class="hidden mt-2 text-xs text-red-400"></div>
+      <div id="report-error" class="hidden mt-2 text-xs text-red-400" aria-live="polite"></div>
       <div class="flex gap-2 mt-4">
         <button id="report-submit" class="btn-primary flex-1 justify-center">Submit report</button>
         <button data-report-close class="btn-ghost">Cancel</button>
@@ -1113,7 +1113,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Guest profile modal -->
-  <div id="guest-profile-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
+  <div id="guest-profile-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="guest-profile-modal-title">
     <div class="absolute inset-0 bg-black/70" data-guest-modal-close></div>
     <div class="relative card p-6 w-[min(92vw,400px)] shadow-2xl text-center">
       <button type="button" data-guest-modal-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1"><?= icon('x', 'w-4 h-4') ?></button>
@@ -1126,7 +1126,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Channel background modal (channel owner sets the chat background) -->
-  <div id="chan-bg-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4">
+  <div id="chan-bg-modal" class="hidden fixed inset-0 z-[400] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="chan-bg-modal-title">
     <div class="absolute inset-0 bg-black/70" data-chan-bg-close></div>
     <div class="relative card p-6 w-[min(92vw,440px)] shadow-2xl max-h-[85vh] overflow-y-auto scrollbar-thin">
       <button type="button" data-chan-bg-close class="absolute top-2 right-3 text-discord-400 hover:text-white text-lg leading-none p-1"><?= icon('x', 'w-4 h-4') ?></button>
@@ -1161,7 +1161,7 @@ function presence_label(array $u): string {
           <button id="chan-bg-remove" class="btn-ghost text-red-400">Remove</button>
           <button data-chan-bg-close class="btn-ghost">Close</button>
         </div>
-        <div id="chan-bg-msg" class="text-sm text-green-400 hidden">Saved.</div>
+        <div id="chan-bg-msg" class="text-sm text-green-400 hidden" aria-live="polite">Saved.</div>
       </div>
     </div>
   </div>
@@ -1195,7 +1195,7 @@ function presence_label(array $u): string {
       <h3 id="dlg-title" class="text-lg font-bold text-white mb-2"></h3>
       <p id="dlg-message" class="hidden text-sm text-discord-400 mb-3 whitespace-pre-wrap"></p>
       <input id="dlg-input" class="input hidden" type="text" autocomplete="off" spellcheck="false">
-      <div id="dlg-error" class="hidden text-xs text-red-400 mt-2"></div>
+      <div id="dlg-error" class="hidden text-xs text-red-400 mt-2" aria-live="polite"></div>
       <div class="flex gap-2 mt-4">
         <button id="dlg-ok" class="btn-primary flex-1 justify-center">OK</button>
         <button id="dlg-cancel" class="btn-ghost hidden">Cancel</button>
@@ -1215,7 +1215,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Embed code modal -->
-  <div id="embed-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="embed-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="embed-modal-title">
     <div class="absolute inset-0 bg-black/70" data-embed-close></div>
     <div class="relative card p-6 w-[min(92vw,560px)] shadow-2xl">
       <h2 class="text-lg font-bold text-white">Embed this chat</h2>
@@ -1229,7 +1229,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- How to install modal (PWA install instructions) -->
-  <div id="install-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="install-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="install-modal-title">
     <div class="absolute inset-0 bg-black/70" data-install-close></div>
     <div class="relative card shadow-2xl w-[min(92vw,480px)] flex flex-col max-h-[80vh]">
       <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
@@ -1281,7 +1281,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Download the desktop app modal (native desktop clients) -->
-  <div id="download-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="download-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="download-modal-title">
     <div class="absolute inset-0 bg-black/70" data-download-close></div>
     <div class="relative card shadow-2xl w-[min(92vw,600px)] flex flex-col max-h-[80vh]">
       <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">
@@ -1348,7 +1348,7 @@ function presence_label(array $u): string {
   </div>
 
   <!-- App install unsupported modal (shown when the browser can't install PWAs) -->
-  <div id="install-unsupported-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="install-unsupported-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="install-unsupported-modal-title">
     <div class="absolute inset-0 bg-black/70" data-install-unsupported-close></div>
     <div class="relative card shadow-2xl w-[min(92vw,480px)] flex flex-col max-h-[80vh]">
       <div class="flex items-center justify-between px-6 pt-5 pb-2 border-b border-discord-700 shrink-0">

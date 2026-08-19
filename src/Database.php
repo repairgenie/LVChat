@@ -447,6 +447,7 @@ final class Database
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_spamfilters_enabled ON spamfilters(enabled)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_user ON channel_members(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_guest ON channel_members(guest_id)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pm_recipient ON private_messages(recipient_id, recipient_guest_id, read_at)');
 
         self::seedOperclasses($pdo);
         self::seedSoundAlerts($pdo);

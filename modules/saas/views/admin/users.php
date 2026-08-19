@@ -76,7 +76,7 @@ foreach ($overrides as $ov) {
           <div class="flex items-end justify-between gap-3">
             <button type="submit" class="btn-primary px-4 py-2 text-sm">Save</button>
             <button type="submit" formaction="/admin/saas/users/cancel" class="btn-secondary px-4 py-2 text-sm"
-              onclick="return confirm('Force-downgrade this user to the free plan?');">Downgrade</button>
+               data-confirm="Force-downgrade this user to the free plan?">Downgrade</button>
           </div>
         </div>
 

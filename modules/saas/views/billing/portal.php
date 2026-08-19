@@ -57,7 +57,7 @@
       <?php if (($assignment['source'] ?? '') === 'self'): ?>
         <form method="post" action="/billing/cancel" class="mt-4">
           <?= Csrf::field() ?>
-          <button class="btn-secondary text-xs" onclick="return confirm('Cancel your subscription and downgrade to the free plan?');">Cancel subscription</button>
+          <button class="btn-secondary text-xs" data-confirm="Cancel your subscription and downgrade to the free plan?">Cancel subscription</button>
         </form>
       <?php endif; ?>
     </div>

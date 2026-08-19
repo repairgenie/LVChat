@@ -76,7 +76,7 @@ $p = $plans;
               <?= (int) $plan['active'] === 1 ? 'Deactivate' : 'Activate' ?>
             </button>
             <button type="submit" formaction="/admin/saas/plan/delete" class="text-xs text-red-400 hover:text-red-300 text-left"
-              onclick="return confirm('Delete this plan? Users must be downgraded first.');">Delete plan</button>
+               data-confirm="Delete this plan? Users must be downgraded first.">Delete plan</button>
           <?php else: ?>
             <span class="text-xs <?= (int) $plan['active'] === 1 ? 'text-green-400' : 'text-red-400' ?>">
               <?= (int) $plan['active'] === 1 ? 'active' : 'inactive' ?>
