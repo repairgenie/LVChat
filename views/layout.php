@@ -42,7 +42,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
   <?php require ROOT . '/views/partials/tailwind.php'; ?>
   <?php require ROOT . '/views/partials/theme.php'; ?>
   <?php require ROOT . '/views/partials/pwa.php'; ?>
-  <script src="/assets/js/icons.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/icons.js') ?>"></script>
+  <script src="/assets/js/icons.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/icons.js') ?>" defer></script>
 </head>
 <body class="bg-discord-900 text-discord-200 antialiased min-h-screen flex flex-col" data-csrf="<?= h(Csrf::token()) ?>">
   <header class="bg-discord-950/60 border-b border-discord-800">

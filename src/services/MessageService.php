@@ -89,28 +89,30 @@ final class MessageService
         return 'SELECT m.*,'
             . ($extraSel !== null ? ' ' . $extraSel : '')
             . '
-                    COALESCE((SELECT u.username FROM users u WHERE u.id = m.sender_id),
-                             (SELECT g.nick FROM guests g WHERE g.id = m.sender_guest_id)) AS username,
-                    (SELECT u.role FROM users u WHERE u.id = m.sender_id) AS role,
-                    (SELECT u.avatar FROM users u WHERE u.id = m.sender_id) AS avatar,
+                    COALESCE(u.username, g.nick) AS username,
+                    u.role AS role,
+                    u.avatar AS avatar,
                     CASE WHEN m.sender_guest_id IS NOT NULL THEN 1 ELSE 0 END AS guest,
-                    CASE WHEN m.sender_guest_id IS NOT NULL THEN 0 ELSE COALESCE((SELECT u.bot FROM users u WHERE u.id = m.sender_id), 0) END AS bot,
+                    CASE WHEN m.sender_guest_id IS NOT NULL THEN 0 ELSE COALESCE(u.bot, 0) END AS bot,
                     CASE WHEN m.sender_guest_id IS NOT NULL THEN \'normal\'
                          ELSE (SELECT CASE WHEN r.helper = 1 AND COALESCE(cm.level, \'normal\') NOT IN (\'halfop\',\'op\',\'admin\',\'founder\')
                                            THEN \'halfop\' ELSE COALESCE(cm.level, \'normal\') END
                                FROM channel_members cm
-                               LEFT JOIN roles r ON r.id = (SELECT u.role_id FROM users u WHERE u.id = m.sender_id)
+                               LEFT JOIN roles r ON r.id = u.role_id
                                WHERE cm.channel_id = m.channel_id AND cm.user_id = m.sender_id)
                     END AS level,
-                    (SELECT CASE WHEN r.helper = 1 THEN \'' . Auth::HELPER_COLOR . '\' ELSE r.color END
-                     FROM roles r WHERE r.id = (SELECT u.role_id FROM users u WHERE u.id = m.sender_id)) AS role_color,
-                    (SELECT slug FROM channels c WHERE c.id = m.channel_id) AS channel_slug,
-                    (SELECT COALESCE(u2.username, g2.nick) FROM messages pm
-                        LEFT JOIN users u2 ON u2.id = pm.sender_id
-                        LEFT JOIN guests g2 ON g2.id = pm.sender_guest_id
-                        WHERE pm.id = m.reply_to_id AND pm.deleted = 0) AS reply_to_username,
+                    (SELECT CASE WHEN r2.helper = 1 THEN \'' . Auth::HELPER_COLOR . '\' ELSE r2.color END
+                     FROM roles r2 WHERE r2.id = u.role_id) AS role_color,
+                    c.slug AS channel_slug,
+                    COALESCE(u2.username, g2.nick) AS reply_to_username,
                     (SELECT substr(pm2.content, 1, 80) FROM messages pm2 WHERE pm2.id = m.reply_to_id AND pm2.deleted = 0) AS reply_to_excerpt
-             FROM messages m';
+             FROM messages m
+             LEFT JOIN users u ON u.id = m.sender_id
+             LEFT JOIN guests g ON g.id = m.sender_guest_id
+             LEFT JOIN channels c ON c.id = m.channel_id
+             LEFT JOIN messages pm ON pm.id = m.reply_to_id AND pm.deleted = 0
+             LEFT JOIN users u2 ON u2.id = pm.sender_id
+             LEFT JOIN guests g2 ON g2.id = pm.sender_guest_id';
     }
 
     public static function send(int $channelId, array $sender, string $content, string $kind = 'message', ?int $replyTo = null, bool $skipPush = false): array

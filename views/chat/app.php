@@ -870,10 +870,10 @@ function presence_label(array $u): string {
 
   <!-- Password-protected join modal -->
   <?php if (!empty($joinModal)): ?>
-  <div id="join-modal" class="fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="join-modal" class="fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="join-modal-title">
     <div class="absolute inset-0 bg-black/70"></div>
     <div class="relative card p-6 w-[min(92vw,420px)] shadow-2xl">
-      <h2 class="text-lg font-bold text-white">Join <?= h($joinModal['name']) ?></h2>
+      <h2 id="join-modal-title" class="text-lg font-bold text-white">Join <?= h($joinModal['name']) ?></h2>
       <p class="text-xs text-discord-400 mt-1 mb-4">This channel is protected by a password.</p>
       <form id="join-form" method="post" action="/c/<?= h(rawurlencode($joinModal['slug'])) ?>/join" class="space-y-3">
         <?= Csrf::field() ?>
@@ -916,13 +916,13 @@ function presence_label(array $u): string {
   <?php endif; ?>
 
   <!-- Channel browser modal -->
-  <div id="browse-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="browse-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="browse-modal-title">
     <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-browse-close></div>
     <div class="relative bg-discord-800 rounded-xl browse-glow browse-modal-enter w-[min(96vw,920px)] flex flex-col overflow-hidden" style="max-height:88vh">
       <div class="browse-gradient-accent shrink-0"></div>
       <div class="px-6 pt-5 pb-4 flex items-start justify-between shrink-0">
         <div>
-          <h2 class="text-2xl font-extrabold text-white tracking-tight">Channel Browser</h2>
+          <h2 id="browse-modal-title" class="text-2xl font-extrabold text-white tracking-tight">Channel Browser</h2>
           <p class="text-sm text-discord-400 mt-1">Discover and join public channels on <?= h($site) ?></p>
         </div>
         <button type="button" data-browse-close class="text-discord-400 hover:text-white text-lg leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-discord-700/80 transition-colors mt-0.5" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
@@ -993,11 +993,11 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Create channel modal -->
-  <div id="create-channel-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="create-channel-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="create-channel-modal-title">
     <div class="absolute inset-0 bg-black/70" data-create-close></div>
     <div class="relative card p-6 w-[min(92vw,480px)] shadow-2xl max-h-[90vh] overflow-y-auto scrollbar-thin">
       <div class="flex items-center justify-between mb-1">
-        <h2 class="text-lg font-bold text-white">Create a channel</h2>
+        <h2 id="create-channel-modal-title" class="text-lg font-bold text-white">Create a channel</h2>
         <button type="button" data-create-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <p class="text-xs text-discord-400 mb-4">Give your channel a name, set the topic, and choose who can find it.</p>
@@ -1083,11 +1083,11 @@ function presence_label(array $u): string {
   <div id="ctx-menu" class="hidden fixed z-[100] min-w-52 max-w-72 card p-1.5 shadow-2xl text-sm"></div>
 
   <!-- Report message modal -->
-  <div id="report-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="report-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
     <div class="absolute inset-0 bg-black/70" data-report-close></div>
     <div class="relative card p-6 w-[min(92vw,480px)] shadow-2xl">
       <div class="flex items-center justify-between mb-1">
-        <h2 class="text-lg font-bold text-white">Report message</h2>
+        <h2 id="report-modal-title" class="text-lg font-bold text-white">Report message</h2>
         <button type="button" data-report-close class="text-discord-400 hover:text-white text-lg leading-none p-1"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <p class="text-xs text-discord-400 mb-4">This report goes to the staff. The message content is included.</p>
@@ -1167,11 +1167,11 @@ function presence_label(array $u): string {
   </div>
 
   <!-- Channel settings modal (channel control panel: bans, ops, topic, URL) -->
-  <div id="chan-settings-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4">
+  <div id="chan-settings-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="chan-settings-modal-title">
     <div class="absolute inset-0 bg-black/70" data-chan-settings-close></div>
     <div class="relative card shadow-2xl w-[min(94vw,760px)] max-h-[88vh] flex flex-col overflow-hidden">
       <div class="flex items-center justify-between px-5 pt-4 pb-3 border-b border-discord-700 shrink-0">
-        <h2 class="text-lg font-bold text-white">Channel settings <span id="cs-name" class="text-blurple"></span></h2>
+        <h2 id="chan-settings-modal-title" class="text-lg font-bold text-white">Channel settings <span id="cs-name" class="text-blurple"></span></h2>
         <button type="button" data-chan-settings-close class="text-discord-400 hover:text-white text-lg leading-none p-1" title="Close"><?= icon('x', 'w-4 h-4') ?></button>
       </div>
       <div id="cs-tabs" class="flex flex-wrap gap-1 px-3 py-2 border-b border-discord-700 bg-discord-850 shrink-0"></div>
@@ -1371,12 +1371,12 @@ function presence_label(array $u): string {
   </div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
-  <script src="/assets/vendor/ai/marked.min.js"></script>
-  <script src="/assets/vendor/ai/purify.min.js"></script>
-  <script src="/assets/vendor/ai/highlight.min.js"></script>
+  <script src="/assets/vendor/ai/marked.min.js" defer></script>
+  <script src="/assets/vendor/ai/purify.min.js" defer></script>
+  <script src="/assets/vendor/ai/highlight.min.js" defer></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark-dimmed.min.css">
-  <script src="/assets/js/icons.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/icons.js') ?>"></script>
-  <script src="/assets/js/app.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/app.js') ?>"></script>
+  <script src="/assets/js/icons.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/icons.js') ?>" defer></script>
+  <script src="/assets/js/app.js?v=<?= (int) @filemtime(ROOT . '/public/assets/js/app.js') ?>" defer></script>
   <script>
   // JS-health watchdog: explains why the chat scripts aren't running, if they aren't.
   window.__lvcErrors = [];

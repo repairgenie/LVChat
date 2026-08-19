@@ -333,9 +333,9 @@
     const mine = (m.my_reactions || []).map(String);
     const chips = rows.map((r) => {
       const isMine = mine.indexOf(String(r.emoji)) !== -1;
-      return `<button type="button" class="reaction-btn flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border transition-colors hover:border-blurple/60 hover:bg-blurple/20 ${isMine ? 'bg-blurple/30 border-blurple/60' : 'bg-discord-800 border-discord-700'}" data-emoji="${esc(r.emoji)}" title="Toggle reaction"><span class="text-sm leading-none">${esc(r.emoji)}</span><span class="text-discord-300 font-medium">${parseInt(r.count, 10)}</span></button>`;
+      return `<button type="button" class="reaction-btn flex items-center gap-1 px-2.5 py-1 rounded-md text-xs border transition-colors hover:border-blurple/60 hover:bg-blurple/20 ${isMine ? 'bg-blurple/30 border-blurple/60' : 'bg-discord-800 border-discord-700'}" data-emoji="${esc(r.emoji)}" title="Toggle reaction"><span class="text-sm leading-none">${esc(r.emoji)}</span><span class="text-discord-300 font-medium">${parseInt(r.count, 10)}</span></button>`;
     }).join('');
-    return `<div class="msg-reactions flex flex-wrap gap-1.5 mt-1.5">${chips}<button type="button" class="reaction-add px-2 py-0.5 rounded-md text-xs bg-discord-800 border border-discord-700 text-discord-400 hover:text-white hover:border-blurple/60" title="Add a reaction">+</button></div>`;
+    return `<div class="msg-reactions flex flex-wrap gap-1.5 mt-1.5">${chips}<button type="button" class="reaction-add px-2.5 py-1 rounded-md text-xs bg-discord-800 border border-discord-700 text-discord-400 hover:text-white hover:border-blurple/60" title="Add a reaction">+</button></div>`;
   }
 
   function msgHtml(m, grouped) {
@@ -371,11 +371,11 @@
     }
     let actions = '';
     const mine = String(m.sender_id) === String(MY_ID) || (m.username && m.username.toLowerCase() === MY_NICK);
-    actions = '<button type="button" class="msg-react-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Add a reaction">' + window.icon('smile', 'w-4 h-4') + '</button>'
-      + '<button type="button" class="msg-reply-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Reply">' + window.icon('reply', 'w-4 h-4') + '</button>';
+    actions = '<button type="button" class="msg-react-btn p-2.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Add a reaction">' + window.icon('smile', 'w-4 h-4') + '</button>'
+      + '<button type="button" class="msg-reply-btn p-2.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Reply">' + window.icon('reply', 'w-4 h-4') + '</button>';
     if (CAN_ADMIN || mine) {
-      actions += '<button type="button" class="msg-edit p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Edit">' + window.icon('edit', 'w-4 h-4') + '</button>'
-        + '<button type="button" class="msg-del p-1.5 rounded-md text-discord-400 hover:text-red-400 hover:bg-discord-700" title="Delete">' + window.icon('trash', 'w-4 h-4') + '</button>';
+      actions += '<button type="button" class="msg-edit p-2.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Edit">' + window.icon('edit', 'w-4 h-4') + '</button>'
+        + '<button type="button" class="msg-del p-2.5 rounded-md text-discord-400 hover:text-red-400 hover:bg-discord-700" title="Delete">' + window.icon('trash', 'w-4 h-4') + '</button>';
     }
     return `<div class="msg group relative px-4 pt-[17px] pb-0.5 hover:bg-white/[0.03] flex gap-4" data-id="${m.id}" data-kind="${esc(m.kind)}" data-is-pm="${m.is_pm ? '1' : '0'}" data-author="${esc(m.username)}" data-guest="${m.guest ? '1' : '0'}">
       <div class="w-10 h-10 shrink-0">${avatarHtml(m, 'w-10 h-10 rounded-full')}</div>

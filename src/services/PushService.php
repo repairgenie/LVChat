@@ -45,6 +45,21 @@ final class PushService
     private const MAX_SUBS_PER_SEND = 400;
     private const TTL = 86400; // seconds — how long a push service may hold a message
 
+    /** Per-request cache of push subscriptions keyed by user_id. */
+    private static array $subCache = [];
+
+    /** Fetch push subscriptions for a user, with per-request caching. */
+    private static function subsForUser(int $userId): array
+    {
+        if (!isset(self::$subCache[$userId])) {
+            self::$subCache[$userId] = Database::all(
+                'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?',
+                [$userId]
+            );
+        }
+        return self::$subCache[$userId];
+    }
+
     // ── VAPID keys ────────────────────────────────────────────────────────────
 
     /** Auto-provision the site's VAPID keypair (public = base64url uncompressed point). */
@@ -368,7 +383,7 @@ final class PushService
         if (NotifyPrefs::quietHoursActive($notifyPrefs)) {
             return;
         }
-        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [$recipientId]);
+        $subs = self::subsForUser($recipientId);
         if (!$subs) {
             return;
         }
@@ -390,7 +405,7 @@ final class PushService
         if (Auth::isGuest($user)) {
             return false;
         }
-        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [(int) $user['id']]);
+        $subs = self::subsForUser((int) $user['id']);
         if (!$subs) {
             return false;
         }
@@ -419,7 +434,7 @@ final class PushService
         if (NotifyPrefs::quietHoursActive($notifyPrefs)) {
             return;
         }
-        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [$targetUserId]);
+        $subs = self::subsForUser($targetUserId);
         if (!$subs) {
             return;
         }
@@ -452,7 +467,7 @@ final class PushService
         if (NotifyPrefs::quietHoursActive($notifyPrefs)) {
             return;
         }
-        $subs = Database::all('SELECT * FROM push_subscriptions WHERE user_id = ?', [$targetUserId]);
+        $subs = self::subsForUser($targetUserId);
         if (!$subs) {
             return;
         }

@@ -39,7 +39,7 @@ final class EventLogService
             return null;
         }
 
-        $rows = self::fetchLogRows($channelName);
+        $rows = self::fetchLogRows($channelName, $event['started_at'] ?? null, $event['ended_at'] ?? null);
         $logTxt = self::formatLogText($rows, $channelName, $event);
 
         // Collect image attachments from the event.
@@ -128,13 +128,21 @@ final class EventLogService
         return !empty($result['ok']);
     }
 
-    /** Fetch all chat log rows for the channel name. */
-    private static function fetchLogRows(string $channelName): array
+    /** Fetch chat log rows for the channel name, bounded by event time range. */
+    private static function fetchLogRows(string $channelName, ?string $startedAt = null, ?string $endedAt = null): array
     {
-        return Database::all(
-            'SELECT * FROM chat_logs WHERE channel_name = ? ORDER BY id ASC',
-            [$channelName]
-        );
+        $sql = 'SELECT * FROM chat_logs WHERE channel_name = ?';
+        $params = [$channelName];
+        if ($startedAt) {
+            $sql .= ' AND created_at >= ?';
+            $params[] = $startedAt;
+        }
+        if ($endedAt) {
+            $sql .= ' AND created_at <= ?';
+            $params[] = $endedAt . ' 23:59:59';
+        }
+        $sql .= ' ORDER BY id ASC LIMIT 50000';
+        return Database::all($sql, $params);
     }
 
     /** Format rows into IRC-style plain text (same format as admin logs). */

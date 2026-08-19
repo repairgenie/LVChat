@@ -175,7 +175,8 @@ foreach (['kline' => 'IP/account-wide kill ban', 'gline' => 'global ban', 'zline
                 // shun blocks messaging, so don't kick
             } elseif ($isIp || ($userId === null && in_array($kind, ['kline', 'gline', 'zline'], true))) {
                 // Kick any online users whose recorded IP matches the ban.
-                foreach (Database::all('SELECT * FROM users WHERE last_ip IS NOT NULL') as $u) {
+                // Only fetch the columns needed for matching + kicking (avoids SELECT *).
+                foreach (Database::all('SELECT id, username, last_ip FROM users WHERE last_ip IS NOT NULL') as $u) {
                     if (Auth::ipMatch($target, (string) $u['last_ip'])) {
                         op_force_kick((int) $u['id'], "Banned (" . ($reason ?: $kind) . ')', $user);
                     }
