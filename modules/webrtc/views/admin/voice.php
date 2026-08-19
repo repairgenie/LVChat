@@ -99,6 +99,35 @@ $s = $settings;
       <input class="input font-mono text-xs" type="number" min="16000" max="64000" name="voice_bitrate" value="<?= h($s['voice_bitrate'] ?? '40000') ?>" placeholder="40000">
     </div>
 
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="label">Default video quality</label>
+        <select class="input" name="video_quality_default">
+          <?php
+          $vqDefault = $s['video_quality_default'] ?? '720p';
+          foreach (['360p' => '360p (640×360)', '480p' => '480p (640×480)', '720p' => '720p (1280×720)', '1080p' => '1080p (1920×1080)'] as $val => $label) {
+              echo '<option value="' . h($val) . '"' . ($vqDefault === $val ? ' selected' : '') . '>' . h($label) . '</option>';
+          }
+          ?>
+        </select>
+        <p class="text-xs text-discord-400 mt-1">Applies to users who haven't chosen a video quality. Users can override this in their settings.</p>
+      </div>
+      <div>
+        <label class="label">Available video qualities</label>
+        <div class="flex flex-wrap gap-3 mt-1">
+          <?php
+          $vqAvail = $s['video_quality_available'] ?? '360p,480p,720p,1080p';
+          $vqAvailArr = array_map('trim', explode(',', $vqAvail));
+          foreach (['360p', '480p', '720p', '1080p'] as $q) {
+              $checked = in_array($q, $vqAvailArr, true) ? ' checked' : '';
+              echo '<label class="inline-flex items-center gap-1.5 text-sm text-discord-300"><input type="checkbox" name="vq_available[]" value="' . h($q) . '" class="accent-blurple"' . $checked . '> ' . h($q) . '</label>';
+          }
+          ?>
+        </div>
+        <p class="text-xs text-discord-400 mt-1">Which video qualities users can pick in their settings. At least one must be enabled.</p>
+      </div>
+    </div>
+
     <div class="flex items-center justify-between card p-4">
       <div>
         <div class="text-sm font-medium text-white">Allow meeting recording (egress)</div>

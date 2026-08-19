@@ -308,6 +308,8 @@ final class VoiceController
             'talker_cap' => LiveKitService::talkerCap(),
             'bitrate' => LiveKitService::bitrate(),
             'ring_seconds' => LiveKitService::ringSeconds(),
+            'video_quality_default' => LiveKitService::videoQualityDefault(),
+            'video_quality_available' => LiveKitService::videoQualityAvailable(),
             'recording' => ['enabled' => $recEnabled, 'active' => $recActive],
             'channels' => $channels,
             'session' => $session,

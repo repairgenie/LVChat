@@ -31,6 +31,9 @@ return static function (Router $router): void {
     $router->post('/api/webrtc/voice/leave', [VoiceController::class, 'leave']);
     $router->post('/api/webrtc/voice/channel-voice', [VoiceController::class, 'channelVoice']);
 
+    // Echo test (mic + server verification).
+    $router->post('/api/webrtc/voice/echo-test', [EchoTestController::class, 'test']);
+
     // One-on-one calls (growable into group calls via /invite).
     $router->post('/api/webrtc/call/initiate', [CallController::class, 'initiate']);
     $router->post('/api/webrtc/call/invite', [CallController::class, 'invite']);

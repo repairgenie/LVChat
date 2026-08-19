@@ -46,7 +46,7 @@ npm run preview             # serve dist/ locally for testing (http://127.0.0.1:
 | `APP_THEME_COLOR` | `#26283c` | PWA theme colour (install header) |
 | `APP_BACKGROUND_COLOR` | `#1a1a24` | PWA splash background |
 | `APP_DESCRIPTION` | *(default)* | PWA description |
-| `APP_VERSION` | `1.0.0` | Reported in `build-info.json` / `config.js` |
+| `APP_VERSION` | `0.9.0beta` | Reported in `build-info.json` / `config.js` |
 
 `npm run build` generates `dist/config.js`, `dist/manifest.webmanifest`,
 `dist/sw.js` (cache-version stamped) and copies the client. Re-run it whenever

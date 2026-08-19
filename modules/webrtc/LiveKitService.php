@@ -103,6 +103,28 @@ final class LiveKitService
         return max(16000, min(64000, $bitrate));
     }
 
+    /** Allowed video quality labels (admin whitelist). */
+    private const VIDEO_QUALITIES = ['360p', '480p', '720p', '1080p'];
+
+    /** Default video quality for users who haven't chosen one. */
+    public static function videoQualityDefault(): string
+    {
+        $q = (string) (config_get('video_quality_default', '720p') ?? '720p');
+        return in_array($q, self::VIDEO_QUALITIES, true) ? $q : '720p';
+    }
+
+    /** Which video qualities users are allowed to pick (comma-separated setting). */
+    public static function videoQualityAvailable(): array
+    {
+        $raw = trim((string) (config_get('video_quality_available', '360p,480p,720p,1080p') ?? ''));
+        if ($raw === '') {
+            return ['360p', '480p', '720p', '1080p'];
+        }
+        $parts = array_map('trim', explode(',', $raw));
+        $valid = array_values(array_intersect($parts, self::VIDEO_QUALITIES));
+        return $valid !== [] ? $valid : ['720p'];
+    }
+
     /** A stable LiveKit identity for an actor (used as JWT `sub`). */
     public static function identity(array $actor): string
     {

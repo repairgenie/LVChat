@@ -6,7 +6,7 @@
   "author": "LVChat Tests",
   "license": "MIT",
   "requires": {
-    "lvchat": ">=1.0.0",
+    "lvchat": ">=0.9.0beta",
     "php": ">=8.1"
   },
   "order": 1,

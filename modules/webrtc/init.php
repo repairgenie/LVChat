@@ -49,6 +49,9 @@ if (!class_exists('EventController')) {
 if (!class_exists('AdminVoiceController')) {
     require __DIR__ . '/AdminVoiceController.php';
 }
+if (!class_exists('EchoTestController')) {
+    require __DIR__ . '/EchoTestController.php';
+}
 
 // Note: no slash commands are registered here — the core `/voice` command
 // (IRC +v channel mode) owns that name, and joining voice is driven by the

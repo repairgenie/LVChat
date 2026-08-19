@@ -56,7 +56,8 @@ final class AdminVoiceController
         return [
             'voice_enabled', 'livekit_url', 'livekit_api_key', 'livekit_api_secret',
             'voice_max_users', 'voice_talker_cap', 'voice_bitrate', 'voice_quality_preset',
-            'call_ring_seconds', 'recording_enabled', 'recording_path',
+            'call_ring_seconds', 'video_quality_default', 'video_quality_available',
+            'recording_enabled', 'recording_path',
         ];
     }
 
@@ -131,6 +132,24 @@ final class AdminVoiceController
             $bitrate = (string) max(16000, min(64000, $custom));
         }
         config_set('voice_bitrate', $bitrate);
+
+        // Video quality defaults + available presets.
+        $validQualities = ['360p', '480p', '720p', '1080p'];
+        $vqDefault = (string) ($post['video_quality_default'] ?? '720p');
+        if (!in_array($vqDefault, $validQualities, true)) {
+            $vqDefault = '720p';
+        }
+        config_set('video_quality_default', $vqDefault);
+
+        $vqAvailInput = $post['vq_available'] ?? [];
+        if (!is_array($vqAvailInput)) {
+            $vqAvailInput = [$vqAvailInput];
+        }
+        $vqAvail = array_values(array_intersect($vqAvailInput, $validQualities));
+        if ($vqAvail === []) {
+            $vqAvail = ['720p'];
+        }
+        config_set('video_quality_available', implode(',', $vqAvail));
 
         // Recording (egress).
         config_set('recording_enabled', ($post['recording_enabled'] ?? '0') === '1' ? '1' : '0');

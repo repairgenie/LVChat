@@ -2235,6 +2235,24 @@ function openMessageContextMenu (x, y, m) {
       closeContextMenu()
     }))
   }
+
+  const canDelete = (state.me && (state.me.role === 'admin' || isMine(m)))
+  if (canDelete && state.open && state.open.type === 'room') {
+    menu.appendChild(menuSeparator())
+    const del = menuItem('Delete', async () => {
+      closeContextMenu()
+      const ok = await appConfirm('Delete this message?')
+      if (!ok) return
+      const r = await LvApi.postForm('/api/message/delete', { id: m.id })
+      if (r.ok && r.body && !r.body.error) {
+        const idx = state.messages.findIndex((msg) => Number(msg.id) === Number(m.id))
+        if (idx !== -1) { state.messages.splice(idx, 1); renderStream() }
+      }
+    })
+    del.classList.add('danger')
+    menu.appendChild(del)
+  }
+
   // Mute/Block the sender (registered accounts only — guests have no account).
   if (m.username && m.sender_id != null) {
     menu.appendChild(menuSeparator())

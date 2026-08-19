@@ -370,6 +370,10 @@
 .st-meter-val { color: #fbbf24; font-size: 11px; min-width: 32px; }
 .st-bg { flex: 1; }
 .st-bg.on { background: #5865f2; border-color: #5865f2; color: #fff; }
+.st-vq { flex: 1; font-size: 12px; }
+.st-vq.on { background: #5865f2; border-color: #5865f2; color: #fff; }
+.pane-vq { font-size: 11px; font-family: monospace; opacity: .8; }
+.pane-vq:hover { opacity: 1; }
 .st-imgprev {
   width: 100%;
   max-height: 160px;

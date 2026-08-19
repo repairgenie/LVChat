@@ -1,6 +1,6 @@
 {
   "name": "lvchat-messenger-web",
-  "version": "1.0.0",
+  "version": "0.9.0beta",
   "description": "LVChat Messenger Web — PWA client that connects to a single LVChat server (configured in .env)",
   "private": true,
   "scripts": {

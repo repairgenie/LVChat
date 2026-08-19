@@ -101,7 +101,7 @@ function loadConfig (envFile) {
     description: (env.APP_DESCRIPTION || DEFAULTS.APP_DESCRIPTION).trim(),
     themeColor: (env.APP_THEME_COLOR || DEFAULTS.APP_THEME_COLOR).trim(),
     backgroundColor: (env.APP_BACKGROUND_COLOR || DEFAULTS.APP_BACKGROUND_COLOR).trim(),
-    version: (env.APP_VERSION || '1.0.0').trim()
+    version: (env.APP_VERSION || '0.9.0beta').trim()
   }
 }
 

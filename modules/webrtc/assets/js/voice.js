@@ -117,6 +117,14 @@
   var ICON_CALL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
   var ICON_HANGUP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(135deg)"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>';
 
+  var VIDEO_QUALITY = {
+    '360p':  { width: 640,  height: 360,  frameRate: 20 },
+    '480p':  { width: 640,  height: 480,  frameRate: 20 },
+    '720p':  { width: 1280, height: 720,  frameRate: 30 },
+    '1080p': { width: 1920, height: 1080, frameRate: 30 }
+  };
+  var VIDEO_QUALITY_ORDER = ['360p', '480p', '720p', '1080p'];
+
   var state = {
     enabled: false,
     active: 0,
@@ -143,6 +151,7 @@
     devices: { audioinput: [], videoinput: [], audiooutput: [] },
     camTest: null,       // active camera-test stream
     micTest: null,       // active mic-test analyser state
+    echoTest: null,      // { room, analyser, stream, raf } — active echo-test state
     settingsOpen: false,
     bgProc: null,        // active LiveKit video processor for bg effects
     bgProcKey: '',       // JSON key of the effect the processor was built for
@@ -155,6 +164,9 @@
     ringAudio: null,     // synthesized ring tone element
     outgoingRing: false, // caller-side ring tone active for an outgoing call
     recording: { enabled: false, active: null },  // egress recording state
+    videoQuality: '720p',     // current user video quality preference
+    videoQualityDefault: '720p',  // server default
+    videoQualityAvailable: ['360p', '480p', '720p', '1080p'],  // admin-allowed options
   };
 
   var els = {};          // { btn, settingsBtn, mtgBtn, pane, ring, pill, videos, toast, st* }
@@ -187,6 +199,12 @@
       state.calls = j.calls || { incoming: [], outgoing: [], active: null, recent: [] };
       state.recent = state.calls.recent || [];
       state.ringSeconds = j.ring_seconds || state.ringSeconds || 20;
+      state.videoQualityDefault = j.video_quality_default || '720p';
+      state.videoQualityAvailable = j.video_quality_available || ['360p', '480p', '720p', '1080p'];
+      /* Apply server default if user has no saved preference. */
+      if (!state.prefs.videoQuality) {
+        state.videoQuality = state.videoQualityDefault;
+      }
       state.inVoice = !!(state.session && state.room && state.room.state === 'connected');
       render();
       handleCallTransitions();
@@ -449,6 +467,8 @@
     }
     var opts = {};
     if (state.prefs && state.prefs.cam) opts.deviceId = state.prefs.cam;
+    var res = VIDEO_QUALITY[state.videoQuality] || VIDEO_QUALITY['720p'];
+    opts.resolution = res;
     var proc = currentBgProcessor();
     if (proc) opts.videoProcessor = proc;
     return room.localParticipant.setCameraEnabled(true, opts).then(attachLocalVideos).catch(function (e) { toast(String(e && e.message || e)); });
@@ -470,6 +490,8 @@
       if (!wasOn) return;
       var opts = {};
       if (state.prefs && state.prefs.cam) opts.deviceId = state.prefs.cam;
+      var res = VIDEO_QUALITY[state.videoQuality] || VIDEO_QUALITY['720p'];
+      opts.resolution = res;
       var proc = currentBgProcessor();
       if (proc) opts.videoProcessor = proc;
       return room.localParticipant.setCameraEnabled(true, opts);
@@ -511,7 +533,8 @@
   function defaultPrefs() {
     return {
       mic: '', cam: '', speaker: '', bg: 'none', blur: 8, image: '',
-      echoc: true, ns: true, agc: true, screenAudio: false
+      echoc: true, ns: true, agc: true, screenAudio: false,
+      videoQuality: ''
     };
   }
 
@@ -610,6 +633,28 @@
         els.stImgPrev.classList.add('hidden');
       }
     }
+    renderVqButtons();
+  }
+
+  function renderVqButtons() {
+    if (!els.stVqRow) return;
+    var cur = state.videoQuality || '720p';
+    var avail = state.videoQualityAvailable || ['360p', '480p', '720p', '1080p'];
+    els.stVqRow.innerHTML = '';
+    avail.forEach(function (q) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lvcvoice-btn-ghost st-vq' + (q === cur ? ' on' : '');
+      btn.dataset.vq = q;
+      btn.textContent = q;
+      btn.addEventListener('click', function () {
+        state.videoQuality = q;
+        state.prefs.videoQuality = q;
+        savePrefs();
+        renderVqButtons();
+      });
+      els.stVqRow.appendChild(btn);
+    });
   }
 
   function openSettings() {
@@ -634,6 +679,7 @@
     var mic = els.stMic.value;
     var cam = els.stCam.value;
     var speaker = els.stSpeaker.value;
+    var prevQuality = state.videoQuality;
     state.prefs.mic = mic;
     state.prefs.cam = cam;
     state.prefs.speaker = speaker;
@@ -649,6 +695,53 @@
     toast('Voice settings saved.');
   }
 
+  /* ── Echo test modal ───────────────────────────────────────────────── */
+  function openEchoTest() {
+    ensureEls();
+    if (!els.echoTestModal) buildEchoTestModal();
+    if (els.echoTestModal) els.echoTestModal.classList.remove('hidden');
+  }
+
+  function closeEchoTest() {
+    stopEchoTest();
+    if (els.echoTestModal) els.echoTestModal.classList.add('hidden');
+  }
+
+  function buildEchoTestModal() {
+    var el = document.createElement('div');
+    el.id = 'lvcvoice-echotest-overlay';
+    el.className = 'hidden lvcvoice-mtg-overlay';
+    el.innerHTML =
+      '<div class="lvcvoice-settings-card">' +
+      '<div class="lvcvoice-mtg-head"><span>Echo test</span>' +
+      '<button type="button" class="lvcvoice-btn-ghost et-close">✕</button></div>' +
+      '<div class="lvcvoice-settings-body">' +
+      '<p class="st-hint" style="margin-bottom:8px">Speak into your microphone and you should hear yourself. ' +
+      'This verifies your mic, speakers, and the WebRTC server are working.</p>' +
+      '<div class="st-section">' +
+      '<div class="st-label">Input level ' +
+      '<span class="st-meter-wrap"><meter id="lvcvoice-et-meter" min="0" max="100" low="10" high="70"></meter>' +
+      '<span class="st-meter-val" id="lvcvoice-et-meterval"></span></span></div>' +
+      '<div id="lvcvoice-et-status" class="st-hint" style="min-height:1.2em"></div>' +
+      '<button type="button" class="lvcvoice-btn-ghost" id="lvcvoice-et-btn" style="width:100%">Start echo test</button>' +
+      '</div>' +
+      '</div></div>';
+
+    el.querySelector('.et-close').addEventListener('click', closeEchoTest);
+    el.addEventListener('click', function (e) { if (e.target === el) closeEchoTest(); });
+
+    document.body.appendChild(el);
+    els.echoTestModal = el;
+    els.echoTestBtn = el.querySelector('#lvcvoice-et-btn');
+    els.echoTestMeter = el.querySelector('#lvcvoice-et-meter');
+    els.echoTestMeterVal = el.querySelector('#lvcvoice-et-meterval');
+    els.echoTestStatus = el.querySelector('#lvcvoice-et-status');
+
+    els.echoTestBtn.addEventListener('click', function () {
+      if (state.echoTest) stopEchoTest(); else startEchoTest();
+    });
+  }
+
   /* Camera test — plain getUserMedia preview, no LiveKit involved. */
   function startCamTest() {
     if (state.camTest) return;
@@ -656,8 +749,9 @@
       toast('Camera access is not supported here.');
       return;
     }
-    var constraints = { video: true, audio: false };
-    if (state.prefs && state.prefs.cam) constraints.video = { deviceId: { exact: state.prefs.cam } };
+    var res = VIDEO_QUALITY[state.videoQuality] || VIDEO_QUALITY['720p'];
+    var constraints = { video: { width: { ideal: res.width }, height: { ideal: res.height }, frameRate: { ideal: res.frameRate } }, audio: false };
+    if (state.prefs && state.prefs.cam) constraints.video.deviceId = { exact: state.prefs.cam };
     navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
       state.camTest = stream;
       if (els.stCamTest) els.stCamTest.classList.remove('hidden');
@@ -730,6 +824,121 @@
     state.micTest = null;
     if (els.stMeter) els.stMeter.value = 0;
     if (els.stMeterVal) els.stMeterVal.textContent = '';
+  }
+
+  /* ── Echo test — join a per-user LiveKit room and hear yourself back ──── */
+  function startEchoTest() {
+    if (state.echoTest) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('Microphone access is not supported here.');
+      return;
+    }
+    var constraints = { audio: true, video: false };
+    if (state.prefs && state.prefs.mic) constraints.audio = { deviceId: { exact: state.prefs.mic } };
+
+    toast('Starting echo test…');
+    api('/api/webrtc/voice/echo-test').then(function (j) {
+      if (!j || !j.ok) {
+        toast(j && j.error ? j.error : 'Could not start echo test.');
+        return;
+      }
+      navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+        if (!lk()) {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          toast('Voice client library is not loaded.');
+          return;
+        }
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          toast('Audio analysis is not supported here.');
+          return;
+        }
+        var actx = new AC();
+        var analyser = actx.createAnalyser();
+        analyser.fftSize = 512;
+        var source = actx.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        /* Connect to LiveKit so the audio is routed through the server.
+         * We create a minimal Room, publish the mic track, and subscribe
+         * back — the remote audio is the "echo" the user hears. */
+        var Room = lk().Room;
+        var room = new Room({ adaptiveStream: false });
+        var remoteAudio = null;
+        var audioEl = document.createElement('audio');
+        audioEl.autoplay = true;
+        if (state.prefs && state.prefs.speaker) audioEl.setSinkId(state.prefs.speaker).catch(function () {});
+
+        var Event = lk().RoomEvent || {};
+        room.on(Event.TrackSubscribed, function (track, pub, participant) {
+          if (track.kind === 'audio') {
+            remoteAudio = track;
+            track.attach(audioEl);
+          }
+        });
+        room.on(Event.TrackUnsubscribed, function (track) {
+          if (track.kind === 'audio' && remoteAudio === track) {
+            track.detach(audioEl);
+            remoteAudio = null;
+          }
+        });
+        room.on(Event.Connected, function () {
+          /* Publish the mic track so LiveKit routes it back to us. */
+          var micPub = stream.getAudioTracks()[0];
+          if (micPub) {
+            room.localParticipant.publishTrack(micPub, { name: 'echo-mic' }).catch(function () {});
+          }
+        });
+        room.on(Event.Disconnected, function () {
+          stopEchoTest();
+        });
+
+        room.connect(j.url, j.token, {}).then(function () {
+          state.echoTest = { room: room, stream: stream, actx: actx, analyser: analyser, audioEl: audioEl };
+          if (els.echoTestBtn) els.echoTestBtn.textContent = 'Stop echo test';
+          if (els.echoTestMeter) els.echoTestMeter.value = 0;
+          if (els.echoTestStatus) els.echoTestStatus.textContent = 'Listening — speak into your microphone.';
+          toast('Echo test connected — speak to hear yourself.');
+          echoTestMeterLoop();
+        }).catch(function (err) {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          try { actx.close(); } catch (e) {}
+          toast('Could not connect to echo test: ' + (err && err.message || err));
+        });
+      }).catch(function (e) {
+        toast('Could not start mic: ' + (e && e.message || e));
+      });
+    });
+  }
+
+  function stopEchoTest() {
+    if (!state.echoTest) return;
+    cancelAnimationFrame(state.echoTest.raf);
+    if (state.echoTest.room) { try { state.echoTest.room.disconnect(); } catch (e) {} }
+    if (state.echoTest.audioEl) { try { state.echoTest.audioEl.srcObject = null; } catch (e) {} }
+    try { state.echoTest.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    try { state.echoTest.actx.close(); } catch (e) {}
+    state.echoTest = null;
+    if (els.echoTestBtn) els.echoTestBtn.textContent = 'Start echo test';
+    if (els.echoTestMeter) els.echoTestMeter.value = 0;
+    if (els.echoTestStatus) els.echoTestStatus.textContent = '';
+  }
+
+  function echoTestMeterLoop() {
+    if (!state.echoTest) return;
+    var et = state.echoTest;
+    var buf = new Uint8Array(et.analyser.frequencyBinCount);
+    et.analyser.getByteTimeDomainData(buf);
+    var sum = 0;
+    for (var i = 0; i < buf.length; i++) {
+      var v = (buf[i] - 128) / 128;
+      sum += v * v;
+    }
+    var pct = Math.min(100, Math.round(Math.sqrt(sum / buf.length) * 220));
+    if (els.echoTestMeter) els.echoTestMeter.value = pct;
+    if (els.echoTestMeterVal) els.echoTestMeterVal.textContent = pct + '%';
+    et.raf = requestAnimationFrame(echoTestMeterLoop);
   }
 
   /* Background effects: a LiveKit TrackProcessor that composites the person
@@ -980,6 +1189,11 @@
       '<p class="st-hint">Background effects only apply while your camera is on, and are processed locally in your browser.</p>' +
       '</div>' +
 
+      '<div class="st-section"><div class="st-label">Video quality</div>' +
+      '<div class="st-row st-vq-row" id="lvcvoice-st-vq"></div>' +
+      '<p class="st-hint">Higher quality uses more bandwidth. This affects camera preview and published video.</p>' +
+      '</div>' +
+
       '<div class="st-row st-actions">' +
       '<button type="button" class="btn-primary st-save">Save settings</button>' +
       '<button type="button" class="lvcvoice-btn-ghost st-cancel">Cancel</button>' +
@@ -1020,6 +1234,7 @@
     els.stImageRow = el.querySelector('.st-image');
     els.stImgPrev = el.querySelector('#lvcvoice-st-imgprev');
     els.stImgFile = el.querySelector('#lvcvoice-st-imgfile');
+    els.stVqRow = el.querySelector('#lvcvoice-st-vq');
   }
 
   function onBgImageFile(e) {
@@ -1439,6 +1654,13 @@
     els.ddSettingsItem.addEventListener('click', function () { closeDropdown(); openSettings(); });
     menu.appendChild(els.ddSettingsItem);
 
+    els.ddEchoTestItem = document.createElement('button');
+    els.ddEchoTestItem.type = 'button';
+    els.ddEchoTestItem.className = 'lvcvoice-dd-item';
+    els.ddEchoTestItem.innerHTML = '<span class="lvcvoice-dd-item-icon">🎙</span><span class="lvcvoice-dd-item-label">Echo test</span>';
+    els.ddEchoTestItem.addEventListener('click', function () { closeDropdown(); openEchoTest(); });
+    menu.appendChild(els.ddEchoTestItem);
+
     dd.appendChild(menu);
     header.appendChild(dd);
     els.dropdown = dd;
@@ -1483,6 +1705,7 @@
     el.innerHTML =
       '<div class="pane-head"><span class="pane-title">Voice</span>' +
       '<span class="pane-head-actions">' +
+      '<button type="button" class="lvcvoice-btn-ghost pane-vq" title="Video quality">720p</button>' +
       '<button type="button" class="lvcvoice-btn-ghost pane-layout" title="Layout: auto / speaker / gallery">⬒</button>' +
       '<button type="button" class="lvcvoice-btn-ghost pane-min" title="Minimize">–</button>' +
       '<button type="button" class="lvcvoice-btn-ghost pane-settings" title="Voice &amp; video settings">⚙</button>' +
@@ -1530,6 +1753,7 @@
     el.querySelector('.pane-hand').addEventListener('click', toggleHand);
     el.querySelector('.pane-react').addEventListener('click', function () { toggleReactionStrip(); });
     el.querySelector('.pane-layout').addEventListener('click', cycleLayout);
+    el.querySelector('.pane-vq').addEventListener('click', cycleVideoQuality);
     el.querySelector('.pane-min').addEventListener('click', toggleMinimize);
     el.querySelector('.pane-muteall').addEventListener('click', function () { moderate('mute_all'); });
     el.querySelector('.pane-unmuteall').addEventListener('click', function () { moderate('unmute_all'); });
@@ -1589,6 +1813,20 @@
     var next = state.layout === 'auto' ? 'speaker' : (state.layout === 'speaker' ? 'gallery' : 'auto');
     setLayout(next);
     toast('Layout: ' + next);
+  }
+
+  function cycleVideoQuality() {
+    var avail = state.videoQualityAvailable || ['360p', '480p', '720p', '1080p'];
+    var cur = state.videoQuality || '720p';
+    var idx = avail.indexOf(cur);
+    var next = avail[(idx + 1) % avail.length];
+    state.videoQuality = next;
+    state.prefs.videoQuality = next;
+    savePrefs();
+    toast('Video quality: ' + next);
+    render();
+    var room = state.room;
+    if (room && room.localParticipant.isCameraEnabled()) restartCamera();
   }
 
   function toggleMinimize() {
@@ -2005,6 +2243,8 @@
         els.pane.querySelector('.pane-cam').textContent = camOn ? 'Camera off' : 'Camera';
         els.pane.querySelector('.pane-share').textContent = shareOn ? 'Stop share' : 'Share';
         els.pane.querySelector('.pane-hand').textContent = state.hands[myIdentity()] ? '✋ Lower' : '✋ Hand';
+        var vqBtn = els.pane.querySelector('.pane-vq');
+        if (vqBtn) vqBtn.textContent = state.videoQuality || '720p';
         var sess = state.session;
         if (els.paneMod) els.paneMod.classList.toggle('hidden', !(sess && sess.can_moderate));
         var inviteRow = els.pane && els.pane.querySelector('.pane-invite');
@@ -2119,6 +2359,7 @@
   function boot() {
     if (!hostBootGate()) return;
     loadPrefs();
+    if (state.prefs.videoQuality) state.videoQuality = state.prefs.videoQuality;
     ensureEls();
     document.addEventListener('keydown', onKeydown);
     pollStatus();

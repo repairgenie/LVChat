@@ -1276,12 +1276,15 @@ final class ChatController
         $user = self::requireUser();
         self::requireCsrf();
         $id = (int) ($_POST['id'] ?? 0);
+        error_log("[deleteMessage] user={$user['id']} role={$user['role']} id={$id} guest=" . (int) MessageService::isGuest($user));
         $r = MessageService::delete($id, $user);
         if ($r !== true) {
+            error_log("[deleteMessage] DENIED id={$id} reason={$r}");
             json_out(['error' => $r], 403);
         }
         log_audit('message_delete', 'msg#' . $id);
         self::pushMsgUpdate($id, 'delete');
+        error_log("[deleteMessage] OK id={$id}");
         json_out(['ok' => true]);
     }
 

@@ -401,6 +401,9 @@ function presence_label(array $u): string {
           <span id="rt-label" class="truncate">connecting…</span>
         </div>
       </div>
+      <div class="px-2 pt-0.5 select-none">
+        <div class="px-2 py-1 rounded-md text-[10px] font-mono text-discord-500" title="Core platform version">LVChat <?= h(LVC_VERSION) ?></div>
+      </div>
 
       <?php if ($user['role'] === 'admin'): ?>
       <nav class="px-2 pt-3">

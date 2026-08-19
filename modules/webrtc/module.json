@@ -5,7 +5,7 @@
   "description": "Calls, channel voice, video, group calls, waiting rooms, moderation and recording via a self-hosted LiveKit SFU.",
   "author": "LVChat",
   "requires": {
-    "lvchat": ">=1.7.1",
+    "lvchat": ">=0.9.0beta",
     "php": ">=8.1"
   },
   "order": 10,
@@ -22,6 +22,8 @@
     "voice_bitrate": "40000",
     "voice_quality_preset": "moderate",
     "call_ring_seconds": "20",
+    "video_quality_default": "720p",
+    "video_quality_available": "360p,480p,720p,1080p",
     "recording_enabled": "0",
     "recording_path": ""
   },
