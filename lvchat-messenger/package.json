@@ -1,15 +1,15 @@
 {
   "name": "lvchat-messenger",
-  "version": "0.9.0beta",
+  "version": "0.9.0-beta",
   "description": "LVChat Messenger — IM-first desktop client for LVChat",
   "main": "src/main.js",
   "author": {
     "name": "LVChat",
     "email": "admin@lasvegasbestinternet.com"
   },
-  "homepage": "https://lasvegasbestinternet.com",
+  "homepage": "https://lvchat.org",
   "desktopName": "lvchat-messenger.desktop",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "start": "electron .",
     "test": "bash tests/run.sh",

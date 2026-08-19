@@ -1,15 +1,15 @@
 {
   "name": "lvchat-desktop",
-  "version": "0.9.0beta",
+  "version": "0.9.0-beta",
   "description": "LVChat Desktop client — connect to your LVChat servers",
   "main": "src/main.js",
   "author": {
     "name": "LVChat",
     "email": "admin@lasvegasbestinternet.com"
   },
-  "homepage": "https://lasvegasbestinternet.com",
+  "homepage": "https://lvchat.org",
   "desktopName": "lvchat-desktop.desktop",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "start": "electron .",
     "test": "bash tests/run.sh",
