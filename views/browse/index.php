@@ -96,8 +96,8 @@ function channel_card(array $c, array $joinedMap): string {
 
   <div>
     <div class="flex flex-wrap gap-3 items-center mb-4">
-      <input id="ch-search" class="input w-64 !py-2 !rounded-lg" placeholder="Search by name or topic…" autocomplete="off">
-      <select id="ch-filter" class="input w-44 !py-2 !rounded-lg">
+      <input id="ch-search" class="input w-64 !py-2 !rounded-lg" placeholder="Search by name or topic…" autocomplete="off" aria-label="Search channels">
+      <select id="ch-filter" class="input w-44 !py-2 !rounded-lg" aria-label="Filter channels">
         <option value="all">All channels</option>
         <option value="open">Not joined</option>
         <option value="joined">Joined</option>

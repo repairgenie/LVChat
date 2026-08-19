@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '40';
+    private const SCHEMA_VERSION = '41';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -437,6 +437,11 @@ final class Database
                 $pdo->exec("ALTER TABLE users ADD COLUMN searchable INTEGER NOT NULL DEFAULT 1");
             }
         }
+
+        // Performance indexes (schema v41).
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_users_last_ip ON users(last_ip)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_chat_logs_channel ON chat_logs(channel_name, created_at)');
 
         self::seedOperclasses($pdo);
         self::seedSoundAlerts($pdo);

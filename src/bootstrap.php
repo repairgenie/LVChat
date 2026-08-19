@@ -199,6 +199,13 @@ if ($secure) {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }
 
+// Security headers: CSP (restrictive baseline) and clickjacking protection.
+// The CSP allows 'unsafe-inline' for styles (Tailwind) and scripts (theme-switcher,
+// CSRF injection) — a nonce-based approach can replace this in a future hardening pass.
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+header("X-Content-Type-Options: nosniff");
+header("Referrer-Policy: strict-origin-when-cross-origin");
+
 // Admin session timeout: force re-authentication for admin accounts after 8 hours
 // of inactivity, regardless of the 30-day cookie lifetime.
 // Check both session-based and bearer-based auth paths.

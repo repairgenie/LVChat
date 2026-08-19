@@ -23,7 +23,7 @@
     <div class="p-8">
       <div class="flex items-center gap-4 mb-8">
         <?php if (site_logo()): ?>
-        <img src="<?= h(site_logo()) ?>" alt="" class="w-14 h-14 rounded-2xl object-contain ring-1 ring-discord-700 shadow-lg">
+        <img src="<?= h(site_logo()) ?>" alt="<?= h(config_get('site_name', 'LVChat')) ?>" class="w-14 h-14 rounded-2xl object-contain ring-1 ring-discord-700 shadow-lg">
         <?php else: ?>
         <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blurple to-purple-500 flex items-center justify-center text-xl font-bold text-white shadow-lg"><?= h(strtoupper(mb_substr(config_get('site_name', 'LVChat'), 0, 1))) ?></div>
         <?php endif; ?>

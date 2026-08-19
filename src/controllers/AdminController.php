@@ -115,8 +115,9 @@ final class AdminController
                 FROM users u';
         $params = [];
         if ($term !== '') {
+            $safeTerm = addcslashes($term, '%_\\');
             $sql .= ' WHERE u.username LIKE ? COLLATE NOCASE OR u.email LIKE ? COLLATE NOCASE';
-            $params = ["%$term%", "%$term%"];
+            $params = ["%$safeTerm%", "%$safeTerm%"];
         }
         $sql .= ' ORDER BY u.registered_at DESC LIMIT 200';
         $users = Database::all($sql, $params);

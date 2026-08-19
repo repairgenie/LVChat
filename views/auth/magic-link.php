@@ -20,7 +20,7 @@
 <div class="max-w-md mx-auto">
   <div class="card auth-card p-8">
     <?php if (site_logo()): ?>
-    <img src="<?= h(site_logo()) ?>" alt="" class="w-full h-auto object-contain mb-8">
+    <img src="<?= h(site_logo()) ?>" alt="<?= h(config_get('site_name', 'LVChat')) ?>" class="w-full h-auto object-contain mb-8">
     <?php endif; ?>
     <div class="flex items-center gap-3 mb-8">
       <div>

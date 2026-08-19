@@ -709,6 +709,7 @@ function presence_label(array $u): string {
         <div id="attach-preview" class="hidden mb-1.5 flex items-center gap-2"></div>
         <div class="flex items-end gap-1 rounded-xl border border-discord-600 bg-discord-800 px-1.5 py-1 transition-colors focus-within:border-blurple/60 focus-within:ring-1 focus-within:ring-blurple/30 shadow-sm">
           <textarea id="chat-input" name="content" rows="1" autocomplete="off" spellcheck="false"
+                 aria-label="Message input"
                  class="flex-1 min-w-0 bg-transparent border-0 focus:ring-0 focus:outline-none resize-none max-h-40 py-1.5 px-1.5 text-sm text-discord-100 placeholder:text-discord-400"
                  placeholder="<?= h($channel ? "Message " . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
                  <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>

@@ -474,6 +474,21 @@ html.light .bg-red-500 .text-white { color: #fff; }
   box-shadow: 0 4px 20px rgba(0,0,0,0.3), 0 0 0 1px rgb(var(--c-blurple) / .2);
 }
 
+/* Reduced motion: respect prefers-reduced-motion for all animations. */
+@media (prefers-reduced-motion: reduce) {
+  .msg-enter,
+  .typing-dot,
+  .pulse-dot,
+  .browse-modal-enter,
+  [id$="-modal"]:not(.hidden) > .relative.card,
+  .browse-row-premium,
+  .stat-card,
+  .stat-card:hover .stat-icon {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .browse-gradient-accent {
   background: linear-gradient(90deg, rgb(var(--c-blurple)) 0%, rgb(var(--c-blurple) / .3) 50%, transparent 100%);
   height: 2px;
@@ -495,3 +510,31 @@ html.light .bg-red-500 .text-white { color: #fff; }
 .browse-stat-green::before { background: radial-gradient(circle at 30% 50%, #22c55e, transparent 70%); }
 .browse-stat-amber::before { background: radial-gradient(circle at 30% 50%, #f59e0b, transparent 70%); }
 .browse-stat-blurple::before { background: radial-gradient(circle at 30% 50%, rgb(var(--c-blurple)), transparent 70%); }
+
+/* Reduced motion: respect prefers-reduced-motion for all animations. */
+@media (prefers-reduced-motion: reduce) {
+  .msg-enter,
+  .typing-dot,
+  .pulse-dot,
+  .browse-modal-enter,
+  [id$="-modal"]:not(.hidden) > .relative.card,
+  .browse-row-premium,
+  .stat-card,
+  .stat-card:hover .stat-icon {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Print styles: hide chrome, show content. */
+@media print {
+  body.chat-app { position: static !important; overflow: visible !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .sidebar, .right-panel, #composer, .msg-actions, .actions,
+  #admin-nav-toggle, .admin-drawer-backdrop, .admin-sidebar,
+  .admin-drawer-backdrop, nav, header, footer, .hidden { display: none !important; }
+  .card { border: 1px solid #ccc !important; background: #fff !important; }
+  #messages { overflow: visible !important; height: auto !important; }
+  a { color: #000 !important; text-decoration: underline !important; }
+  img { max-width: 100% !important; }
+}

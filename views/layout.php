@@ -49,7 +49,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
     <div class="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <?php if (site_logo()): ?>
-        <img src="<?= h(site_logo()) ?>" alt="" class="w-8 h-8 rounded-xl object-contain">
+        <img src="<?= h(site_logo()) ?>" alt="<?= h(config_get('site_name', 'LVChat')) ?>" class="w-8 h-8 rounded-xl object-contain">
         <?php else: ?>
         <div class="w-8 h-8 rounded-xl bg-blurple flex items-center justify-center font-bold text-white">#</div>
         <?php endif; ?>

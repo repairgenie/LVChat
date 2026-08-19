@@ -28,7 +28,8 @@
     <?php endif; ?>
     <form method="post" action="/c/<?= h(rawurlencode($channel['slug'])) ?>/join" class="space-y-4">
       <?= Csrf::field() ?>
-      <input class="input text-center" type="password" name="key" placeholder="Channel key" required autofocus>
+      <label class="label" for="join-key">Channel key</label>
+      <input class="input text-center" type="password" name="key" id="join-key" placeholder="Channel key" required autofocus>
       <button class="btn-primary w-full justify-center py-2.5">Join <?= h($channel['name']) ?></button>
     </form>
   </div>

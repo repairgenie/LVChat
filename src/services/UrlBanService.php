@@ -29,6 +29,10 @@ declare(strict_types=1);
  */
 final class UrlBanService
 {
+    /** Per-request cache of banned domains. Avoids a full-table scan on every
+     *  embed fetch / channel URL validation. Reset by add()/remove(). */
+    private static ?array $cachedBans = null;
+
     /** Normalize a submitted value to a bare host, or null when it isn't a
      *  usable host. Accepts "example.com", "*.example.com", "https://example.com/path". */
     public static function normalizeHost(string $value): ?string
@@ -70,7 +74,10 @@ final class UrlBanService
         if ($host === null) {
             return null;
         }
-        foreach (Database::all('SELECT * FROM banned_urls') as $ban) {
+        if (self::$cachedBans === null) {
+            self::$cachedBans = Database::all('SELECT * FROM banned_urls');
+        }
+        foreach (self::$cachedBans as $ban) {
             $domain = self::cleanHost((string) $ban['domain']);
             if ($domain === null) {
                 continue;
@@ -124,6 +131,7 @@ final class UrlBanService
             'INSERT INTO banned_urls (domain, reason, created_by) VALUES (?, ?, ?)',
             [$host, mb_substr($reason, 0, 300), $createdBy]
         );
+        self::$cachedBans = null; // invalidate cache
         log_audit('banned_url_add', $host, $reason ?: 'no reason');
         return null;
     }
@@ -131,6 +139,7 @@ final class UrlBanService
     public static function remove(int $id): void
     {
         Database::query('DELETE FROM banned_urls WHERE id = ?', [$id]);
+        self::$cachedBans = null; // invalidate cache
         log_audit('banned_url_remove', 'banned_url#' . $id);
     }
 }
