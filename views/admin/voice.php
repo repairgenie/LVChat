@@ -120,6 +120,12 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
 
   <pre id="voice-output" class="hidden mt-2 p-2 rounded bg-black/40 text-[11px] text-discord-300 leading-relaxed max-h-48 overflow-auto whitespace-pre-wrap font-mono"></pre>
+
+  <!-- Port availability probe -->
+  <div id="port-probe" class="mt-3">
+    <div class="text-xs text-discord-400 mb-1">Port availability (8787–8795):</div>
+    <div id="port-grid" class="flex flex-wrap gap-1.5"></div>
+  </div>
 </div>
 
 <!-- Sidecar startup modal -->
@@ -169,7 +175,7 @@ require ROOT . '/views/admin/_page_header.php';
       .then(onOk);
   }
 
-  function renderSidecar(which, s) {
+  function renderSidecar(which, s, ports) {
     var dot = document.getElementById(which + '-dot');
     var txt = document.getElementById(which + '-status-text');
     var mdl = document.getElementById(which + '-model');
@@ -182,6 +188,9 @@ require ROOT . '/views/admin/_page_header.php';
       var parts = [];
       if (s.model) parts.push(s.model);
       if (s.device) parts.push(s.device);
+      // Show actual port from URL
+      var m = (s.url || '').match(/:(\d+)$/);
+      if (m) parts.push('port ' + m[1]);
       mdl.textContent = parts.length ? parts.join(' · ') : '';
       startBtn.disabled = true;
       stopBtn.disabled = false;
@@ -196,7 +205,13 @@ require ROOT . '/views/admin/_page_header.php';
       dot.className = 'w-2 h-2 rounded-full bg-red-500';
       txt.textContent = 'Stopped';
       txt.className = 'text-red-400 font-semibold';
-      mdl.textContent = '';
+      // Show port availability
+      var portNum = parseInt(portFromUrl(which === 'stt' ? sttUrl : ttsUrl));
+      if (ports && ports[portNum] !== undefined) {
+        mdl.textContent = ports[portNum] ? 'Port ' + portNum + ' is free' : 'Port ' + portNum + ' is in use — Start will auto-select a free port';
+      } else {
+        mdl.textContent = '';
+      }
       startBtn.disabled = false;
       stopBtn.disabled = true;
     }
@@ -207,8 +222,22 @@ require ROOT . '/views/admin/_page_header.php';
       .then(function (r) { return r.json().catch(function () { return {}; }); })
       .catch(function () { return {}; })
       .then(function (j) {
-        if (j.stt) renderSidecar('stt', j.stt);
-        if (j.tts) renderSidecar('tts', j.tts);
+        if (j.stt) renderSidecar('stt', j.stt, j.ports);
+        if (j.tts) renderSidecar('tts', j.tts, j.ports);
+        // Render port grid
+        if (j.ports) {
+          var grid = document.getElementById('port-grid');
+          if (grid) {
+            var html = '';
+            Object.keys(j.ports).sort(function(a,b){return a-b;}).forEach(function(p) {
+              var free = j.ports[p];
+              var bg = free ? 'bg-green-600/80' : 'bg-red-600/80';
+              var label = free ? p + ' free' : p + ' in use';
+              html += '<span class="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded ' + bg + ' text-white">' + p + '</span>';
+            });
+            grid.innerHTML = html;
+          }
+        }
       });
   }
 

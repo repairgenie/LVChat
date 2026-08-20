@@ -13,9 +13,56 @@ if [ ! -d "$DIR/venv" ]; then
   echo "[stt] Dependencies installed."
 fi
 
-export STT_PORT="${STT_PORT:-8787}"
+# Kill any existing process on the target port
+kill_port() {
+  local port="$1"
+  local pids
+  pids=$(lsof -ti :"$port" 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    echo "[stt] Killing existing process(es) on port $port (PIDs: $pids)..."
+    kill $pids 2>/dev/null || true
+    sleep 1
+    # Force kill if still alive
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+      kill -9 $pids 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+}
+
+# Find a free port starting from the preferred one
+find_free_port() {
+  local preferred="$1"
+  local port="$preferred"
+  local max=$((preferred + 20))
+  while [ "$port" -le "$max" ]; do
+    if ! lsof -i :"$port" >/dev/null 2>&1; then
+      echo "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  echo ""
+  return 1
+}
+
 export STT_MODEL="${STT_MODEL:-small}"
 unset STT_THREADS
 
+PREFERRED_PORT="${STT_PORT:-8787}"
+kill_port "$PREFERRED_PORT"
+STT_PORT=$(find_free_port "$PREFERRED_PORT")
+
+if [ -z "$STT_PORT" ]; then
+  echo "[stt] ERROR: No free port found in range $PREFERRED_PORT-$((PREFERRED_PORT + 20))"
+  exit 1
+fi
+
+if [ "$STT_PORT" != "$PREFERRED_PORT" ]; then
+  echo "[stt] Port $PREFERRED_PORT in use, using port $STT_PORT instead"
+fi
+
+export STT_PORT
 echo "[stt] Starting on port $STT_PORT (model=$STT_MODEL)..."
 exec "$DIR/venv/bin/uvicorn" server:app --host 127.0.0.1 --port "$STT_PORT" --log-level info

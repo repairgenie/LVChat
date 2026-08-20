@@ -229,6 +229,7 @@ $router->post('/admin/deploy/stream', [AdminController::class, 'deployStream']);
 // Voice & Speech admin
 $router->get('/admin/voice', [VoiceAdminController::class, 'admin']);
 $router->get('/admin/voice/status', [VoiceAdminController::class, 'status']);
+$router->get('/admin/voice/ports', [VoiceAdminController::class, 'ports']);
 $router->post('/admin/voice/save', [VoiceAdminController::class, 'save']);
 $router->post('/admin/voice/control', [VoiceAdminController::class, 'control']);
 $router->post('/admin/voice/setup-stream', [VoiceAdminController::class, 'setupStream']);

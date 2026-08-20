@@ -64,11 +64,34 @@ final class VoiceAdminController
     public static function status(): void
     {
         self::requireAdmin();
+        $stt = self::sidecarStatus('stt');
+        $tts = self::sidecarStatus('tts');
+
+        // Probe port availability for common ranges
+        $ports = [];
+        foreach ([8787, 8788, 8789, 8790, 8791, 8792, 8793, 8794, 8795] as $p) {
+            $ports[$p] = self::portFree($p);
+        }
+
         json_out([
-            'ok'   => true,
-            'stt'  => self::sidecarStatus('stt'),
-            'tts'  => self::sidecarStatus('tts'),
+            'ok'    => true,
+            'stt'   => $stt,
+            'tts'   => $tts,
+            'ports' => $ports,
         ]);
+    }
+
+    /** GET /admin/voice/ports — check which ports in a range are free. */
+    public static function ports(): void
+    {
+        self::requireAdmin();
+        $start = max(1, (int) ($_GET['start'] ?? 8787));
+        $end = min(65535, $start + 19);
+        $result = [];
+        for ($p = $start; $p <= $end; $p++) {
+            $result[$p] = self::portFree($p);
+        }
+        json_out(['ok' => true, 'ports' => $result, 'start' => $start, 'end' => $end]);
     }
 
     /** POST /admin/voice/save — save voice feature settings. */
@@ -442,6 +465,17 @@ final class VoiceAdminController
             'model'   => $data['model'] ?? $data['voice'] ?? null,
             'device'  => $data['device'] ?? null,
         ];
+    }
+
+    /** Check if a TCP port is free (not in use). */
+    private static function portFree(int $port): bool
+    {
+        $sock = @stream_socket_server("tcp://127.0.0.1:{$port}", $errno, $errstr, STREAM_SERVER_BIND);
+        if ($sock) {
+            fclose($sock);
+            return true;
+        }
+        return false;
     }
 
     /** Start a sidecar process in the background. */
