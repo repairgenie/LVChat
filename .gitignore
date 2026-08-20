@@ -11,3 +11,6 @@ lvchat-messenger/dist/
 messenger-web/.env
 messenger-web/dist/
 messenger-web/node_modules/
+
+sidecar/stt/venv/
+sidecar/tts/venv/
