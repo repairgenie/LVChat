@@ -41,7 +41,7 @@ declare(strict_types=1);
 final class SaaSService
 {
     /** Feature toggles (per-plan on/off switches). */
-    public const FEATURE_KEYS = ['events', 'voice', 'openclaw_bots'];
+    public const FEATURE_KEYS = ['events', 'voice', 'voice_stt', 'voice_tts', 'openclaw_bots'];
 
     /** Numeric limits ('' / null value = unlimited). */
     public const LIMIT_KEYS = [
@@ -56,6 +56,8 @@ final class SaaSService
     private const LABELS = [
         'events' => 'Events',
         'voice' => 'Voice (calls + channel voice)',
+        'voice_stt' => 'Speech-to-text dictation',
+        'voice_tts' => 'Text-to-speech read-aloud',
         'openclaw_bots' => 'OpenClaw bots',
         'connections' => 'Concurrent connections',
         'owned_channels' => 'Owned channels',
@@ -73,6 +75,8 @@ final class SaaSService
     private const DEFAULT_FEATURES = [
         'events' => false,
         'voice' => false,
+        'voice_stt' => false,
+        'voice_tts' => false,
         'openclaw_bots' => false,
     ];
 

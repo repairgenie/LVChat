@@ -225,6 +225,7 @@ require ROOT . '/views/admin/_page_header.php';
     <input class="input font-mono" name="giphy_api_key" value="<?= h($settings['giphy_api_key'] ?? '') ?>" placeholder="Get a free key at developers.giphy.com" autocomplete="off" spellcheck="false">
     <p class="text-xs text-discord-400 mt-1">Required for GIF search. Search/trending is proxied through this server, so the key is never exposed to browsers.</p>
   </div>
+
   <div class="flex items-center justify-between card p-4">
     <div>
       <div class="text-sm font-medium text-white">Realtime mode</div>

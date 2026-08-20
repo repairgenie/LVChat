@@ -131,7 +131,8 @@ function msg_action_buttons(array $viewer, array $m): string {
         || (!empty($m['username']) && strcasecmp((string) $m['username'], (string) $viewer['username']) === 0);
     $canEdit = $viewer['role'] === 'admin' || $mine;
     $html = '<button type="button" class="msg-react-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Add a reaction">' . icon('smile') . '</button>'
-        . '<button type="button" class="msg-reply-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Reply">' . icon('reply') . '</button>';
+        . '<button type="button" class="msg-reply-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Reply">' . icon('reply') . '</button>'
+        . '<button type="button" class="msg-tts-btn p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Read aloud">' . icon('volume') . '</button>';
     if ($canEdit) {
         $html .= '<button type="button" class="msg-edit p-1.5 rounded-md text-discord-400 hover:text-white hover:bg-discord-700" title="Edit">' . icon('edit') . '</button>'
             . '<button type="button" class="msg-del p-1.5 rounded-md text-discord-400 hover:text-red-400 hover:bg-discord-700" title="Delete">' . icon('trash') . '</button>';
@@ -714,6 +715,7 @@ function presence_label(array $u): string {
                  placeholder="<?= h($channel ? "Message " . $channel['name'] : ($dm ? 'Message ' . $dm['username'] : 'Join a channel to chat')) ?>"
                  <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
           <div class="flex items-center gap-0.5 shrink-0">
+            <button type="button" id="mic-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Dictate a message"><?= icon('mic', 'w-4 h-4') ?></button>
             <button type="button" id="upload-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? 'inline-flex' : 'hidden' ?>" title="Upload an image"><?= icon('paperclip', 'w-4 h-4') ?></button>
             <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
             <button type="button" id="emoji-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji"><?= icon('smile', 'w-4 h-4') ?></button>
@@ -1371,6 +1373,11 @@ function presence_label(array $u): string {
   </div>
 
 <script>window.CHAT = { csrf: <?= json_encode($csrf) ?> };</script>
+  <script>
+  window.VOICE_STT_ENABLED = <?= (config_get('voice_stt_enabled', '0') === '1') ? 'true' : 'false' ?>;
+  window.VOICE_TTS_ENABLED = <?= (config_get('voice_tts_enabled', '0') === '1') ? 'true' : 'false' ?>;
+  window.VOICE_FORCE_LOCAL = <?= (config_get('voice_force_local', '0') === '1') ? 'true' : 'false' ?>;
+  </script>
   <script src="/assets/vendor/ai/marked.min.js" defer></script>
   <script src="/assets/vendor/ai/purify.min.js" defer></script>
   <script src="/assets/vendor/ai/highlight.min.js" defer></script>

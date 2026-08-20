@@ -2229,6 +2229,10 @@ function openMessageContextMenu (x, y, m) {
     await window.msg.copyText(String(m.content || ''))
     closeContextMenu()
   }))
+  menu.appendChild(menuItem('Read aloud', async () => {
+    closeContextMenu()
+    ttsSpeak(String(m.content || ''))
+  }))
   if (m.username) {
     menu.appendChild(menuItem('View ' + m.username + '\u2019s profile', () => {
       window.msg.openExternal(new URL('/u/' + encodeURIComponent(m.username), LvApi.origin()).toString())
@@ -4262,4 +4266,98 @@ function wireOpenConversation () {
 }
 
 wireOpenConversation()
+
+// ── Voice: STT + TTS ───────────────────────────────────────────────────
+let voiceConfig = { stt_enabled: false, tts_enabled: false, force_local: false }
+
+async function loadVoiceConfig () {
+  try {
+    const r = await LvApi.get('/api/voice/config')
+    if (r.ok && r.body) voiceConfig = r.body
+  } catch (e) { /* ignore */ }
+  const micBtn = document.getElementById('btn-mic')
+  if (micBtn) {
+    if (voiceConfig.stt_enabled) { micBtn.hidden = false; micBtn.innerHTML = window.icon ? window.icon('mic', 'w-4 h-4') : '🎤' }
+    else { micBtn.hidden = true }
+  }
+}
+
+let mediaRecorder = null
+let audioChunks = []
+let isRecording = false
+
+function initMic () {
+  const micBtn = document.getElementById('btn-mic')
+  const input = document.getElementById('composer-input')
+  if (!micBtn || !input) return
+  micBtn.addEventListener('click', async () => {
+    if (isRecording) {
+      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop()
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunks = []
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm',
+      })
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data) }
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        isRecording = false
+        micBtn.innerHTML = window.icon ? window.icon('mic', 'w-4 h-4') : '🎤'
+        micBtn.title = 'Dictate a message'
+        if (audioChunks.length === 0) return
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType })
+        if (blob.size < 100) return
+        try {
+          const fd = new FormData()
+          fd.append('audio', blob, 'audio.webm')
+          const r = await LvApi.upload('/api/voice/transcribe', fd)
+          if (r.ok && r.body && r.body.text) {
+            const sep = input.value && !input.value.endsWith(' ') ? ' ' : ''
+            input.value += sep + r.body.text
+            input.dispatchEvent(new Event('input'))
+          } else if (r.ok && r.body && r.body.error) {
+            appToast(r.body.error)
+          }
+        } catch (err) { appToast('Speech-to-text request failed.') }
+      }
+      mediaRecorder.start()
+      isRecording = true
+      micBtn.innerHTML = window.icon ? window.icon('mic-off', 'w-4 h-4') : '🔴'
+      micBtn.title = 'Click to stop recording'
+    } catch (err) {
+      if (err.name === 'NotAllowedError') appToast('Microphone permission denied.')
+      else appToast('Could not access microphone.')
+    }
+  })
+}
+
+let currentAudio = null
+async function ttsSpeak (text) {
+  if (!text.trim()) return
+  if (currentAudio) { currentAudio.pause(); currentAudio = null }
+  if (voiceConfig.tts_enabled) {
+    try {
+      const fd = new FormData()
+      fd.append('text', text)
+      const r = await LvApi.upload('/api/voice/speak', fd)
+      if (r.ok && r.raw) {
+        const blob = new Blob([r.raw], { type: 'audio/wav' })
+        const url = URL.createObjectURL(blob)
+        currentAudio = new Audio(url)
+        currentAudio.onended = () => { URL.revokeObjectURL(url); currentAudio = null }
+        currentAudio.play()
+        return
+      }
+    } catch (e) { /* fall through to browser TTS */ }
+  }
+  if (!voiceConfig.force_local && window.speechSynthesis) {
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text))
+  }
+}
+
+loadVoiceConfig()
+initMic()
 boot()

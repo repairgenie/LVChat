@@ -73,6 +73,7 @@ function admin_sidebar_html(string $active, array $user): string
         ],
         'System' => [
             'logs' => ['/admin/logs', 'Chat logs', 'message-square', $isAdmin],
+            'voice' => ['/admin/voice', 'Voice & Speech', 'mic', $isAdmin],
             'settings' => ['/admin/settings', 'Settings', 'gear', $isAdmin],
             'updates' => ['/admin/updates', 'Updates', 'download', $isAdmin],
             'modules' => ['/admin/modules', 'Modules', 'grid', $isAdmin],

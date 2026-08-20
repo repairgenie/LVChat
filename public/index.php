@@ -101,6 +101,11 @@ $router->get('/api/history', [ChatController::class, 'historyApi']);
 $router->get('/api/search', [ChatController::class, 'search']);
 $router->get('/api/gifs', [ChatController::class, 'gifSearch']);
 
+// Voice (STT / TTS)
+$router->get('/api/voice/config', [VoiceController::class, 'config']);
+$router->post('/api/voice/transcribe', [VoiceController::class, 'transcribe']);
+$router->post('/api/voice/speak', [VoiceController::class, 'speak']);
+
 // Users / profiles
 $router->get('/u/{username}', [UserController::class, 'profile']);
 $router->get('/api/me', [UserController::class, 'me']);
@@ -220,6 +225,13 @@ $router->post('/admin/ws/reconnect', [AdminController::class, 'wsReconnect']);
 $router->post('/admin/ws/control', [AdminController::class, 'wsControl']);
 $router->post('/admin/deploy', [AdminController::class, 'deploy']);
 $router->post('/admin/deploy/stream', [AdminController::class, 'deployStream']);
+
+// Voice & Speech admin
+$router->get('/admin/voice', [VoiceAdminController::class, 'admin']);
+$router->get('/admin/voice/status', [VoiceAdminController::class, 'status']);
+$router->post('/admin/voice/save', [VoiceAdminController::class, 'save']);
+$router->post('/admin/voice/control', [VoiceAdminController::class, 'control']);
+$router->post('/admin/voice/start-stream', [VoiceAdminController::class, 'startStream']);
 
 // Incoming webhooks (public, token-authenticated) + admin management
 $router->post('/api/webhooks/{token}', [WebhookController::class, 'post']);

@@ -395,6 +395,14 @@ html.light .bg-red-500 .text-white { color: #fff; }
 .typing-dot:nth-child(2) { animation-delay: .15s; }
 .typing-dot:nth-child(3) { animation-delay: .3s; }
 
+/* Voice: mic recording pulse + TTS playing indicator */
+@keyframes mic-pulse {
+  0%, 100% { color: #ef4444; }
+  50% { color: #f87171; box-shadow: 0 0 0 4px rgba(239, 68, 68, .25); }
+}
+#mic-btn.recording { animation: mic-pulse 1s ease-in-out infinite; border-radius: 9999px; }
+.msg-tts-btn.playing { color: #3b82f6; animation: mic-pulse 1s ease-in-out infinite; }
+
 /* Modal entry animation for every *-modal wrapper (card fades in + lifts). */
 @keyframes modal-in {
   from { opacity: 0; transform: scale(.97) translateY(8px); }
