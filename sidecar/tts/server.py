@@ -2,7 +2,7 @@
 LVChat — Text-to-Speech sidecar
 
 Lightweight FastAPI service wrapping piper-tts for local text-to-speech.
-Uses a small ONNX voice model that auto-downloads on first use.
+Downloads voice model from Hugging Face on first run.
 
 Usage:
     pip install -r requirements.txt
@@ -17,6 +17,7 @@ import io
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -26,7 +27,36 @@ from pydantic import BaseModel
 logger = logging.getLogger("tts-sidecar")
 
 _voice = os.environ.get("TTS_VOICE", "en_US-lessac-medium")
+_model_dir = Path(__file__).parent / "models"
 _synthesizer = None
+
+
+def _download_voice(name: str) -> tuple[Path, Path]:
+    """Download ONNX model + JSON config from Hugging Face if not cached."""
+    _model_dir.mkdir(exist_ok=True)
+    onnx_path = _model_dir / f"{name}.onnx"
+    json_path = _model_dir / f"{name}.onnx.json"
+
+    if onnx_path.exists() and json_path.exists():
+        return onnx_path, json_path
+
+    logger.info("Downloading voice model: %s", name)
+    import urllib.request
+
+    base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium"
+    for filename, dest in [
+        (f"{name}.onnx", onnx_path),
+        (f"{name}.onnx.json", json_path),
+    ]:
+        url = f"{base}/{filename}"
+        logger.info("  %s -> %s", url, dest)
+        try:
+            urllib.request.urlretrieve(url, str(dest))
+        except Exception as e:
+            logger.error("Failed to download %s: %s", url, e)
+            raise
+
+    return onnx_path, json_path
 
 
 @asynccontextmanager
@@ -34,10 +64,12 @@ async def lifespan(app: FastAPI):
     global _synthesizer
     logger.info("Loading TTS voice: %s", _voice)
     try:
+        onnx_path, json_path = _download_voice(_voice)
+
         from piper import PiperVoice
 
-        _synthesizer = PiperVoice.load(_voice)
-        logger.info("Voice loaded successfully")
+        _synthesizer = PiperVoice.load(str(onnx_path), config_path=str(json_path))
+        logger.info("Voice loaded successfully from %s", onnx_path)
     except Exception as e:
         logger.warning("Could not load piper voice '%s': %s. TTS will return 503.", _voice, e)
         _synthesizer = None
@@ -67,7 +99,6 @@ async def synthesize(req: SynthesizeRequest):
     if not text:
         raise HTTPException(status_code=400, detail="Text is empty")
 
-    # Truncate very long text to avoid memory issues
     if len(text) > 5000:
         text = text[:5000]
 
