@@ -29,7 +29,8 @@ logger = logging.getLogger("stt-sidecar")
 # Global model reference — loaded once at startup.
 _model = None
 _model_size = os.environ.get("STT_MODEL", "small")
-_threads = int(os.environ.get("STT_THREADS", "0")) or None
+_threads_raw = os.environ.get("STT_THREADS", "0").strip()
+_threads = int(_threads_raw) if _threads_raw.isdigit() else None
 
 
 @asynccontextmanager

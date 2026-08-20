@@ -15,7 +15,7 @@ fi
 
 export STT_PORT="${STT_PORT:-8787}"
 export STT_MODEL="${STT_MODEL:-small}"
-export STT_THREADS="${STT_THREADS:-}"
+unset STT_THREADS
 
 echo "[stt] Starting on port $STT_PORT (model=$STT_MODEL)..."
 exec "$DIR/venv/bin/uvicorn" server:app --host 127.0.0.1 --port "$STT_PORT" --log-level info
