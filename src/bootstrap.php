@@ -130,6 +130,8 @@ require ROOT . '/src/controllers/OpenClawController.php';
 require ROOT . '/src/controllers/PushController.php';
 require ROOT . '/src/controllers/EmbedController.php';
 require ROOT . '/src/controllers/MessengerController.php';
+require ROOT . '/src/controllers/VoiceController.php';
+require ROOT . '/src/controllers/VoiceAdminController.php';
 require ROOT . '/src/services/LicenseKeys.php';
 require ROOT . '/src/services/LicensingService.php';
 require ROOT . '/src/ModuleLoader.php';

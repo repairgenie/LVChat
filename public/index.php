@@ -231,6 +231,7 @@ $router->get('/admin/voice', [VoiceAdminController::class, 'admin']);
 $router->get('/admin/voice/status', [VoiceAdminController::class, 'status']);
 $router->post('/admin/voice/save', [VoiceAdminController::class, 'save']);
 $router->post('/admin/voice/control', [VoiceAdminController::class, 'control']);
+$router->post('/admin/voice/setup-stream', [VoiceAdminController::class, 'setupStream']);
 $router->post('/admin/voice/start-stream', [VoiceAdminController::class, 'startStream']);
 
 // Incoming webhooks (public, token-authenticated) + admin management

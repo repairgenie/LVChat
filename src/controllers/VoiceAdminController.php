@@ -110,6 +110,162 @@ final class VoiceAdminController
         json_out(['ok' => true, 'results' => $results]);
     }
 
+    /** POST /admin/voice/setup-stream — streaming setup (create venv + install deps). */
+    public static function setupStream(): void
+    {
+        self::requireAdmin();
+        if (!Csrf::bearerAuthorized()) {
+            $sent = $_POST['csrf'] ?? ($_GET['csrf'] ?? '');
+            if (!is_string($sent) || !hash_equals(Csrf::token(), $sent)) {
+                http_response_code(419);
+                exit('CSRF token mismatch');
+            }
+        }
+        $which = (string) ($_POST['which'] ?? ($_GET['which'] ?? ''));
+        if (!in_array($which, ['stt', 'tts', 'all'], true)) {
+            json_out(['error' => 'Invalid sidecar.'], 400);
+        }
+
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        if (!CommandRunner::available()) {
+            echo "[Shell execution is disabled — cannot run setup.]\n";
+            flush();
+            exit;
+        }
+        echo "(via " . CommandRunner::backend() . ")\n\n";
+        flush();
+
+        // Detect OS and package manager once
+        $osInfo = self::detectOs();
+        echo "OS: {$osInfo['name']} | Package manager: {$osInfo['pm']}\n\n";
+
+        $targets = $which === 'all' ? ['stt', 'tts'] : [$which];
+        foreach ($targets as $w) {
+            $dir = ROOT . '/sidecar/' . $w;
+            $name = $w === 'stt' ? 'STT (speech-to-text)' : 'TTS (text-to-speech)';
+            echo "━━━ Setting up {$name} sidecar ━━━\n\n";
+
+            if (!is_dir($dir)) {
+                echo "[error] Directory {$dir} not found. Did you upload the sidecar files?\n\n";
+                continue;
+            }
+
+            $reqFile = $dir . '/requirements.txt';
+            $venvDir = $dir . '/venv';
+            $python = $venvDir . '/bin/python';
+
+            if (!file_exists($python)) {
+                echo "→ Creating virtualenv...\n";
+                flush();
+
+                // Try creating the venv
+                $cmd = "python3 -m venv " . escapeshellarg($venvDir) . " 2>&1";
+                [$code, $output] = CommandRunner::run($cmd, 60);
+                echo $output;
+
+                if ($code !== 0) {
+                    // Detect the specific failure
+                    $needsVenvPkg = (strpos($output, 'ensurepip is not available') !== false)
+                        || (strpos($output, 'No module named venv') !== false)
+                        || (strpos($output, 'python3-venv') !== false);
+
+                    if ($needsVenvPkg) {
+                        echo "\n⚠ python3-venv package is required but not installed.\n\n";
+
+                        $pyVer = self::pythonVersion();
+                        $installCmd = self::venvInstallCommand($pyVer);
+
+                        if ($installCmd !== null) {
+                            echo "→ Attempting to install automatically...\n";
+                            echo "  Running: sudo {$installCmd}\n\n";
+                            flush();
+
+                            $sudoCmd = "echo '{$_SERVER['USER']}' | sudo -S {$installCmd} 2>&1";
+                            [$iCode, $iOutput] = CommandRunner::run($sudoCmd, 120);
+                            echo $iOutput;
+
+                            if ($iCode !== 0) {
+                                echo "\n⚠ Automatic install failed (exit {$iCode}).\n";
+                                echo "  You may need to install it manually:\n\n";
+                                echo "  sudo {$installCmd}\n\n";
+                                echo "  Or install the full venv package for your Python version:\n";
+                                echo "  sudo apt install python{$pyVer}-venv\n\n";
+                                continue;
+                            }
+
+                            echo "✓ Package installed. Retrying virtualenv creation...\n\n";
+                            flush();
+
+                            // Retry venv creation
+                            [$code2, $output2] = CommandRunner::run("python3 -m venv " . escapeshellarg($venvDir) . " 2>&1", 60);
+                            echo $output2;
+                            if ($code2 !== 0) {
+                                echo "\n[error] Virtualenv creation still failed after installing python3-venv.\n";
+                                echo "  Try creating it manually: python3 -m venv {$venvDir}\n\n";
+                                continue;
+                            }
+                            echo "✓ Virtualenv created.\n\n";
+                        } else {
+                            echo "  Could not determine the install command for your system.\n";
+                            echo "  Please install the venv package manually:\n\n";
+                            if ($osInfo['family'] === 'debian' || $osInfo['family'] === 'ubuntu') {
+                                echo "  sudo apt install python{$pyVer}-venv\n";
+                            } elseif ($osInfo['family'] === 'fedora') {
+                                echo "  sudo dnf install python3-virtualenv\n";
+                            } elseif ($osInfo['family'] === 'arch') {
+                                echo "  sudo pacman -S python-virtualenv\n";
+                            } elseif ($osInfo['family'] === 'alpine') {
+                                echo "  apk add python3\n";
+                            } else {
+                                echo "  Consult your distribution's package manager for python3-venv.\n";
+                            }
+                            echo "\n  Then re-run Setup.\n\n";
+                            continue;
+                        }
+                    } else {
+                        echo "\n[error] Failed to create virtualenv (exit {$code}).\n";
+                        echo "  Is python3 installed? Check: python3 --version\n\n";
+                        continue;
+                    }
+                } else {
+                    echo "✓ Virtualenv created.\n\n";
+                }
+            } else {
+                echo "✓ Virtualenv already exists.\n\n";
+            }
+
+            if (file_exists($reqFile)) {
+                echo "→ Installing dependencies from requirements.txt...\n";
+                flush();
+                $pip = $venvDir . '/bin/pip';
+                [$pCode, $pOutput] = CommandRunner::run(
+                    escapeshellarg($pip) . " install --upgrade pip -q 2>&1 && "
+                    . escapeshellarg($pip) . " install -r " . escapeshellarg($reqFile) . " 2>&1",
+                    300
+                );
+                echo $pOutput;
+                if ($pCode !== 0) {
+                    echo "\n[warning] pip install exited with code {$pCode} — some packages may have failed.\n\n";
+                } else {
+                    echo "\n✓ Dependencies installed.\n\n";
+                }
+            } else {
+                echo "✓ No requirements.txt found — skipping dependency install.\n\n";
+            }
+        }
+
+        echo "━━━ Setup complete ━━━\n";
+        echo "You can now start the sidecar(s) with the Start button.\n";
+        log_audit('voice_setup', '', 'streamed for: ' . implode(',', $targets));
+        exit;
+    }
+
     /** POST /admin/voice/start-stream — streaming start output. */
     public static function startStream(): void
     {
@@ -188,7 +344,10 @@ final class VoiceAdminController
         curl_close($ch);
 
         if ($response === false || $error || $httpCode !== 200) {
-            return ['running' => false, 'url' => $baseUrl, 'error' => $error ?: null];
+            // Check if the venv exists — if not, the sidecar needs setup
+            $venvDir = ROOT . '/sidecar/' . $which . '/venv';
+            $needsSetup = !is_dir($venvDir);
+            return ['running' => false, 'url' => $baseUrl, 'error' => $error ?: null, 'needs_setup' => $needsSetup];
         }
 
         $data = json_decode($response, true);
@@ -313,5 +472,100 @@ final class VoiceAdminController
             }
         }
         return array_unique($pids);
+    }
+
+    /** Detect the OS family and package manager. */
+    private static function detectOs(): array
+    {
+        $result = ['name' => PHP_OS_FAMILY, 'family' => strtolower(PHP_OS_FAMILY), 'pm' => 'unknown'];
+
+        if (PHP_OS_FAMILY === 'Linux') {
+            $release = @file_get_contents('/etc/os-release');
+            if ($release !== false) {
+                $parsed = [];
+                foreach (explode("\n", $release) as $line) {
+                    if (str_contains($line, '=')) {
+                        [$k, $v] = explode('=', $line, 2);
+                        $parsed[trim($k)] = trim($v, '"');
+                    }
+                }
+                $result['name'] = $parsed['PRETTY_NAME'] ?? $parsed['NAME'] ?? 'Linux';
+
+                $id = strtolower($parsed['ID'] ?? '');
+                $idLike = strtolower($parsed['ID_LIKE'] ?? '');
+
+                if (in_array($id, ['ubuntu', 'debian', 'linuxmint', 'pop', 'zorin', 'elementary', 'kali', 'raspbian'], true)
+                    || str_contains($idLike, 'debian')
+                    || str_contains($idLike, 'ubuntu')) {
+                    $result['family'] = 'debian';
+                    $result['pm'] = 'apt';
+                } elseif (in_array($id, ['fedora', 'rhel', 'centos', 'rocky', 'alma', 'ol', 'amazon', 'nobara'], true)
+                    || str_contains($idLike, 'rhel')
+                    || str_contains($idLike, 'fedora')) {
+                    $result['family'] = 'fedora';
+                    $result['pm'] = 'dnf';
+                    // CentOS 7 / RHEL 7 still uses yum
+                    if (file_exists('/usr/bin/yum') && !file_exists('/usr/bin/dnf')) {
+                        $result['pm'] = 'yum';
+                    }
+                } elseif ($id === 'arch' || $id === 'manjaro' || str_contains($idLike, 'arch')) {
+                    $result['family'] = 'arch';
+                    $result['pm'] = 'pacman';
+                } elseif ($id === 'alpine') {
+                    $result['family'] = 'alpine';
+                    $result['pm'] = 'apk';
+                } elseif ($id === 'opensuse-leap' || $id === 'opensuse-tumbleweed' || $id === 'sles') {
+                    $result['family'] = 'suse';
+                    $result['pm'] = 'zypper';
+                }
+            }
+        } elseif (PHP_OS_FAMILY === 'Darwin') {
+            $result['family'] = 'macos';
+            $result['pm'] = file_exists('/opt/homebrew/bin/brew') || file_exists('/usr/local/bin/brew') ? 'brew' : 'unknown';
+        }
+
+        return $result;
+    }
+
+    /** Get the Python version string (e.g. "3.12"). */
+    private static function pythonVersion(): string
+    {
+        [$code, $output] = CommandRunner::run('python3 -c "import sys; print(f\'{sys.version_info.major}.{sys.version_info.minor}\')" 2>&1', 5);
+        $ver = trim($output);
+        return preg_match('/^\d+\.\d+$/', $ver) ? $ver : '';
+    }
+
+    /**
+     * Determine the install command for python3-venv based on the OS.
+     * Returns null if we can't determine the command.
+     */
+    private static function venvInstallCommand(string $pyVer): ?string
+    {
+        $os = self::detectOs();
+        $family = $os['family'];
+        $pm = $os['pm'];
+
+        if ($family === 'debian' || $family === 'ubuntu') {
+            // Try the version-specific package first, then the unversioned one
+            return "apt install -y python{$pyVer}-venv || apt install -y python3-venv";
+        }
+        if ($family === 'fedora') {
+            return "dnf install -y python3-virtualenv";
+        }
+        if ($family === 'arch') {
+            return "pacman -S --noconfirm python-virtualenv";
+        }
+        if ($family === 'alpine') {
+            return "apk add python3";
+        }
+        if ($family === 'suse') {
+            return "zypper install -y python3-virtualenv";
+        }
+        if ($family === 'macos') {
+            // macOS usually has venv built-in, but if not, python3 comes from Xcode or Homebrew
+            return null;
+        }
+
+        return null;
     }
 }

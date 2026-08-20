@@ -68,7 +68,7 @@ require ROOT . '/views/admin/_page_header.php';
 <!-- ── Sidecar control panel ────────────────────────────────────────────── -->
 <div class="card p-6 max-w-2xl mt-6 space-y-4">
   <h3 class="text-sm font-bold text-white">Sidecar processes</h3>
-  <p class="text-xs text-discord-400">The STT and TTS sidecars are Python services that run locally. Start them here, or run <code class="font-mono">bash bin/start-sidecars.sh</code> from SSH.</p>
+  <p class="text-xs text-discord-400">The STT and TTS sidecars are Python services that run locally. Click <strong class="text-amber-400">Setup</strong> first to create the Python virtualenv and install dependencies, then <strong class="text-green-400">Start</strong> to launch. You can also run <code class="font-mono">bash bin/start-sidecars.sh</code> from SSH.</p>
 
   <div class="grid grid-cols-2 gap-4">
     <!-- STT -->
@@ -85,6 +85,7 @@ require ROOT . '/views/admin/_page_header.php';
       </div>
       <div id="stt-model" class="text-[11px] text-discord-500 mb-3"></div>
       <div class="flex items-center gap-2">
+        <button type="button" id="stt-btn-setup" class="btn bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold">Setup</button>
         <button type="button" id="stt-btn-start" class="btn bg-green-600/80 hover:bg-green-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Start</button>
         <button type="button" id="stt-btn-stop" class="btn bg-red-600/80 hover:bg-red-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Stop</button>
       </div>
@@ -104,6 +105,7 @@ require ROOT . '/views/admin/_page_header.php';
       </div>
       <div id="tts-model" class="text-[11px] text-discord-500 mb-3"></div>
       <div class="flex items-center gap-2">
+        <button type="button" id="tts-btn-setup" class="btn bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold">Setup</button>
         <button type="button" id="tts-btn-start" class="btn bg-green-600/80 hover:bg-green-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Start</button>
         <button type="button" id="tts-btn-stop" class="btn bg-red-600/80 hover:bg-red-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled>Stop</button>
       </div>
@@ -111,6 +113,7 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
 
   <div class="flex items-center gap-2 pt-2">
+    <button type="button" id="voice-btn-setup-all" class="btn bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold">Setup all</button>
     <button type="button" id="voice-btn-start-all" class="btn bg-green-600/80 hover:bg-green-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Start all</button>
     <button type="button" id="voice-btn-stop-all" class="btn bg-red-600/80 hover:bg-red-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Stop all</button>
     <button type="button" id="voice-btn-refresh" class="btn bg-discord-600 hover:bg-discord-500 text-white rounded-lg px-3 py-1.5 text-xs font-semibold" title="Refresh status">Refresh</button>
@@ -182,6 +185,13 @@ require ROOT . '/views/admin/_page_header.php';
       mdl.textContent = parts.length ? parts.join(' · ') : '';
       startBtn.disabled = true;
       stopBtn.disabled = false;
+    } else if (s.needs_setup) {
+      dot.className = 'w-2 h-2 rounded-full bg-amber-500';
+      txt.textContent = 'Needs setup';
+      txt.className = 'text-amber-400 font-semibold';
+      mdl.textContent = 'Run Setup first to install dependencies';
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
     } else {
       dot.className = 'w-2 h-2 rounded-full bg-red-500';
       txt.textContent = 'Stopped';
@@ -254,6 +264,46 @@ require ROOT . '/views/admin/_page_header.php';
 
   sttStart.addEventListener('click', function () { streamStart('stt'); });
   ttsStart.addEventListener('click', function () { streamStart('tts'); });
+
+  function streamSetup(which) {
+    var label = which === 'all' ? 'all sidecars' : (which === 'stt' ? 'STT (speech-to-text)' : 'TTS (text-to-speech)');
+    var out = openModal('Setting up ' + label + '…');
+    if (!out) return;
+    out.textContent += '$ Setting up ' + label + '…\n';
+    var fd = new FormData();
+    fd.append('csrf', csrf);
+    fd.append('which', which);
+    fetch('/admin/voice/setup-stream', { method: 'POST', body: fd })
+      .then(function (r) {
+        if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+        return r.body.getReader();
+      })
+      .then(function (reader) {
+        var decoder = new TextDecoder();
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) {
+              out.textContent += '\nSetup complete. You can now start the sidecar(s).\n';
+              return;
+            }
+            out.textContent += decoder.decode(res.value, { stream: true });
+            out.scrollTop = out.scrollHeight;
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function (err) {
+        out.textContent += '\n[error: ' + (err && err.message ? err.message : 'request failed') + ']';
+      });
+  }
+
+  var sttSetup = document.getElementById('stt-btn-setup');
+  var ttsSetup = document.getElementById('tts-btn-setup');
+  var setupAll = document.getElementById('voice-btn-setup-all');
+  if (sttSetup) sttSetup.addEventListener('click', function () { streamSetup('stt'); });
+  if (ttsSetup) ttsSetup.addEventListener('click', function () { streamSetup('tts'); });
+  if (setupAll) setupAll.addEventListener('click', function () { streamSetup('all'); });
 
   sttStop.addEventListener('click', function () {
     showOutput('Stopping STT sidecar…');
