@@ -1,0 +1,6 @@
+#!/home/george/Documents/chat.lasvegasbestinternet.com/sidecar/stt/venv/bin/python
+import sys
+from ctranslate2.converters.transformers import main
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(main())

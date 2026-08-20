@@ -13,19 +13,29 @@ if [ ! -d "$DIR/venv" ]; then
   echo "[stt] Dependencies installed."
 fi
 
-# Kill any existing process on the target port
+# Kill any existing process on the target port (try lsof, fall back to ss/fuser)
 kill_port() {
   local port="$1"
-  local pids
-  pids=$(lsof -ti :"$port" 2>/dev/null || true)
+  local pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+  elif command -v fuser >/dev/null 2>&1; then
+    pids=$(fuser "$port/tcp" 2>/dev/null | tr -s ' ' || true)
+  elif command -v ss >/dev/null 2>&1; then
+    pids=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K\d+' || true)
+  fi
   if [ -n "$pids" ]; then
     echo "[stt] Killing existing process(es) on port $port (PIDs: $pids)..."
-    kill $pids 2>/dev/null || true
+    echo "$pids" | xargs kill 2>/dev/null || true
     sleep 1
     # Force kill if still alive
-    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if command -v lsof >/dev/null 2>&1; then
+      pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    elif command -v fuser >/dev/null 2>&1; then
+      pids=$(fuser "$port/tcp" 2>/dev/null | tr -s ' ' || true)
+    fi
     if [ -n "$pids" ]; then
-      kill -9 $pids 2>/dev/null || true
+      echo "$pids" | xargs kill -9 2>/dev/null || true
       sleep 1
     fi
   fi
@@ -37,7 +47,15 @@ find_free_port() {
   local port="$preferred"
   local max=$((preferred + 20))
   while [ "$port" -le "$max" ]; do
-    if ! lsof -i :"$port" >/dev/null 2>&1; then
+    local in_use=false
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -i :"$port" >/dev/null 2>&1 && in_use=true
+    elif command -v ss >/dev/null 2>&1; then
+      ss -tln "sport = :$port" 2>/dev/null | grep -q ":$port" && in_use=true
+    elif command -v fuser >/dev/null 2>&1; then
+      fuser "$port/tcp" >/dev/null 2>&1 && in_use=true
+    fi
+    if [ "$in_use" = false ]; then
       echo "$port"
       return 0
     fi

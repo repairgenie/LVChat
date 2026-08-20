@@ -67,10 +67,14 @@ final class VoiceAdminController
         $stt = self::sidecarStatus('stt');
         $tts = self::sidecarStatus('tts');
 
-        // Probe port availability for common ranges
+        // Probe port availability (best-effort — don't let failures kill the response)
         $ports = [];
-        foreach ([8787, 8788, 8789, 8790, 8791, 8792, 8793, 8794, 8795] as $p) {
-            $ports[$p] = self::portFree($p);
+        try {
+            foreach ([8787, 8788, 8789, 8790, 8791, 8792, 8793, 8794, 8795] as $p) {
+                $ports[$p] = self::portFree($p);
+            }
+        } catch (\Throwable $e) {
+            // Port probing failed — return status without ports
         }
 
         json_out([
@@ -440,36 +444,44 @@ final class VoiceAdminController
         $baseUrl = rtrim((string) config_get($urlKey, $defaultUrl), '/');
         $healthUrl = $baseUrl . '/health';
 
-        $ch = curl_init($healthUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 3,
-            CURLOPT_CONNECTTIMEOUT => 2,
-        ]);
-        $response = curl_exec($ch);
-        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
+        $venvDir = ROOT . '/sidecar/' . $which . '/venv';
+        $needsSetup = !is_dir($venvDir);
 
-        if ($response === false || $error || $httpCode !== 200) {
-            // Check if the venv exists — if not, the sidecar needs setup
-            $venvDir = ROOT . '/sidecar/' . $which . '/venv';
-            $needsSetup = !is_dir($venvDir);
-            return ['running' => false, 'url' => $baseUrl, 'error' => $error ?: null, 'needs_setup' => $needsSetup];
+        try {
+            $ch = curl_init($healthUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 3,
+                CURLOPT_CONNECTTIMEOUT => 2,
+            ]);
+            $response = curl_exec($ch);
+            $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+
+            if ($response === false || $error || $httpCode !== 200) {
+                return ['running' => false, 'url' => $baseUrl, 'error' => $error ?: null, 'needs_setup' => $needsSetup];
+            }
+
+            $data = json_decode($response, true);
+            return [
+                'running' => true,
+                'url'     => $baseUrl,
+                'model'   => $data['model'] ?? $data['voice'] ?? null,
+                'device'  => $data['device'] ?? null,
+            ];
+        } catch (\Throwable $e) {
+            return ['running' => false, 'url' => $baseUrl, 'error' => $e->getMessage(), 'needs_setup' => $needsSetup];
         }
-
-        $data = json_decode($response, true);
-        return [
-            'running' => true,
-            'url'     => $baseUrl,
-            'model'   => $data['model'] ?? $data['voice'] ?? null,
-            'device'  => $data['device'] ?? null,
-        ];
     }
 
     /** Check if a TCP port is free (not in use). */
     private static function portFree(int $port): bool
     {
+        if (!function_exists('stream_socket_server')) {
+            // Can't probe — assume free
+            return true;
+        }
         $sock = @stream_socket_server("tcp://127.0.0.1:{$port}", $errno, $errstr, STREAM_SERVER_BIND);
         if ($sock) {
             fclose($sock);
