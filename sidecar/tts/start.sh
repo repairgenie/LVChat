@@ -4,6 +4,16 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# If venv exists but was created on a different machine, rebuild it
+if [ -d "$DIR/venv" ] && [ -f "$DIR/venv/bin/python" ]; then
+  VENV_PYTHON=$("$DIR/venv/bin/python" -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
+  REAL_PYTHON=$(command -v python3 || echo "")
+  if [ -n "$VENV_PYTHON" ] && [ "$VENV_PYTHON" != "$REAL_PYTHON" ]; then
+    echo "[tts] Venv was built with $VENV_PYTHON (expected $REAL_PYTHON) — rebuilding..."
+    rm -rf "$DIR/venv"
+  fi
+fi
+
 if [ ! -d "$DIR/venv" ]; then
   echo "[tts] Creating virtualenv..."
   python3 -m venv "$DIR/venv"
