@@ -126,6 +126,10 @@ final class VoiceAdminController
             json_out(['error' => 'Invalid sidecar.'], 400);
         }
 
+        // Prevent any PHP warnings/notices from breaking the streaming response
+        error_reporting(E_ERROR | E_PARSE);
+        ini_set('display_errors', '0');
+
         header('Content-Type: text/plain; charset=utf-8');
         header('Cache-Control: no-cache');
         header('X-Accel-Buffering: no');
@@ -144,15 +148,18 @@ final class VoiceAdminController
         // Detect OS and package manager once
         $osInfo = self::detectOs();
         echo "OS: {$osInfo['name']} | Package manager: {$osInfo['pm']}\n\n";
+        flush();
 
         $targets = $which === 'all' ? ['stt', 'tts'] : [$which];
         foreach ($targets as $w) {
             $dir = ROOT . '/sidecar/' . $w;
             $name = $w === 'stt' ? 'STT (speech-to-text)' : 'TTS (text-to-speech)';
             echo "━━━ Setting up {$name} sidecar ━━━\n\n";
+            flush();
 
             if (!is_dir($dir)) {
                 echo "[error] Directory {$dir} not found. Did you upload the sidecar files?\n\n";
+                flush();
                 continue;
             }
 
@@ -160,23 +167,37 @@ final class VoiceAdminController
             $venvDir = $dir . '/venv';
             $python = $venvDir . '/bin/python';
 
-            if (!file_exists($python)) {
+            // Check if venv exists and is complete
+            $venvExists = file_exists($python);
+            $pipExists = file_exists($venvDir . '/bin/pip');
+
+            if ($venvExists && !$pipExists) {
+                echo "→ Removing incomplete virtualenv (pip missing)...\n";
+                flush();
+                CommandRunner::run("rm -rf " . escapeshellarg($venvDir), 10);
+                echo "✓ Cleaned up.\n\n";
+                flush();
+                $venvExists = false;
+            }
+
+            if (!$venvExists) {
                 echo "→ Creating virtualenv...\n";
                 flush();
 
-                // Try creating the venv
-                $cmd = "python3 -m venv " . escapeshellarg($venvDir) . " 2>&1";
-                [$code, $output] = CommandRunner::run($cmd, 60);
-                echo $output;
+                [$code, $output] = CommandRunner::run("python3 -m venv " . escapeshellarg($venvDir) . " 2>&1", 60);
+                if ($output !== '') {
+                    echo $output . "\n";
+                    flush();
+                }
 
                 if ($code !== 0) {
-                    // Detect the specific failure
-                    $needsVenvPkg = (strpos($output, 'ensurepip is not available') !== false)
-                        || (strpos($output, 'No module named venv') !== false)
-                        || (strpos($output, 'python3-venv') !== false);
+                    $needsVenvPkg = (strpos((string) $output, 'ensurepip is not available') !== false)
+                        || (strpos((string) $output, 'No module named venv') !== false)
+                        || (strpos((string) $output, 'python3-venv') !== false);
 
                     if ($needsVenvPkg) {
                         echo "\n⚠ python3-venv package is required but not installed.\n\n";
+                        flush();
 
                         $pyVer = self::pythonVersion();
                         $installCmd = self::venvInstallCommand($pyVer);
@@ -186,31 +207,39 @@ final class VoiceAdminController
                             echo "  Running: sudo {$installCmd}\n\n";
                             flush();
 
-                            $sudoCmd = "echo '{$_SERVER['USER']}' | sudo -S {$installCmd} 2>&1";
+                            // Use -S with a fresh stdin to avoid password prompts hanging
+                            $sudoCmd = "sudo -n {$installCmd} 2>&1 || (echo 'sudo requires a password — please install manually: sudo {$installCmd}' && exit 1)";
                             [$iCode, $iOutput] = CommandRunner::run($sudoCmd, 120);
-                            echo $iOutput;
+                            if ($iOutput !== '') {
+                                echo $iOutput . "\n";
+                                flush();
+                            }
 
                             if ($iCode !== 0) {
                                 echo "\n⚠ Automatic install failed (exit {$iCode}).\n";
-                                echo "  You may need to install it manually:\n\n";
+                                echo "  Please install manually:\n\n";
                                 echo "  sudo {$installCmd}\n\n";
-                                echo "  Or install the full venv package for your Python version:\n";
-                                echo "  sudo apt install python{$pyVer}-venv\n\n";
+                                echo "  Then re-run Setup.\n\n";
+                                flush();
                                 continue;
                             }
 
                             echo "✓ Package installed. Retrying virtualenv creation...\n\n";
                             flush();
 
-                            // Retry venv creation
                             [$code2, $output2] = CommandRunner::run("python3 -m venv " . escapeshellarg($venvDir) . " 2>&1", 60);
-                            echo $output2;
+                            if ($output2 !== '') {
+                                echo $output2 . "\n";
+                                flush();
+                            }
                             if ($code2 !== 0) {
                                 echo "\n[error] Virtualenv creation still failed after installing python3-venv.\n";
                                 echo "  Try creating it manually: python3 -m venv {$venvDir}\n\n";
+                                flush();
                                 continue;
                             }
                             echo "✓ Virtualenv created.\n\n";
+                            flush();
                         } else {
                             echo "  Could not determine the install command for your system.\n";
                             echo "  Please install the venv package manually:\n\n";
@@ -226,37 +255,93 @@ final class VoiceAdminController
                                 echo "  Consult your distribution's package manager for python3-venv.\n";
                             }
                             echo "\n  Then re-run Setup.\n\n";
+                            flush();
                             continue;
                         }
                     } else {
                         echo "\n[error] Failed to create virtualenv (exit {$code}).\n";
                         echo "  Is python3 installed? Check: python3 --version\n\n";
+                        flush();
                         continue;
                     }
                 } else {
                     echo "✓ Virtualenv created.\n\n";
+                    flush();
                 }
             } else {
                 echo "✓ Virtualenv already exists.\n\n";
+                flush();
+            }
+
+            // Ensure pip is available inside the venv
+            $pipScript = $venvDir . '/bin/pip';
+            if (!file_exists($pipScript)) {
+                echo "→ pip not found in venv — bootstrapping with ensurepip...\n";
+                flush();
+                [$eCode, $eOutput] = CommandRunner::run(
+                    escapeshellarg($venvDir . '/bin/python') . " -m ensurepip --upgrade 2>&1",
+                    30
+                );
+                if ($eOutput !== '') {
+                    echo $eOutput . "\n";
+                    flush();
+                }
+                if ($eCode !== 0 || !file_exists($pipScript)) {
+                    echo "\n⚠ ensurepip failed. Trying get-pip.py fallback...\n";
+                    flush();
+
+                    // Check if curl is available
+                    [$curlCheck, ] = CommandRunner::run("which curl 2>/dev/null", 5);
+                    if (trim((string) $curlCheck) !== '') {
+                        [$gCode, $gOutput] = CommandRunner::run(
+                            "curl -sSL https://bootstrap.pypa.io/get-pip.py 2>&1 | "
+                            . escapeshellarg($venvDir . '/bin/python') . " 2>&1",
+                            60
+                        );
+                        if ($gOutput !== '') {
+                            echo $gOutput . "\n";
+                            flush();
+                        }
+                    } else {
+                        echo "  curl not found — cannot download get-pip.py.\n";
+                        flush();
+                    }
+
+                    if (!file_exists($pipScript)) {
+                        echo "\n[error] Could not install pip automatically.\n";
+                        echo "  Please install it manually, then re-run Setup:\n\n";
+                        echo "  sudo apt install python3-pip\n";
+                        echo "  — or —\n";
+                        echo "  curl https://bootstrap.pypa.io/get-pip.py | {$venvDir}/bin/python\n\n";
+                        flush();
+                        continue;
+                    }
+                }
+                echo "✓ pip bootstrapped.\n\n";
+                flush();
             }
 
             if (file_exists($reqFile)) {
                 echo "→ Installing dependencies from requirements.txt...\n";
                 flush();
-                $pip = $venvDir . '/bin/pip';
                 [$pCode, $pOutput] = CommandRunner::run(
-                    escapeshellarg($pip) . " install --upgrade pip -q 2>&1 && "
-                    . escapeshellarg($pip) . " install -r " . escapeshellarg($reqFile) . " 2>&1",
+                    escapeshellarg($venvDir . '/bin/python') . " -m pip install --upgrade pip -q 2>&1 && "
+                    . escapeshellarg($venvDir . '/bin/python') . " -m pip install -r " . escapeshellarg($reqFile) . " 2>&1",
                     300
                 );
-                echo $pOutput;
+                if ($pOutput !== '') {
+                    echo $pOutput . "\n";
+                    flush();
+                }
                 if ($pCode !== 0) {
                     echo "\n[warning] pip install exited with code {$pCode} — some packages may have failed.\n\n";
                 } else {
                     echo "\n✓ Dependencies installed.\n\n";
                 }
+                flush();
             } else {
                 echo "✓ No requirements.txt found — skipping dependency install.\n\n";
+                flush();
             }
         }
 
