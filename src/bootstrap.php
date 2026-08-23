@@ -272,7 +272,16 @@ define('CSP_NONCE', $__cspNonce);
 // Security headers: CSP (restrictive baseline) and clickjacking protection.
 // The nonce replaces 'unsafe-inline' for scripts. 'unsafe-eval' is removed.
 // Styles still use 'unsafe-inline' (Tailwind inline styles).
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'nonce-{$__cspNonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+$__wsOrigin = '';
+if (class_exists('Realtime') && Realtime::enabled()) {
+    $__wsUrl = Realtime::clientUrl();
+    $__wsParsed = parse_url($__wsUrl);
+    if (!empty($__wsParsed['scheme']) && !empty($__wsParsed['host'])) {
+        $__wsOrigin = $__wsParsed['scheme'] . '://' . $__wsParsed['host'] . (!empty($__wsParsed['port']) ? ':' . $__wsParsed['port'] : '');
+    }
+}
+$__connectSrc = "'self'" . ($__wsOrigin !== '' ? " {$__wsOrigin}" : '');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'nonce-{$__cspNonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src {$__connectSrc}; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
 header("X-Content-Type-Options: nosniff");
 header("Referrer-Policy: strict-origin-when-cross-origin");
 
