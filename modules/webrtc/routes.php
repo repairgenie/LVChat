@@ -26,10 +26,10 @@
 
 return static function (Router $router): void {
     // Channel voice + shared status.
-    $router->get('/api/webrtc/voice/status', [VoiceController::class, 'status']);
-    $router->post('/api/webrtc/voice/join', [VoiceController::class, 'join']);
-    $router->post('/api/webrtc/voice/leave', [VoiceController::class, 'leave']);
-    $router->post('/api/webrtc/voice/channel-voice', [VoiceController::class, 'channelVoice']);
+    $router->get('/api/webrtc/voice/status', [WebRTCVoiceController::class, 'status']);
+    $router->post('/api/webrtc/voice/join', [WebRTCVoiceController::class, 'join']);
+    $router->post('/api/webrtc/voice/leave', [WebRTCVoiceController::class, 'leave']);
+    $router->post('/api/webrtc/voice/channel-voice', [WebRTCVoiceController::class, 'channelVoice']);
 
     // Echo test (mic + server verification).
     $router->post('/api/webrtc/voice/echo-test', [EchoTestController::class, 'test']);
@@ -53,11 +53,12 @@ return static function (Router $router): void {
     $router->post('/api/events/create', [EventController::class, 'create']);
     $router->post('/api/events/invite', [EventController::class, 'inviteEmails']);
     $router->post('/api/events/cancel', [EventController::class, 'cancel']);
+    $router->post('/api/events/end', [EventController::class, 'end']);
     $router->get('/api/events/list', [EventController::class, 'listEvents']);
     $router->get('/e/{token}', [EventController::class, 'inviteLanding']);
     $router->get('/event/{slug}', [EventController::class, 'landing']);
 
     // Admin.
-    $router->get('/admin/voice', [AdminVoiceController::class, 'admin']);
-    $router->post('/admin/voice/save', [AdminVoiceController::class, 'save']);
+    $router->get('/admin/webrtc', [AdminVoiceController::class, 'admin']);
+    $router->post('/admin/webrtc/save', [AdminVoiceController::class, 'save']);
 };

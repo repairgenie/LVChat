@@ -31,7 +31,7 @@
 if (!class_exists('LiveKitService')) {
     require __DIR__ . '/LiveKitService.php';
 }
-if (!class_exists('VoiceController')) {
+if (!class_exists('WebRTCVoiceController')) {
     require __DIR__ . '/VoiceController.php';
 }
 if (!class_exists('CallController')) {

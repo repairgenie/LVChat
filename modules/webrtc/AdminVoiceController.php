@@ -104,7 +104,7 @@ final class AdminVoiceController
 
         log_audit('voice_settings', null, 'saved by ' . (Auth::user()['username'] ?? 'admin'));
         flash('Voice settings saved.');
-        redirect('/admin/voice');
+        redirect('/admin/webrtc');
     }
 
     /** Persist the non-secret voice fields (shared by save + autoconfigure). */
@@ -215,7 +215,7 @@ final class AdminVoiceController
 
         log_audit('voice_settings', null, 'autoconfigured livekit keys by ' . (Auth::user()['username'] ?? 'admin'));
         flash($msg);
-        redirect('/admin/voice');
+        redirect('/admin/webrtc');
     }
 
     private static function generateApiKey(): string

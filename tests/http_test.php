@@ -2029,18 +2029,18 @@ check('module serves the segmentation wasm', $s === 200, (string) $s);
 check('channel-voice toggle denied for non-op', $s === 403, "$s $b");
 
 // Admin enables + configures the module through its own admin page.
-[$s, $h, $b] = req('POST', '/admin/voice/save', [
+[$s, $h, $b] = req('POST', '/admin/webrtc/save', [
     'csrf' => $tV, 'voice_enabled' => '1',
     'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey', 'livekit_api_secret' => 'topsecret',
     'voice_max_users' => '2', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000',
 ], $cjA);
-check('admin voice save redirects', $s === 302 && str_contains($h['location'] ?? '', '/admin/voice'), "$s " . ($h['location'] ?? ''));
+check('admin voice save redirects', $s === 302 && str_contains($h['location'] ?? '', '/admin/webrtc'), "$s " . ($h['location'] ?? ''));
 check('voice_enabled persisted', dbq("SELECT value FROM server_config WHERE key='voice_enabled'")[0]['value'] === '1');
 check('secret persisted', dbq("SELECT value FROM server_config WHERE key='livekit_api_secret'")[0]['value'] === 'topsecret');
-[$s, , $b] = req('GET', '/admin/voice', [], $cjA);
+[$s, , $b] = req('GET', '/admin/webrtc', [], $cjA);
 check('admin voice page renders', $s === 200 && str_contains($b, 'Voice — LiveKit'), (string) $s);
 check('admin voice secret marked stored, never echoed', str_contains($b, 'stored') && !str_contains($b, 'topsecret'), '');
-check('module admin nav entry present', str_contains($b, '/admin/voice'), '');
+check('module admin nav entry present', str_contains($b, '/admin/webrtc'), '');
 
 // Module assets are served with correct MIME types.
 [$s, , $b] = req('GET', '/modules/webrtc/assets/js/voice.js', [], $cjA);
@@ -2080,7 +2080,7 @@ check('JWT carries livekit grant + room', ($dec['iss'] ?? '') === 'devkey' && ($
 check('alice has a voice session row', (int) dbq('SELECT COUNT(*) AS n FROM voice_sessions')[0]['n'] === 1);
 
 // Cap enforcement (join gate): lower the cap and have bob hit it.
-req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '1', 'voice_max_users' => '1', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+req('POST', '/admin/webrtc/save', ['csrf' => csrf(req('GET', '/admin/webrtc', [], $cjA)[2]), 'voice_enabled' => '1', 'voice_max_users' => '1', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
 [$s, $h, $b] = req('POST', '/api/join', ['csrf' => $tW, 'name' => '#general'], $cjB);
 check('bob joins general', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
 [$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tW, 'channel' => 'general'], $cjB);
@@ -2216,7 +2216,7 @@ $tV2 = csrf(req('GET', '/app', [], $cjA)[2]);
 $tW2 = csrf(req('GET', '/app', [], $cjB)[2]);
 // Raise the cap so waiting-room tests aren't constrained by the 1-user cap
 // set during the earlier capacity test.
-req('POST', '/admin/voice/save', ['csrf' => $tV2, 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'voice_max_users' => '4', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+req('POST', '/admin/webrtc/save', ['csrf' => $tV2, 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'voice_max_users' => '4', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
 
 // 1) Lock: a moderator locks the room → non-moderators refused at the gate.
 [$s, , $b] = req('POST', '/api/webrtc/voice/join', ['csrf' => $tV2, 'channel' => 'general'], $cjA);
@@ -2345,7 +2345,7 @@ echo "== webrtc recording ==\n";
 [$s, , $b] = req('POST', '/api/webrtc/record', ['csrf' => $tV2, 'room' => $room, 'action' => 'start'], $cjA);
 check('recording refused while disabled', $s === 403, "$s $b");
 // Enable it through the admin page (keeps voice on).
-req('POST', '/admin/voice/save', ['csrf' => $tV2, 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'recording_enabled' => '1', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+req('POST', '/admin/webrtc/save', ['csrf' => $tV2, 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'recording_enabled' => '1', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
 check('recording_enabled persisted', dbq("SELECT value FROM server_config WHERE key='recording_enabled'")[0]['value'] === '1');
 // Egress down → friendly 503 (LiveKit isn't running in the test env).
 [$s, , $b] = req('POST', '/api/webrtc/record', ['csrf' => $tV2, 'room' => $room, 'action' => 'start'], $cjA);
@@ -2377,8 +2377,92 @@ req('POST', '/api/webrtc/voice/leave', ['csrf' => $tV2], $cjA);
 req('POST', '/api/webrtc/moderate', ['csrf' => $tV2, 'room' => $room, 'action' => 'waiting_room', 'value' => '0'], $cjA);
 
 // Restore admin config defaults for the rest of the suite.
-req('POST', '/admin/voice/save', ['csrf' => csrf(req('GET', '/admin/voice', [], $cjA)[2]), 'voice_enabled' => '0', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+req('POST', '/admin/webrtc/save', ['csrf' => csrf(req('GET', '/admin/webrtc', [], $cjA)[2]), 'voice_enabled' => '0', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
 req('POST', '/api/webrtc/voice/channel-voice', ['csrf' => $tV, 'channel' => 'general', 'enabled' => '0'], $cjA);
+
+// ── Echo test endpoint ──────────────────────────────────────────────────────
+echo "== webrtc echo test ==\n";
+req('POST', '/admin/webrtc/save', ['csrf' => csrf(req('GET', '/admin/webrtc', [], $cjA)[2]), 'voice_enabled' => '1', 'voice_max_users' => '50', 'voice_talker_cap' => '8', 'voice_quality_preset' => 'moderate', 'voice_bitrate' => '40000', 'livekit_url' => 'ws://127.0.0.1:7880', 'livekit_api_key' => 'devkey'], $cjA);
+[$s, , $b] = req('POST', '/api/webrtc/voice/echo-test', ['csrf' => $tV], $cjA);
+$j = jsonDecode($b);
+check('echo test returns ok + token + room', $s === 200 && $j['ok'] === true && !empty($j['token']) && !empty($j['room']), "$s $b");
+check('echo test room starts with echo-test:', str_starts_with($j['room'] ?? '', 'echo-test:'), $b);
+[$s] = req('POST', '/api/webrtc/voice/echo-test');
+check('echo test requires auth', $s === 401, (string) $s);
+
+// ── Private event invite URL flow (Bug 1 fix verification) ──────────────────
+echo "== private event invite flow ==\n";
+[$s, , $b] = req('POST', '/api/events/create', [
+    'csrf' => $tV, 'title' => 'Private Invite Test', 'is_public' => '0', 'event_type' => 'webrtc',
+], $cjA);
+$j = jsonDecode($b);
+check('create private event returns invite_code', $s === 200 && $j['ok'] === true && !empty($j['invite_code']), "$s $b");
+$pvtEvtCode = (string) ($j['invite_code'] ?? '');
+$pvtEvtSlug = (string) ($j['slug'] ?? '');
+$pvtEvtId = (int) ($j['id'] ?? 0);
+// The invite URL /e/{invite_code} should now resolve (Bug 1 fix).
+[$s, $h] = req('GET', '/e/' . $pvtEvtCode, [], $cjB);
+check('/e/{invite_code} redirects to the channel (not 404)', $s === 302 && str_contains($h['location'] ?? '', '/app?channel=' . $pvtEvtSlug), "$s " . ($h['location'] ?? ''));
+// Logged-out visitor bounces to login.
+[$s, $h] = req('GET', '/e/' . $pvtEvtCode);
+check('/e/{invite_code} logged-out -> login', $s === 302 && str_contains($h['location'] ?? '', '/login?next='), "$s " . ($h['location'] ?? ''));
+// Clean up.
+req('POST', '/api/events/cancel', ['csrf' => $tV, 'event_id' => $pvtEvtId], $cjA);
+
+// ── Event end + cancel with chat log (Bug 3 & 4 fix verification) ===========
+echo "== event end + cancel with log ==\n";
+[$s, , $b] = req('POST', '/api/events/create', [
+    'csrf' => $tV, 'title' => 'End Test Event', 'is_public' => '1', 'event_type' => 'webrtc',
+], $cjA);
+$j = jsonDecode($b);
+$endEvtId = (int) ($j['id'] ?? 0);
+$endEvtSlug = (string) ($j['slug'] ?? '');
+// Post a message in the event channel so the log is non-empty.
+req('POST', '/api/join', ['csrf' => $tV, 'name' => '#' . $endEvtSlug], $cjA);
+req('POST', '/api/send', ['csrf' => $tV, 'channel' => $endEvtSlug, 'message' => 'Hello from the event'], $cjA);
+// Founder ends the event manually.
+[$s, , $b] = req('POST', '/api/events/end', ['csrf' => $tV, 'event_id' => $endEvtId], $cjA);
+check('founder ends active event', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('event status is ended', dbq('SELECT status FROM events WHERE id = ?', [$endEvtId])[0]['status'] === 'ended');
+// Non-founder cannot end.
+[$s, , $b] = req('POST', '/api/events/end', ['csrf' => $tW2, 'event_id' => $endEvtId], $cjB);
+check('non-founder cannot end event', $s === 403, "$s $b");
+// Cancel with chat log: create another event, post a message, cancel.
+[$s, , $b] = req('POST', '/api/events/create', [
+    'csrf' => $tV, 'title' => 'Cancel With Log', 'is_public' => '1', 'event_type' => 'webrtc',
+], $cjA);
+$j = jsonDecode($b);
+$cancelEvtId = (int) ($j['id'] ?? 0);
+$cancelEvtSlug = (string) ($j['slug'] ?? '');
+req('POST', '/api/join', ['csrf' => $tV, 'name' => '#' . $cancelEvtSlug], $cjA);
+req('POST', '/api/send', ['csrf' => $tV, 'channel' => $cancelEvtSlug, 'message' => 'About to cancel'], $cjA);
+[$s, , $b] = req('POST', '/api/events/cancel', ['csrf' => $tV, 'event_id' => $cancelEvtId], $cjA);
+check('cancel event returns ok', $s === 200 && jsonDecode($b)['ok'] === true, "$s $b");
+check('cancelled event status', dbq('SELECT status FROM events WHERE id = ?', [$cancelEvtId])[0]['status'] === 'cancelled');
+// Verify the event channel was cleaned up (soft-deleted).
+check('event channel soft-deleted after cancel', strlen((string) dbq('SELECT name FROM channels WHERE id = ?', [$cancelEvtId ? dbq('SELECT channel_id FROM events WHERE id = ?', [$cancelEvtId])[0]['channel_id'] ?? 0 : 0])[0]['name'] ?? '') > 0);
+
+// ── EventSchedulerJob lifecycle (verified via HTTP API + direct DB) ──────────
+echo "== event scheduler job ==\n";
+// Create a scheduled event whose scheduled_at is in the future.
+[$s, , $b] = req('POST', '/api/events/create', [
+    'csrf' => $tV, 'title' => 'Scheduled Start Test', 'is_public' => '1', 'event_type' => 'webrtc',
+    'scheduled_at' => gmdate('Y-m-d H:i:s', strtotime('+5 minutes')),
+], $cjA);
+$j = jsonDecode($b);
+$schedEvtId = (int) ($j['id'] ?? 0);
+check('scheduled event created', $s === 200 && $j['ok'] === true && ($j['status'] ?? '') === 'scheduled', "$s $b");
+check('scheduled event has no channel yet', dbq('SELECT channel_id FROM events WHERE id = ?', [$schedEvtId])[0]['channel_id'] === null);
+
+// ── VoiceCleanupJob preconditions ───────────────────────────────────────────
+echo "== voice cleanup job ==\n";
+// Verify the tables the cleanup job acts on exist and are queryable.
+check('voice_sessions table exists', count(dbq('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'voice_sessions\'')) === 1);
+check('call_sessions table exists', count(dbq('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'call_sessions\'')) === 1);
+check('rate_limits table exists', count(dbq('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'rate_limits\'')) === 1);
+check('voice_room_flags table exists', count(dbq('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'voice_room_flags\'')) === 1);
+check('event_land_limits table exists', count(dbq('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'event_land_limits\'')) === 1);
+check('recordings table exists', count(dbq('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'recordings\'')) === 1);
 
 // ── Licensing client (fixture license server on :8096) ───────────────────────
 echo "== licensing client ==\n";

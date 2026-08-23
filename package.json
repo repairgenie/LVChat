@@ -9,6 +9,7 @@
     "watch": "tailwindcss -i ./src/assets/input.css -o ./public/assets/css/app.css --watch"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tiptap/core": "^2.11.5",
     "@tiptap/extension-color": "^2.27.2",
     "@tiptap/extension-highlight": "^2.27.2",

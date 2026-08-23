@@ -10,7 +10,7 @@
   },
   "order": 10,
   "admin": [
-    { "id": "voice", "label": "Voice (LiveKit)", "url": "/admin/voice", "roles": ["admin"] }
+    { "id": "voice", "label": "Voice (LiveKit)", "url": "/admin/webrtc", "roles": ["admin"] }
   ],
   "settings": {
     "voice_enabled": "0",

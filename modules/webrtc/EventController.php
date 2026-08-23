@@ -183,6 +183,15 @@ final class EventController
             Database::query('UPDATE channels SET event_id = ? WHERE id = ?', [$eventId, $channelId]);
         }
 
+        // For private events, seed the invite_code into event_invites so the
+        // founder's shareable URL (/e/{invite_code}) resolves correctly.
+        if ($inviteCode !== null) {
+            Database::query(
+                'INSERT INTO event_invites (event_id, email, token, invited_by) VALUES (?, ?, ?, ?)',
+                [$eventId, '_founder_invite', $inviteCode, (int) $actor['id']]
+            );
+        }
+
         log_audit('event_create', $title, $eventType . ($isPublic ? ' public' : ' private'));
 
         json_out([
@@ -300,12 +309,94 @@ final class EventController
 
         Database::query('UPDATE events SET status = \'cancelled\' WHERE id = ?', [$eventId]);
 
-        // If a channel was created, kick everyone and delete it.
-        if ($event['channel_id']) {
-            self::cleanupEventChannel((int) $event['channel_id']);
+        // Email the chat log to the founder if the channel is still live.
+        $channelId = (int) ($event['channel_id'] ?? 0);
+        if ($channelId > 0) {
+            $ch = Database::row('SELECT name, slug, forbidden FROM channels WHERE id = ?', [$channelId]);
+            if ($ch
+                && strncmp((string) $ch['name'], 'deleted-', 8) !== 0
+                && (int) $ch['forbidden'] === 0
+            ) {
+                $founder = Database::row('SELECT * FROM users WHERE id = ?', [(int) $event['founder_id']]);
+                if ($founder && Mailer::configured()) {
+                    try {
+                        $logPath = EventLogService::buildLogZip($event, (string) $ch['name'], (string) $ch['slug']);
+                        if ($logPath) {
+                            EventLogService::emailLog($event, $founder, $logPath);
+                            @unlink($logPath);
+                        }
+                    } catch (\Throwable $emailErr) {
+                        error_log('[EventController] cancel email failed: ' . $emailErr->getMessage());
+                    }
+                }
+            }
+            // Kick everyone and delete the channel.
+            self::cleanupEventChannel($channelId);
         }
 
         log_audit('event_cancel', $event['title']);
+        json_out(['ok' => true]);
+    }
+
+    /** POST /api/events/end — manually end an active event early */
+    public static function end(): void
+    {
+        $actor = self::requireActor();
+        self::requireCsrf();
+
+        $eventId = (int) ($_POST['event_id'] ?? 0);
+        $event = Database::row('SELECT * FROM events WHERE id = ?', [$eventId]);
+        if (!$event) {
+            json_out(['error' => 'Event not found.'], 404);
+        }
+        if ((int) $event['founder_id'] !== (int) $actor['id']) {
+            json_out(['error' => 'Only the event founder can end the event.'], 403);
+        }
+        if ($event['status'] !== 'active') {
+            json_out(['error' => 'Event is not active.'], 400);
+        }
+
+        $channelId = (int) ($event['channel_id'] ?? 0);
+
+        // Mark ended first (idempotent — same pattern as EventSchedulerJob).
+        Database::query(
+            "UPDATE events SET status = 'ended', ended_at = datetime('now') WHERE id = ? AND status = 'active'",
+            [$eventId]
+        );
+
+        // Generate and email the chat log exactly once.
+        if ($channelId > 0 && (int) ($event['log_sent'] ?? 0) === 0) {
+            $ch = Database::row('SELECT name, slug, forbidden FROM channels WHERE id = ?', [$channelId]);
+            if ($ch
+                && strncmp((string) $ch['name'], 'deleted-', 8) !== 0
+                && (int) $ch['forbidden'] === 0
+            ) {
+                $founder = Database::row('SELECT * FROM users WHERE id = ?', [(int) $event['founder_id']]);
+                if ($founder && Mailer::configured()) {
+                    try {
+                        $logPath = EventLogService::buildLogZip($event, (string) $ch['name'], (string) $ch['slug']);
+                        if ($logPath) {
+                            EventLogService::emailLog($event, $founder, $logPath);
+                            @unlink($logPath);
+                        }
+                    } catch (\Throwable $emailErr) {
+                        error_log('[EventController] end email failed: ' . $emailErr->getMessage());
+                    }
+                }
+            }
+            Database::query('UPDATE events SET log_sent = 1 WHERE id = ?', [$eventId]);
+        }
+
+        // Kick everyone and clean up the channel.
+        if ($channelId > 0) {
+            try {
+                self::cleanupEventChannel($channelId);
+            } catch (\Throwable $cleanupErr) {
+                error_log('[EventController] end cleanup failed: ' . $cleanupErr->getMessage());
+            }
+        }
+
+        log_audit('event_end', $event['title'], 'ended by founder');
         json_out(['ok' => true]);
     }
 
@@ -373,7 +464,13 @@ final class EventController
             $channel = Database::row('SELECT * FROM channels WHERE id = ?', [$invite['channel_id']]);
             if ($channel) {
                 $status = ChannelService::joinStatus($channel, $user);
-                if ($status['ok'] || $status['reason'] === 'already_member') {
+                // The event invite link is the access credential: invite_only
+                // must not block a logged-in visitor. Moderation (bans / akicks /
+                // forbidden) still applies via joinStatus.
+                $canJoin = $status['ok']
+                    || $status['reason'] === 'already_member'
+                    || $status['reason'] === 'This channel is invite-only.';
+                if ($canJoin) {
                     if ($status['reason'] !== 'already_member') {
                         ChannelService::join($channel, $user);
                     }

@@ -31,7 +31,7 @@
  * Auth: browser session cookie + CSRF (POSTs) or the messenger bearer token
  * (X-LVC-Session, CSRF-safe by construction) — mirrors FriendController.
  */
-final class VoiceController
+final class WebRTCVoiceController
 {
     private static function requireActor(): array
     {
