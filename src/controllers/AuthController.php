@@ -257,6 +257,18 @@ final class AuthController
             registration_attempt_record();
         }
         $user = Auth::attempt($username, $password);
+        // Store UTM/referral data captured on the landing page.
+        $referral = $_SESSION['referral'] ?? null;
+        if ($referral && !empty($user['id'])) {
+            $refSource = $referral['utm_source'] ?: $referral['ref'] ?: '';
+            if ($refSource === '' && !empty($referral['utm_medium'])) {
+                $refSource = $referral['utm_medium'] . '/' . ($referral['utm_campaign'] ?? '');
+            }
+            if ($refSource !== '') {
+                Database::query('UPDATE users SET referral_source = ? WHERE id = ?', [$refSource, (int) $user['id']]);
+            }
+            unset($_SESSION['referral']);
+        }
         if (TotpService::requiredFor($user)) {
             self::beginMfa($user, $next);
             $_SESSION['mfa_setup_secret'] = TotpService::generateSecret();

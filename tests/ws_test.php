@@ -70,10 +70,10 @@ config_set('realtime', 'ws');
 config_set('ws_port', (string) $wsPort);
 config_set('ws_push_url', $pushUrl);
 
-Auth::register('rtalice', 'rtalice@example.com', 'password123', true);
-Auth::register('rtbob', 'rtbob@example.com', 'password123', true);
-$alice = Auth::attempt('rtalice', 'password123');
-$bob = Auth::attempt('rtbob', 'password123');
+Auth::register('rtalice', 'rtalice@example.com', 'Password123', true);
+Auth::register('rtbob', 'rtbob@example.com', 'Password123', true);
+$alice = Auth::attempt('rtalice', 'Password123');
+$bob = Auth::attempt('rtbob', 'Password123');
 if (!$alice || !$bob) {
     echo "SKIP  could not create test users\n";
     exit(0);
@@ -270,8 +270,8 @@ fclose($connB);
 // receive DMs it is a participant in. Previously any authenticated user could
 // subscribe to any slug/name and receive private traffic in WS mode (the
 // poll/SSE paths already enforce these checks).
-Auth::register('rtcarol', 'rtcarol@example.com', 'password123', true);
-$carol = Auth::attempt('rtcarol', 'password123');
+Auth::register('rtcarol', 'rtcarol@example.com', 'Password123', true);
+$carol = Auth::attempt('rtcarol', 'Password123');
 if (!$carol) {
     echo "SKIP  could not create rtcarol\n";
     exit(0);

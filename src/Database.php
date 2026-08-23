@@ -64,6 +64,12 @@ final class Database
         }
 
         // Slow path (fresh install or schema upgrade): apply schema + migrations.
+        // Create a backup before any destructive DDL to prevent data loss on
+        // partial migration failure (SQLite auto-commits each DDL statement, so
+        // wrapping in a transaction does not help).
+        if (!$fresh && $schemaVersion !== null && $schemaVersion !== self::SCHEMA_VERSION) {
+            self::backup();
+        }
         // Guests must leave `users` BEFORE schema.sql runs, so the guests table
         // exists for its FKs and the guest columns exist for its indexes.
         self::migrateGuestsOut($pdo);
@@ -436,6 +442,10 @@ final class Database
             if (!in_array('searchable', $colNames, true)) {
                 $pdo->exec("ALTER TABLE users ADD COLUMN searchable INTEGER NOT NULL DEFAULT 1");
             }
+            // UTM/referral tracking: store the traffic source on registration.
+            if (!in_array('referral_source', $colNames, true)) {
+                $pdo->exec("ALTER TABLE users ADD COLUMN referral_source TEXT");
+            }
         }
 
         // Performance indexes (schema v41).
@@ -448,6 +458,11 @@ final class Database
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_user ON channel_members(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_guest ON channel_members(guest_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pm_recipient ON private_messages(recipient_id, recipient_guest_id, read_at)');
+
+        // Global rate limiting table (used by WebRTC module and core rate limiter).
+        if (!in_array('rate_limits', $tables, true)) {
+            $pdo->exec('CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, hits INTEGER NOT NULL DEFAULT 1, window_start INTEGER NOT NULL DEFAULT 0)');
+        }
 
         self::seedOperclasses($pdo);
         self::seedSoundAlerts($pdo);
@@ -701,6 +716,68 @@ final class Database
         $chan->execute(['#help', 'help', 'Need help? Ask here.', 'Get help from the community and staff', 'public']);
         $chan->execute(['#staff', 'staff', 'Staff coordination', 'Admins and staff only', 'staff']);
         $chan->execute(['#oper-log', 'oper-log', 'Operator action log', 'Admin-only log of every action taken by admins and opers', 'private']);
+    }
+
+    /**
+     * Create a timestamped backup of the database using SQLite's VACUUM INTO.
+     * Returns the backup file path on success, false on failure.
+     * Backups are stored in ROOT/data/backups/ with automatic rotation.
+     */
+    public static function backup(int $keep = 7): false|string
+    {
+        $path = getenv('CHAT_DB') ?: ROOT . '/data/chat.db';
+        if (!file_exists($path)) {
+            return false;
+        }
+        $backupDir = dirname($path) . '/backups';
+        if (!is_dir($backupDir)) {
+            @mkdir($backupDir, 0775, true);
+        }
+        $stamp = gmdate('Y-m-d-His');
+        $dest = $backupDir . "/chat-{$stamp}.db";
+        try {
+            self::instance()->exec("VACUUM INTO '" . str_replace("'", "''", $dest) . "'");
+        } catch (\Throwable $e) {
+            error_log('LVChat backup failed: ' . $e->getMessage());
+            return false;
+        }
+        // Rotate: keep only the newest $keep backups.
+        $files = glob($backupDir . '/chat-*.db');
+        if (is_array($files) && count($files) > $keep) {
+            usort($files, fn ($a, $b) => strcmp($a, $b));
+            $toDelete = array_slice($files, 0, count($files) - $keep);
+            foreach ($toDelete as $old) {
+                @unlink($old);
+            }
+        }
+        return $dest;
+    }
+
+    /**
+     * Run routine maintenance: prune stale data, run ANALYZE for query planner,
+     * and auto-backup. Designed to be called from a cron job.
+     */
+    public static function maintenance(): void
+    {
+        $pdo = self::instance();
+        // Prune expired rate-limit / session / ticket data.
+        $pdo->exec('DELETE FROM login_attempts WHERE attempted_at < datetime("now", "-1 hour")');
+        $pdo->exec('DELETE FROM registration_attempts WHERE attempted_at < datetime("now", "-1 hour")');
+        $pdo->exec('DELETE FROM sessions WHERE expires_at < datetime("now")');
+        $pdo->exec('DELETE FROM guest_sessions WHERE expires_at < datetime("now")');
+        $pdo->exec('DELETE FROM auth_tokens WHERE expires_at < datetime("now") OR used_at IS NOT NULL');
+        $pdo->exec('DELETE FROM ws_tickets WHERE expires_at < datetime("now")');
+        $pdo->exec('DELETE FROM typing_indicators WHERE updated_at < datetime("now", "-2 minutes")');
+        // Prune old typing indicators from guests (no FK cascade).
+        $pdo->exec('DELETE FROM typing_indicators WHERE actor_type = "guest" AND updated_at < datetime("now", "-2 minutes")');
+        // Prune stale TOTP replay counters.
+        $pdo->exec('DELETE FROM totp_used_counters WHERE expires_at < datetime("now")');
+        // Prune old guests with no recent activity (30 days).
+        $pdo->exec('DELETE FROM guests WHERE last_seen < datetime("now", "-30 days") AND id NOT IN (SELECT guest_id FROM guest_sessions WHERE guest_id IS NOT NULL)');
+        // Update SQLite query planner statistics.
+        $pdo->exec('ANALYZE');
+        // Create a backup.
+        self::backup();
     }
 
     /** Ensure the built-in operator classes exist (idempotent). */

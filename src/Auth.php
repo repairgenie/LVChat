@@ -226,6 +226,8 @@ final class Auth
         }
         if (strlen($password) < 8) {
             $errors[] = 'Password must be at least 8 characters.';
+        } elseif (!preg_match('/[A-Z]/', $password) || !preg_match('/[a-z]/', $password) || !preg_match('/[0-9]/', $password)) {
+            $errors[] = 'Password must include uppercase, lowercase, and a number.';
         }
         if (!$ageVerified) {
             $errors[] = 'You must certify that you are at least 18 years old to register.';

@@ -66,22 +66,22 @@ function check(string $label, bool $cond, string $detail = ''): void {
 // --- Registration ---
 echo "== registration ==\n";
 $_POST['setup_token'] = 'test-setup-token';
-$r = Auth::register('alice', 'alice@example.com', 'password123', true);
+$r = Auth::register('alice', 'alice@example.com', 'Password123', true);
 check('register alice', $r['ok'] === true, json_encode($r));
-$aliceRow = Auth::attempt('alice', 'password123');
+$aliceRow = Auth::attempt('alice', 'Password123');
 check('first registered user becomes admin', ($aliceRow['role'] ?? '') === 'admin', json_encode($aliceRow));
-$r = Auth::register('bob', 'bob@example.com', 'password123', true);
+$r = Auth::register('bob', 'bob@example.com', 'Password123', true);
 check('register bob', $r['ok'] === true, json_encode($r));
-$bobRow = Auth::attempt('bob', 'password123');
+$bobRow = Auth::attempt('bob', 'Password123');
 check('second user stays a regular user', ($bobRow['role'] ?? '') === 'user', json_encode($bobRow));
-$r = Auth::register('alice', 'alice2@example.com', 'password123', true);
+$r = Auth::register('alice', 'alice2@example.com', 'Password123', true);
 check('duplicate username rejected', $r['ok'] === false, json_encode($r));
 
 // --- Login ---
 echo "== login ==\n";
-$alice = Auth::attempt('alice', 'password123');
+$alice = Auth::attempt('alice', 'Password123');
 check('alice logs in', $alice !== null);
-$bob = Auth::attempt('bob', 'password123');
+$bob = Auth::attempt('bob', 'Password123');
 check('bob logs in', $bob !== null);
 check('wrong password rejected', Auth::attempt('alice', 'wrong') === null);
 Auth::login($alice);
@@ -169,8 +169,8 @@ check('historyBefore returns ascending order', $asc);
 check('admin can edit a message', MessageService::edit((int) $msg['id'], 'hello edited', $alice) === true);
 $msg2 = MessageService::send((int) $ch['id'], $bob, 'bob message');
 check('owner can edit own message', MessageService::edit((int) $msg2['id'], 'bob edited', $bob) === true);
-Auth::register('mallory', 'mallory@example.com', 'password123', true);
-$mallory = Auth::attempt('mallory', 'password123');
+Auth::register('mallory', 'mallory@example.com', 'Password123', true);
+$mallory = Auth::attempt('mallory', 'Password123');
 check('non-owner cannot edit a message', is_string(MessageService::edit((int) $msg2['id'], 'hacked', $mallory)));
 $edited = Database::row('SELECT edited_at FROM messages WHERE id = ?', [(int) $msg2['id']]);
 check('owner edit marks edited_at', !empty($edited['edited_at']));
@@ -477,10 +477,10 @@ check('correct key joins', ChannelService::joinStatus($priv, $alice, 'hunter2')[
 echo "== oper ==\n";
 $res = CommandParser::run('/kline bob 1h spam', $bob, $ch);
 check('non-admin cannot /kline', str_contains($res['replies'][0] ?? '', 'restricted'));
-Auth::register('charlie', 'charlie@example.com', 'password123', true);
+Auth::register('charlie', 'charlie@example.com', 'Password123', true);
 $res = CommandParser::run('/kline charlie 1h spam', $alice, $ch);
 check('/kline as admin', str_contains($res['replies'][0] ?? '', 'KLINE'));
-check('kline blocks charlie', Auth::globalBanFor(Auth::attempt('charlie', 'password123')) !== null);
+check('kline blocks charlie', Auth::globalBanFor(Auth::attempt('charlie', 'Password123')) !== null);
 $res = CommandParser::run('/global test announcement', $alice, $ch);
 check('/global announcement', $res['replies'][0] === 'Announcement sent to all channels.');
 
@@ -508,18 +508,18 @@ check('#staff seeded staff-only', $staff !== null && $staff['visibility'] === 's
 check('regular user denied #staff', ChannelService::joinStatus($staff, $bob)['ok'] === false);
 check('admin can join #staff', ChannelService::joinStatus($staff, $alice)['ok'] === true);
 check('#staff hidden from public list', !in_array($staff['id'], array_column(ChannelService::publicChannels(), 'id'), true));
-Auth::register('dave', 'dave@example.com', 'password123', true);
+Auth::register('dave', 'dave@example.com', 'Password123', true);
 Database::query('UPDATE users SET role = "staff" WHERE username = "dave"');
-$dave = Auth::attempt('dave', 'password123');
+$dave = Auth::attempt('dave', 'Password123');
 check('staff member can join #staff', ChannelService::joinStatus($staff, $dave)['ok'] === true);
 check('#staff denied via share link to non-staff', ChannelService::joinStatus($staff, $bob)['ok'] === false);
 
 // ── Comprehensive command coverage ──────────────────────────────────────────
-$alice = Auth::attempt('alice', 'password123');
-$bob2 = Auth::attempt('bob_the_second', 'password123');
-Auth::register('erin', 'erin@example.com', 'password123', true);
-$erin = Auth::attempt('erin', 'password123');
-$dave = Auth::attempt('dave', 'password123');
+$alice = Auth::attempt('alice', 'Password123');
+$bob2 = Auth::attempt('bob_the_second', 'Password123');
+Auth::register('erin', 'erin@example.com', 'Password123', true);
+$erin = Auth::attempt('erin', 'Password123');
+$dave = Auth::attempt('dave', 'Password123');
 $ch = ChannelService::find('#test');
 ChannelService::join($ch, $bob2);
 ChannelService::join($ch, $erin);
@@ -757,15 +757,15 @@ $res = CommandParser::run('/recover alice', $alice, $ch);
 check('/recover', str_contains($res['replies'][0] ?? '', 'recovered'));
 $res = CommandParser::run('/group', $alice, $ch);
 check('/group', str_contains($res['replies'][0] ?? '', 'unified'));
-$res = CommandParser::run('/identify password123', $alice, $ch);
+$res = CommandParser::run('/identify Password123', $alice, $ch);
 check('/identify nickserv', str_contains($res['replies'][0] ?? '', 'verified'));
-$res = CommandParser::run('/passwd password456', $alice, $ch);
+$res = CommandParser::run('/passwd Password456', $alice, $ch);
 check('/passwd updates the password', str_contains($res['replies'][0] ?? '', 'Password updated'), $res['replies'][0] ?? '');
-$alice = Auth::attempt('alice', 'password456');
-$res = CommandParser::run('/identify password456', $alice, $ch);
+$alice = Auth::attempt('alice', 'Password456');
+$res = CommandParser::run('/identify Password456', $alice, $ch);
 check('new password verifies via identify', str_contains($res['replies'][0] ?? '', 'verified'), $res['replies'][0] ?? '');
-Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash('password123', PASSWORD_ARGON2ID), $alice['id']]);
-$alice = Auth::attempt('alice', 'password123');
+Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash('Password123', PASSWORD_ARGON2ID), $alice['id']]);
+$alice = Auth::attempt('alice', 'Password123');
 
 echo "== memoserv ==\n";
 $res = CommandParser::run('/memo send alice test memo', $bob2, $ch);
@@ -867,11 +867,11 @@ $res = CommandParser::run("/spamfilter del $sf", $alice, $ch);
 check('/spamfilter del', $res['replies'][0] === 'Spam filter removed.');
 
 // ── OperServ: o:line flow, /os alias, gating, rename sync, SAMODE bypass ────
-Auth::register('gina', 'gina@example.com', 'password123', true);
-$gina = Auth::attempt('gina', 'password123');
+Auth::register('gina', 'gina@example.com', 'Password123', true);
+$gina = Auth::attempt('gina', 'Password123');
 $oclass = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "globalop"');
-Database::query('INSERT INTO opers (username, password_hash, operclass_id, enabled) VALUES (?, ?, ?, 1)', ['gina', password_hash('opersecret', PASSWORD_ARGON2ID), $oclass ?: 1]);
-$res = CommandParser::run('/oper gina opersecret', $gina, $ch);
+Database::query('INSERT INTO opers (username, password_hash, operclass_id, enabled) VALUES (?, ?, ?, 1)', ['gina', password_hash('OperSecret1', PASSWORD_ARGON2ID), $oclass ?: 1]);
+$res = CommandParser::run('/oper gina OperSecret1', $gina, $ch);
 check('/oper from o:line', str_contains($res['replies'][0] ?? '', 'operating'), $res['replies'][0] ?? '');
 $res = CommandParser::run('/deoper', $gina, $ch);
 check('/deoper', $res['replies'][0] === 'You are no longer operating.');
@@ -880,8 +880,8 @@ $res = CommandParser::run('/nick gina_v2', $gina, $ch);
 check('/nick rename keeps o:line attached', $res['replies'][0] === 'You are now known as gina_v2.', $res['replies'][0] ?? '');
 check('o:line follows /nick', Database::scalar('SELECT id FROM opers WHERE username = "gina_v2" COLLATE NOCASE') !== false);
 check('stale o:line row removed', Database::scalar('SELECT id FROM opers WHERE username = "gina"') === false);
-$gina = Auth::attempt('gina_v2', 'password123');
-$res = CommandParser::run('/oper gina_v2 opersecret', $gina, $ch);
+$gina = Auth::attempt('gina_v2', 'Password123');
+$res = CommandParser::run('/oper gina_v2 OperSecret1', $gina, $ch);
 check('/oper works after rename', str_contains($res['replies'][0] ?? '', 'operating'), $res['replies'][0] ?? '');
 $res = CommandParser::run('/deoper', $gina, $ch);
 $res = CommandParser::run('/serverstats', $bob2, $ch);
@@ -909,8 +909,8 @@ check('mention creates notification', $after === $before + 1);
 
 // ── Channel lifecycle: temp channels vanish, register/deregister ────────────
 echo "== channel lifecycle ==\n";
-Auth::register('frank', 'frank@example.com', 'password123', true);
-$frank = Auth::attempt('frank', 'password123');
+Auth::register('frank', 'frank@example.com', 'Password123', true);
+$frank = Auth::attempt('frank', 'Password123');
 $tmp = ChannelService::create($frank, '#temp2');
 check('temp channel starts unregistered', ChannelService::isRegistered($tmp) === false);
 ChannelService::join($tmp, $alice);
@@ -1030,7 +1030,7 @@ check('PM archived', (int) Database::scalar('SELECT COUNT(*) FROM chat_logs WHER
 echo "== custom roles ==\n";
 Database::query('INSERT INTO roles (name, color, perms) VALUES ("Moderator", "#00ff88", ?)', [json_encode(['oper', 'manage_badwords'])]);
 Database::query('UPDATE users SET role_id = ? WHERE username = "frank"', [(int) Database::lastId()]);
-$frank = Auth::attempt('frank', 'password123');
+$frank = Auth::attempt('frank', 'Password123');
 check('custom role grants oper', Auth::isOper($frank) === true);
 check('oper role can use /clients', !str_contains(CommandParser::run('/clients', $frank, $ch)['replies'][0] ?? '', 'restricted'));
 $res = CommandParser::run('/kline erin 1h test', $frank, $ch);
@@ -1038,7 +1038,7 @@ check('oper role can /kline', !str_contains($res['replies'][0] ?? '', 'restricte
 Database::query('DELETE FROM bans WHERE kind = "kline" AND target_user_id = ?', [$erin['id']]);
 check('oper role sees IP in /whois', in_array('IP: 203.0.113.7', CommandParser::run('/whois erin', $frank, $ch)['replies'], true));
 Database::query('UPDATE users SET role_id = NULL WHERE username = "frank"');
-$frank = Auth::attempt('frank', 'password123');
+$frank = Auth::attempt('frank', 'Password123');
 check('removing role revokes oper', Auth::isOper($frank) === false);
 
 // ── Helper role: green nick + always half-op ─────────────────────────────────
@@ -1046,7 +1046,7 @@ echo "== helper role ==\n";
 Database::query('INSERT INTO roles (name, color, perms, helper) VALUES ("Helper", "#5865f2", "[]", 1)');
 $helperRole = (int) Database::lastId();
 Database::query('UPDATE users SET role_id = ? WHERE username = "frank"', [$helperRole]);
-$frank = Auth::attempt('frank', 'password123');
+$frank = Auth::attempt('frank', 'Password123');
 check('helper role detected', Auth::isHelper($frank) === true);
 ChannelService::join($ch, $frank);
 check('helper effectiveLevel is halfop', AccessService::effectiveLevel($ch['id'], $frank) === 'halfop');
@@ -1063,7 +1063,7 @@ foreach (ChannelService::members((string) $ch['id']) as $mm) {
 Database::query('DELETE FROM messages WHERE id = ?', [(int) $frankMsg['id']]);
 Database::query('UPDATE users SET role_id = NULL WHERE username = "frank"');
 Database::query('DELETE FROM roles WHERE id = ?', [$helperRole]);
-$frank = Auth::attempt('frank', 'password123');
+$frank = Auth::attempt('frank', 'Password123');
 check('helper removed on role delete', Auth::isHelper($frank) === false);
 
 // ── Chanop promotion + half-op limits (standard IRC) ────────────────────────
@@ -1072,8 +1072,8 @@ ChannelService::join($ch, $erin);
 ChannelService::join($ch, $bob2);
 $res = CommandParser::run('/op erin #test', $alice, $ch);
 check('founder promotes to op', str_contains($res['replies'][0] ?? '', 'now has level: op'), $res['replies'][0] ?? '');
-Auth::register('gloria', 'gloria@example.com', 'password123', true);
-$gloria = Auth::attempt('gloria', 'password123');
+Auth::register('gloria', 'gloria@example.com', 'Password123', true);
+$gloria = Auth::attempt('gloria', 'Password123');
 ChannelService::join($ch, $gloria);
 $res = CommandParser::run('/op gloria #test', $erin, $ch);
 check('an op can promote another to op', str_contains($res['replies'][0] ?? '', 'now has level: op'), $res['replies'][0] ?? '');
@@ -1107,9 +1107,9 @@ check('stale guest row reclaimed (same id keeps DM history)', $g3 !== null && (i
 Auth::logout();
 $g4 = Auth::loginGuest('claimme', true);
 Database::query('UPDATE guests SET last_seen = datetime("now", "-1 hour") WHERE id = ?', [$g4['id']]);
-$rc = Auth::register('claimme', 'claimme@example.com', 'password123', true);
+$rc = Auth::register('claimme', 'claimme@example.com', 'Password123', true);
 check('register converts a stale guest row into a real account', $rc['ok'] === true, json_encode($rc));
-$claimed = Auth::attempt('claimme', 'password123');
+$claimed = Auth::attempt('claimme', 'Password123');
 check('converted guest is a real (non-guest) account', $claimed !== null && (int) $claimed['guest'] === 0, json_encode($claimed));
 check('guest row is gone after conversion', Database::scalar('SELECT COUNT(*) FROM guests WHERE nick = "claimme"') === 0);
 check('guest can join an existing channel', ChannelService::joinStatus(ChannelService::find('#test'), $guest)['ok'] === true);
@@ -1121,7 +1121,7 @@ $res = CommandParser::run('/join #nobodyhere', $guest, null);
 check('guest /join nonexistent denied', str_contains($res['replies'][0] ?? '', 'existing channels'), $res['replies'][0] ?? '');
 $res = CommandParser::run('/whois anoncat', $alice, $ch);
 check('/whois resolves a guest nick', str_contains($res['replies'][0] ?? '', '(guest)'), $res['replies'][0] ?? '');
-$res = CommandParser::run('/register alice@example.com password123', $guest, $ch);
+$res = CommandParser::run('/register alice@example.com Password123', $guest, $ch);
 check('guest /register points at the web form', str_contains($res['replies'][0] ?? '', '/register'), $res['replies'][0] ?? '');
 Database::query('UPDATE users SET last_seen = datetime("now") WHERE id = ?', [$alice['id']]);
 $res = CommandParser::run('/names #test', $alice, $ch);
@@ -1149,8 +1149,8 @@ check('peak_online tracks concurrent users', (int) config_get('peak_online', '0'
 echo "== o-lines ==\n";
 $netadmin = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "netadmin"');
 check('netadmin operclass seeded', $netadmin > 0);
-Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES ("erin", ?, ?)', [password_hash('erinsecret', PASSWORD_ARGON2ID), $netadmin]);
-$res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
+Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES ("erin", ?, ?)', [password_hash('ErinSecret1', PASSWORD_ARGON2ID), $netadmin]);
+$res = CommandParser::run('/oper erin ErinSecret1', $erin, $ch);
 check('/oper with o:line succeeds', str_contains($res['replies'][0] ?? '', 'netadmin'), $res['replies'][0] ?? '');
 check('oper session grants isOper', Auth::isOper($erin) === true);
 $res = CommandParser::run('/clients', $erin, $ch);
@@ -1163,7 +1163,7 @@ $res = CommandParser::run('/deoper', $erin, $ch);
 check('/deoper drops oper', $res['replies'][0] === 'You are no longer operating.');
 check('deoper clears isOper', Auth::isOper($erin) === false);
 Database::query('UPDATE opers SET enabled = 0 WHERE username = "erin"');
-$res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
+$res = CommandParser::run('/oper erin ErinSecret1', $erin, $ch);
 check('disabled o:line rejected', str_contains($res['replies'][0] ?? '', 'Incorrect oper credentials'));
 
 // ── Forbidden nicks (sqline / unsqline / sqlines) ────────────────────────────
@@ -1173,7 +1173,7 @@ check('/sqline forbids a nick', str_contains($res['replies'][0] ?? '', 'forbidde
 unset($_SESSION['last_nick_ts']); // clear the nick-change throttle so the qline gate (not the rate limit) is what answers
 $res = CommandParser::run('/nick forbiddennick', $bob, $ch);
 check('qline blocks /nick', str_contains($res['replies'][0] ?? '', 'reserved'), $res['replies'][0] ?? '');
-$reg = Auth::register('forbiddennick', 'fn@example.com', 'password123', true);
+$reg = Auth::register('forbiddennick', 'fn@example.com', 'Password123', true);
 check('qline blocks registration', $reg['ok'] === false, json_encode($reg));
 $res = CommandParser::run('/sanick erin forbiddennick', $alice, $ch);
 check('qline blocks sanick target', $res['replies'][0] === 'Requested nick is unavailable, please select another', $res['replies'][0] ?? '');
@@ -1203,13 +1203,13 @@ check('channel joinable again after uncqline', ChannelService::joinStatus(Channe
 // ── /sanick (admins + netadmin opers) ────────────────────────────────────────
 echo "== sanick ==\n";
 Database::query('UPDATE opers SET enabled = 1 WHERE username = "erin"');
-$res = CommandParser::run('/oper erin erinsecret', $erin, $ch);
+$res = CommandParser::run('/oper erin ErinSecret1', $erin, $ch);
 check('netadmin o:line works', str_contains($res['replies'][0] ?? '', 'netadmin'));
 $res = CommandParser::run('/sanick nosuchuser whatever', $erin, $ch);
 check('netadmin may use /sanick', !str_contains($res['replies'][0] ?? '', 'requires netadmin'));
 $globalop = (int) Database::scalar('SELECT id FROM operclasses WHERE name = "globalop"');
-Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES ("frank", ?, ?)', [password_hash('franksecret', PASSWORD_ARGON2ID), $globalop]);
-$res = CommandParser::run('/oper frank franksecret', $frank, $ch);
+Database::query('INSERT INTO opers (username, password_hash, operclass_id) VALUES ("frank", ?, ?)', [password_hash('FrankSecret1', PASSWORD_ARGON2ID), $globalop]);
+$res = CommandParser::run('/oper frank FrankSecret1', $frank, $ch);
 check('globalop o:line works', str_contains($res['replies'][0] ?? '', 'globalop'));
 $res = CommandParser::run('/sanick erin zed', $frank, $ch);
 check('sanick denied to non-netadmin oper', str_contains($res['replies'][0] ?? '', 'requires netadmin'), $res['replies'][0] ?? '');
@@ -1237,10 +1237,10 @@ Auth::login($alice);
 CommandParser::run('/kline somefake 1h spam', $alice, $ch);
 $afterLog = (int) Database::scalar('SELECT COUNT(*) FROM messages WHERE channel_id = ?', [$operLog['id']]);
 check('admin action mirrored to #oper-log', $afterLog > $beforeLog, "$beforeLog -> $afterLog");
-Auth::register('opx', 'opx@example.com', 'password123', true);
-$opx = Auth::attempt('opx', 'password123');
-Auth::register('kickme', 'kickme@example.com', 'password123', true);
-$kickme = Auth::attempt('kickme', 'password123');
+Auth::register('opx', 'opx@example.com', 'Password123', true);
+$opx = Auth::attempt('opx', 'Password123');
+Auth::register('kickme', 'kickme@example.com', 'Password123', true);
+$kickme = Auth::attempt('kickme', 'Password123');
 $opCh = ChannelService::create($opx, '#opxtest');
 ChannelService::join($opCh, $kickme);
 Auth::login($opx);
@@ -1337,7 +1337,7 @@ check('revoked invite removed', InviteService::row((int) $inv4['id']) === null);
 check('invite list returns rows', count(InviteService::all()) >= 2);
 
 // Admin-style manual creation with an auto-generated password.
-$manualPw = bin2hex(random_bytes(8));
+$manualPw = generate_password();
 $rManual = Auth::register('manualuser', 'manual@example.com', $manualPw, true);
 check('admin-style manual creation works', $rManual['ok'] === true && Auth::attempt('manualuser', $manualPw) !== null, json_encode($rManual));
 
@@ -1386,19 +1386,19 @@ AuthTokenService::invalidateAllForUser((int) $bob['id'], AuthTokenService::TYPE_
 check('invalidateAllForUser kills unused magic tokens', AuthTokenService::validate($mTok, AuthTokenService::TYPE_MAGIC) === null);
 
 // Full reset flow against the DB: hash updates + sessions die.
-$rReset = Auth::register('resetme', 'resetme@example.com', 'oldpassword1', true);
+$rReset = Auth::register('resetme', 'resetme@example.com', 'Oldpassword1', true);
 check('register resetme', $rReset['ok'] === true, json_encode($rReset));
-$resetme = Auth::attempt('resetme', 'oldpassword1');
+$resetme = Auth::attempt('resetme', 'Oldpassword1');
 $rrTok = AuthTokenService::create((int) $resetme['id'], AuthTokenService::TYPE_RESET, AuthTokenService::RESET_TTL_MINUTES);
 $rrRow = AuthTokenService::validate($rrTok, AuthTokenService::TYPE_RESET);
 Auth::login($resetme);
 check('resetme has a live session', (int) Database::scalar('SELECT COUNT(*) FROM sessions WHERE user_id = ?', [(int) $resetme['id']]) >= 1);
-Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash('newpassword1', PASSWORD_ARGON2ID), (int) $resetme['id']]);
+Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash('Newpassword1', PASSWORD_ARGON2ID), (int) $resetme['id']]);
 AuthTokenService::claim((int) $rrRow['token_id']);
 AuthTokenService::invalidateAllForUser((int) $resetme['id'], AuthTokenService::TYPE_RESET);
 Auth::killSessions((int) $resetme['id'], true);
-check('old password no longer works after reset', Auth::attempt('resetme', 'oldpassword1') === null);
-check('new password works after reset', Auth::attempt('resetme', 'newpassword1') !== null);
+check('old password no longer works after reset', Auth::attempt('resetme', 'Oldpassword1') === null);
+check('new password works after reset', Auth::attempt('resetme', 'Newpassword1') !== null);
 check('reset token consumed (no replay)', AuthTokenService::validate($rrTok, AuthTokenService::TYPE_RESET) === null);
 check('sessions killed after reset', (int) Database::scalar('SELECT COUNT(*) FROM sessions WHERE user_id = ?', [(int) $resetme['id']]) === 0);
 unset($_SESSION['token']);
@@ -1518,7 +1518,7 @@ check('notify prefs restored', NotifyPrefs::get($alice)['quiet_hours_enabled'] =
 
 // ── Age verification ─────────────────────────────────────────────────────────
 echo "== age verification ==\n";
-$under = Auth::register('minor', 'minor@example.com', 'password123', false);
+$under = Auth::register('minor', 'minor@example.com', 'Password123', false);
 check('registration without age certification rejected', $under['ok'] === false && str_contains(implode(' ', $under['errors']), '18'), json_encode($under));
 check('guests cannot join without age', Auth::loginGuest('minorguest', false) === null);
 check('guests can join with age', Auth::loginGuest('ageguest', true) !== null);
@@ -1564,7 +1564,7 @@ ModerationService::setStatus((int) $mallory['id'], 'active', null, $alice);
 check('activate clears status', (Database::row('SELECT * FROM users WHERE id = ?', [$mallory['id']])['status'] ?? '') === 'active');
 
 config_set('registration_requires_approval', '1');
-$penny = Auth::register('penny', 'penny@example.com', 'password123', true);
+$penny = Auth::register('penny', 'penny@example.com', 'Password123', true);
 $pennyRow = Database::row('SELECT * FROM users WHERE id = ?', [$penny['id']]);
 check('approval toggle makes new accounts pending', ($pennyRow['status'] ?? '') === 'pending');
 $restr = ModerationService::restriction($pennyRow);

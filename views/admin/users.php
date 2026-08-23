@@ -125,10 +125,10 @@ require ROOT . '/views/admin/_page_header.php';
               <button name="action" value="user_deadmin" class="btn-ghost text-xs !py-1">Demote</button>
               <?php elseif ($u['role'] === 'staff'): ?>
               <button name="action" value="user_destaff" class="btn-ghost text-xs !py-1">Remove staff</button>
-              <button name="action" value="user_admin" class="btn-ghost text-xs !py-1 text-amber-400">Make admin</button>
+              <button name="action" value="user_admin" class="btn-ghost text-xs !py-1 text-amber-400" data-extra-field='{"confirm_promote":"1"}' onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Promote this user to admin? They will have full server control.')">Make admin</button>
               <?php else: ?>
               <button name="action" value="user_staff" class="btn-ghost text-xs !py-1 text-blurple">Make staff</button>
-              <button name="action" value="user_admin" class="btn-ghost text-xs !py-1 text-amber-400">Make admin</button>
+              <button name="action" value="user_admin" class="btn-ghost text-xs !py-1 text-amber-400" data-extra-field='{"confirm_promote":"1"}' onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Promote this user to admin? They will have full server control.')">Make admin</button>
               <?php endif; ?>
               <button name="action" value="user_reset" class="btn-ghost text-xs !py-1" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Reset password? New password shown on next page.')">Reset pw</button>
               <button name="action" value="user_delete" class="btn-ghost text-xs !py-1 text-red-400" onclick="event.preventDefault(); return LVCDialog.confirmSubmit(this, 'Permanently delete this user? Their account, sessions, memberships and reactions are removed. Channel/PM messages are kept (shown without the name); the chat log archive keeps everything.')">Delete</button>

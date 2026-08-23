@@ -1,0 +1,3 @@
+# LVChat scheduled jobs — runs every minute.
+# Installed by the Docker entrypoint; edit with caution.
+* * * * * cd /var/www/html && /usr/local/bin/php bin/scheduledjobs.php >> data/cron.log 2>&1

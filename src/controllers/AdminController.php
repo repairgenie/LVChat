@@ -662,6 +662,24 @@ final class AdminController
                 break;
             case 'user_admin':
                 $id = (int) ($_POST['id'] ?? 0);
+                $target = Database::row('SELECT id, username, role FROM users WHERE id = ?', [$id]);
+                if (!$target) {
+                    $message = 'User not found.';
+                    break;
+                }
+                if ((int) $target['id'] === (int) $admin['id']) {
+                    $message = 'You cannot change your own admin status.';
+                    break;
+                }
+                if ($target['role'] === 'admin') {
+                    $message = 'User is already an admin.';
+                    break;
+                }
+                // Require explicit confirmation to prevent accidental promotions.
+                if (empty($_POST['confirm_promote'])) {
+                    $message = 'Please confirm the promotion.';
+                    break;
+                }
                 Database::query('UPDATE users SET role = "admin" WHERE id = ?', [$id]);
                 // Auto-join the operator action log.
                 Database::query(
@@ -702,7 +720,7 @@ final class AdminController
                 break;
             case 'user_reset':
                 $id = (int) ($_POST['id'] ?? 0);
-                $pw = bin2hex(random_bytes(6));
+                $pw = generate_password();
                 Database::query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($pw, PASSWORD_ARGON2ID), $id]);
                 Database::query('DELETE FROM sessions WHERE user_id = ?', [$id]);
                 ModerationService::note($id, $admin, 'reset_password', 'Password reset by an administrator');
@@ -1022,7 +1040,7 @@ final class AdminController
                 if (!in_array($role, ['user', 'staff', 'admin'], true)) {
                     $role = 'user';
                 }
-                $pw = bin2hex(random_bytes(8)); // 16 hex chars, shown once
+                $pw = generate_password();
                 $result = Auth::register($username, $email, $pw, true, true);
                 if (!$result['ok']) {
                     $ok = false;

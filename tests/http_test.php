@@ -347,7 +347,7 @@ dbq("UPDATE server_config SET value = '0' WHERE key = 'mfa_require_admin'");
 // Honeypot: a filled trap field must be silently dropped (no account, no flash).
 $cjBot = '/tmp/opencode/httptest-bot.txt';
 $tBot = csrf(req('GET', '/register', [], $cjBot)[2]);
-[$s, $h] = req('POST', '/register', ['csrf' => $tBot, 'website' => 'http://spam.example', 'username' => 'botty', 'email' => 'botty@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjBot);
+[$s, $h] = req('POST', '/register', ['csrf' => $tBot, 'website' => 'http://spam.example', 'username' => 'botty', 'email' => 'botty@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjBot);
 check('honeypot registration silently redirected', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
 $botty = dbq('SELECT COUNT(*) AS n FROM users WHERE username = ?', ['botty']);
 check('honeypot registration created no user', (int) $botty[0]['n'] === 0, json_encode($botty));
@@ -355,7 +355,7 @@ check('honeypot registration created no user', (int) $botty[0]['n'] === 0, json_
 $cjA = '/tmp/opencode/httptest-a.txt';
 $page = req('GET', '/register', [], $cjA)[2];
 $t = csrf($page);
-[$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/', 'setup_token' => 'test-setup-token'], $cjA);
+[$s, $h, $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'alice', 'email' => 'alice@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/', 'setup_token' => 'test-setup-token'], $cjA);
 check('register alice 302', $s === 302, (string) $s);
 check('first user redirected to next', ($h['location'] ?? '') === '/');
 [$s, , $appBody] = req('GET', '/app', [], $cjA);
@@ -393,7 +393,7 @@ check('totp stored in db', !empty(dbq('SELECT totp_secret FROM users WHERE usern
 check('second enable rejected', $s === 400, (string) $s);
 [$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => $t, 'password' => 'wrong'], $cjA);
 check('mfa disable rejects wrong password', $s === 403, "$s $b");
-[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => $t, 'password' => 'password123'], $cjA);
+[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => $t, 'password' => 'Password123'], $cjA);
 check('mfa disable works for self', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 
 // Re-enable, then drive the login challenge flow from a fresh cookie jar.
@@ -404,7 +404,7 @@ req('POST', '/api/mfa/enable', ['csrf' => $t, 'code' => mfaCode($mfaBare)], $cjA
 
 $cjL = '/tmp/opencode/httptest-mfa.txt';
 $page = req('GET', '/login', [], $cjL)[2];
-[$s, $h] = req('POST', '/login', ['csrf' => csrf($page), 'username' => 'alice', 'password' => 'password123', 'next' => '/app'], $cjL);
+[$s, $h] = req('POST', '/login', ['csrf' => csrf($page), 'username' => 'alice', 'password' => 'Password123', 'next' => '/app'], $cjL);
 check('login with mfa redirects to challenge', $s === 302 && str_contains($h['location'] ?? '', '/login/mfa'), "$s " . ($h['location'] ?? ''));
 [$s, , $b] = req('GET', '/login/mfa', [], $cjL);
 check('challenge page renders', $s === 200 && stripos($b, 'authentication code') !== false, (string) $s);
@@ -421,7 +421,7 @@ check('mfa user can open /app', $s === 200, (string) $s);
 dbq("INSERT OR REPLACE INTO server_config (key, value) VALUES ('mfa_require_admin', '1')");
 dbq("UPDATE users SET totp_secret = NULL, totp_enabled_at = NULL WHERE username = 'alice'");
 $cjF = '/tmp/opencode/httptest-mfa-f.txt';
-[$s, $h] = req('POST', '/login', ['csrf' => csrf(req('GET', '/login', [], $cjF)[2]), 'username' => 'alice', 'password' => 'password123', 'next' => '/app'], $cjF);
+[$s, $h] = req('POST', '/login', ['csrf' => csrf(req('GET', '/login', [], $cjF)[2]), 'username' => 'alice', 'password' => 'Password123', 'next' => '/app'], $cjF);
 check('required-class login goes to setup', $s === 302 && str_contains($h['location'] ?? '', '/login/mfa/setup'), "$s " . ($h['location'] ?? ''));
 $page = req('GET', '/login/mfa/setup', [], $cjF)[2];
 check('setup page shows qr uri + secret', stripos($page, 'otpauth://totp/') !== false, '');
@@ -436,7 +436,7 @@ dbq('DELETE FROM totp_used_counters'); // the login challenge consumed the curre
 [$s, $h] = req('POST', '/login/mfa/setup', ['csrf' => csrf($page), 'code' => mfaCode($forcedSecret)], $cjF);
 check('setup verify completes login', $s === 302 && str_contains($h['location'] ?? '', '/app'), "$s " . ($h['location'] ?? ''));
 check('totp enabled after forced setup', !empty(dbq('SELECT totp_enabled_at FROM users WHERE username = "alice"')[0]['totp_enabled_at'] ?? null));
-[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => csrf(req('GET', '/app', [], $cjF)[2]), 'password' => 'password123'], $cjF);
+[$s, , $b] = req('POST', '/api/mfa/disable', ['csrf' => csrf(req('GET', '/app', [], $cjF)[2]), 'password' => 'Password123'], $cjF);
 check('required-class cannot self-disable', $s === 403, "$s $b");
 dbq("UPDATE server_config SET value = '0' WHERE key = 'mfa_require_admin'");
 dbq("UPDATE users SET totp_secret = NULL, totp_enabled_at = NULL WHERE username = 'alice'");
@@ -539,7 +539,7 @@ sleep(6); // let the 5s rate-limit window clear before the PM tests
 echo "== private messages ==\n";
 $cjB = '/tmp/opencode/httptest-b.txt';
 $t = csrf(req('GET', '/register', [], $cjB)[2]);
-[$s, , $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'bob', 'email' => 'bob@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjB);
+[$s, , $b] = req('POST', '/register', ['csrf' => $t, 'username' => 'bob', 'email' => 'bob@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjB);
 check('register bob', $s === 302, (string) $s);
 
 $tA = csrf(req('GET', '/app', [], $cjA)[2]);
@@ -683,7 +683,7 @@ check('unknown member rejected', $s === 400, (string) $s);
 
 // A non-friend (dave) can be found in the directory but not grouped.
 $tD = csrf(req('GET', '/register', [], '/tmp/opencode/httptest-d.txt')[2]);
-[$s] = req('POST', '/register', ['csrf' => $tD, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], '/tmp/opencode/httptest-d.txt');
+[$s] = req('POST', '/register', ['csrf' => $tD, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], '/tmp/opencode/httptest-d.txt');
 check('register dave', $s === 302, (string) $s);
 $daveId = (int) (dbq('SELECT id FROM users WHERE username = "dave"')[0]['id'] ?? 0);
 [$s, , $b] = req('POST', '/api/groups/member/add', ['csrf' => $tA, 'group_id' => (string) $gid, 'friend_id' => (string) $daveId], $cjA);
@@ -892,7 +892,7 @@ $cjE = '/tmp/opencode/httptest-e.txt';
 [$s, , $b] = req('GET', '/register?invite=' . $invToken, [], $cjE);
 check('invite link opens locked register form', $s === 200 && strpos($b, 'invited@x.com') !== false && strpos($b, 'name="invite"') !== false, $b);
 $t = csrf($b);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken, 'username' => 'erin', 'email' => 'invited@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjE);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken, 'username' => 'erin', 'email' => 'invited@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjE);
 check('register via invite 302', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
 $pdo = new PDO('sqlite:' . $DB);
 $used = (int) $pdo->query('SELECT COUNT(*) FROM registration_invites WHERE token = ' . $pdo->quote($invToken) . ' AND used_at IS NOT NULL')->fetchColumn();
@@ -911,11 +911,11 @@ $invToken2 = $m[1] ?? '';
 check('second invite link available', $invToken2 !== '', $invPage);
 $cjF = '/tmp/opencode/httptest-f.txt';
 $t = csrf(req('GET', '/register', [], $cjF)[2]);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'frank2', 'email' => 'frank2@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjF);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'frank2', 'email' => 'frank2@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjF);
 check('plain register blocked when registration closed', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
 [$s, , $b] = req('GET', '/register?invite=' . $invToken2, [], $cjF);
 $t = csrf($b);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken2, 'username' => 'frank', 'email' => 'invited2@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjF);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'invite' => $invToken2, 'username' => 'frank', 'email' => 'invited2@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjF);
 check('invite bypasses closed registration', $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
 // Restore open registration for the rest of the suite.
 $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
@@ -928,12 +928,12 @@ $cjR = '/tmp/opencode/httptest-r.txt';
 foreach (['rlim1', 'rlim2'] as $rn) {
     $jar = $cjR . '-' . $rn;
     $t = csrf(req('GET', '/register', [], $jar)[2]);
-    [$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => $rn, 'email' => "$rn@x.com", 'password' => 'password123', 'age18' => '1', 'next' => '/'], $jar);
+    [$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => $rn, 'email' => "$rn@x.com", 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $jar);
     check("rate limit allows registration $rn", $s === 302 && ($h['location'] ?? '') === '/', "$s " . ($h['location'] ?? ''));
 }
 $jar = $cjR . '-rlim3';
 $t = csrf(req('GET', '/register', [], $jar)[2]);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'rlim3', 'email' => 'rlim3@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $jar);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'rlim3', 'email' => 'rlim3@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $jar);
 check('rate limit blocks over the cap', $s === 302 && str_contains($h['location'] ?? '', '/register'), "$s " . ($h['location'] ?? ''));
 $rlim3 = dbq('SELECT COUNT(*) AS n FROM users WHERE username = ?', ['rlim3']);
 check('rate-limited registration created no user', (int) $rlim3[0]['n'] === 0, json_encode($rlim3));
@@ -946,7 +946,7 @@ $tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_create', 'username' => 'manual', 'email' => 'manual@x.com', 'role' => 'user', 'back' => '/admin/users'], $cjA);
 check('user_create redirects', $s === 302, (string) $s);
 [$s, , $b] = req('GET', '/admin/users', [], $cjA);
-preg_match('/Password: ([0-9a-f]{16})/', $b, $pm);
+preg_match('/Password: ([A-Za-z0-9]{12,})/', $b, $pm);
 $manualPw = $pm[1] ?? '';
 check('created user password shown once', $manualPw !== '', $b);
 $cjM = '/tmp/opencode/httptest-m.txt';
@@ -959,7 +959,7 @@ echo "== user delete ==\n";
 $tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
 [$s] = req('POST', '/admin/action', ['csrf' => $tA, 'action' => 'user_create', 'username' => 'doomed', 'email' => 'doomed@x.com', 'role' => 'user', 'back' => '/admin/users'], $cjA);
 [$s, , $b] = req('GET', '/admin/users', [], $cjA);
-preg_match('/Password: ([0-9a-f]{16})/', $b, $dm);
+preg_match('/Password: ([A-Za-z0-9]{12,})/', $b, $dm);
 $doomedPw = $dm[1] ?? '';
 check('doomed created with password', $doomedPw !== '', $b);
 // Log in as the doomed user and have them own a temporary channel.
@@ -1091,7 +1091,7 @@ check('bob can join private #secret via link', $s === 302 && str_contains($h['lo
 req('POST', '/api/command', ['csrf' => $tA, 'channel' => 'secret', 'text' => '/mode #secret +k hunter2'], $cjA);
 $cjD = '/tmp/opencode/httptest-d.txt';
 $t = csrf(req('GET', '/register', [], $cjD)[2]);
-req('POST', '/register', ['csrf' => $t, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjD);
+req('POST', '/register', ['csrf' => $t, 'username' => 'dave', 'email' => 'dave@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjD);
 [$s, $h] = req('GET', '/c/secret', [], $cjD);
 check('keyed channel opens the join modal', $s === 302 && str_contains($h['location'] ?? '', '/app?join=secret'), "$s " . ($h['location'] ?? ''));
 [$s, , $b] = req('GET', '/app?join=secret', [], $cjD);
@@ -1114,7 +1114,7 @@ check('promote bob to staff', $s === 302, (string) $s);
 check('staff can join #staff', $s === 302 && str_contains($h['location'] ?? '', 'channel=staff'), "$s " . ($h['location'] ?? ''));
 $cjC = '/tmp/opencode/httptest-c.txt';
 $t = csrf(req('GET', '/register', [], $cjC)[2]);
-req('POST', '/register', ['csrf' => $t, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjC);
+req('POST', '/register', ['csrf' => $t, 'username' => 'carol', 'email' => 'carol@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjC);
 [$s] = req('GET', '/c/staff', [], $cjC);
 check('regular user denied #staff', $s === 200, (string) $s); // access-denied page (not redirect to chat)
 
@@ -1454,16 +1454,16 @@ check('embed res passes fonts through with ACAO *', $s === 200
 // ── Web-messenger token auth (login without relying on cookies/CSRF) ─────────
 echo "== messenger token auth ==\n";
 // Create users directly in the DB (avoids the registration throttle interplay).
-$tokHash = password_hash('password123', PASSWORD_ARGON2ID);
+$tokHash = password_hash('Password123', PASSWORD_ARGON2ID);
 $pdo->prepare("INSERT INTO users (username, email, password_hash, age_verified_at, registered_at) VALUES ('tokenuser','tokenuser@x.com',?,'1',datetime('now'))")->execute([$tokHash]);
 $tokUser = (int) $pdo->lastInsertId();
 check('token test user created', $tokUser > 0, (string) $tokUser);
 
-[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'password123']);
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'Password123']);
 check('messenger login requires the X-Messenger header', $s === 403, "$s $j");
 [$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'wrong'], null, ['X-Messenger: 1']);
 check('messenger login rejects bad credentials', $s === 401 && str_contains($j, 'Invalid username or password'), "$s $j");
-[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'password123'], null, ['X-Messenger: 1']);
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokenuser', 'password' => 'Password123'], null, ['X-Messenger: 1']);
 $mTok = jsonDecode($j)['token'] ?? '';
 check('messenger login returns a bearer token', $s === 200 && strlen($mTok) > 40, "$s $j");
 [$s, , $b] = req('GET', '/api/me', [], null, ['X-LVC-Session: ' . $mTok]);
@@ -1483,7 +1483,7 @@ check('revoked token is rejected', $s === 401, (string) $s);
 // MFA path: an enrolled user gets a one-time ticket, then a token on TOTP verify.
 $tokMfaSecret = 'JBSWY3DPEHPK3PXP'; // valid base32 secret for the scratch TOTP helper
 $pdo->prepare("INSERT INTO users (username, email, password_hash, age_verified_at, totp_secret, totp_enabled_at, registered_at) VALUES ('tokmfa','tokmfa@x.com',?,'1',?,datetime('now'),datetime('now'))")->execute([$tokHash, $tokMfaSecret]);
-[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokmfa', 'password' => 'password123'], null, ['X-Messenger: 1']);
+[$s, , $j] = req('POST', '/api/messenger/login', ['username' => 'tokmfa', 'password' => 'Password123'], null, ['X-Messenger: 1']);
 $mfaTicket = jsonDecode($j)['ticket'] ?? '';
 check('messenger login flags MFA with a ticket', $s === 200 && (jsonDecode($j)['mfa'] ?? false) === true && $mfaTicket !== '', "$s $j");
 [$s, , $j] = req('POST', '/api/messenger/mfa', ['ticket' => $mfaTicket, 'code' => '000000'], null, ['X-Messenger: 1']);
@@ -1524,7 +1524,7 @@ $tA = csrf(req('GET', '/admin/settings', [], $cjA)[2]);
 check('approval toggle saved', $s === 302, (string) $s);
 $cjP = '/tmp/opencode/httptest-p.txt';
 $t = csrf(req('GET', '/register', [], $cjP)[2]);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'penny', 'email' => 'penny@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjP);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'penny', 'email' => 'penny@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjP);
 check('pending registration logs in (redirect /app)', $s === 302 && ($h['location'] ?? '') === '/app', "$s " . ($h['location'] ?? ''));
 [$s, , $b] = req('GET', '/app', [], $cjP);
 check('pending banner shown in chat', $s === 200 && strpos($b, 'pending admin approval') !== false, (string) $s);
@@ -1551,7 +1551,7 @@ check('admin suspends penny', $s === 302, (string) $s);
 check('suspended session is dead (redirect to login)', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
 $cjP2 = '/tmp/opencode/httptest-p2.txt';
 $t = csrf(req('GET', '/login', [], $cjP2)[2]);
-[$s, $h] = req('POST', '/login', ['csrf' => $t, 'username' => 'penny', 'password' => 'password123', 'next' => '/'], $cjP2);
+[$s, $h] = req('POST', '/login', ['csrf' => $t, 'username' => 'penny', 'password' => 'Password123', 'next' => '/'], $cjP2);
 check('suspended login blocked', $s === 302 && str_contains($h['location'] ?? '', '/login'), "$s " . ($h['location'] ?? ''));
 check('suspended status has reason', (dbq('SELECT status, status_reason FROM users WHERE id = ?', [$penny['id']])[0]['status_reason'] ?? '') === 'age verification');
 $tA = csrf(req('GET', '/admin/users', [], $cjA)[2]);
@@ -1676,7 +1676,7 @@ check('admin can set any channel bg', $s === 200, "$s $j");
 // A non-owner, non-admin user is blocked.
 $cjBG = '/tmp/opencode/httptest-bg.txt';
 $t = csrf(req('GET', '/register', [], $cjBG)[2]);
-[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'bguser', 'email' => 'bguser@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/app?channel=general'], $cjBG);
+[$s, $h] = req('POST', '/register', ['csrf' => $t, 'username' => 'bguser', 'email' => 'bguser@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/app?channel=general'], $cjBG);
 check('bguser registers', $s === 302, "$s " . ($h['location'] ?? ''));
 $tBG = csrf(req('GET', '/app', [], $cjBG)[2]);
 [$s, , $j] = req('POST', '/api/channel/bg', ['csrf' => $tBG, 'channel' => 'bgtown', 'bg_color' => '#000000'], $cjBG);
@@ -2419,10 +2419,10 @@ echo "== unified notifications ==\n";
 // Jar files are unique per run — a stale PHPSESSID from a previous suite run
 // would leak that run's notification watermark into the fresh one.
 $cjNT = '/tmp/opencode/httptest-notify-a-' . getmypid() . '.txt';
-[$s] = req('POST', '/register', ['csrf' => csrf(req('GET', '/register', [], $cjNT)[2]), 'username' => 'noteeeee', 'email' => 'noteeeee@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjNT);
+[$s] = req('POST', '/register', ['csrf' => csrf(req('GET', '/register', [], $cjNT)[2]), 'username' => 'noteeeee', 'email' => 'noteeeee@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjNT);
 check('notify user registered', $s === 302, (string) $s);
 $cjNB = '/tmp/opencode/httptest-notify-b-' . getmypid() . '.txt';
-[$s] = req('POST', '/register', ['csrf' => csrf(req('GET', '/register', [], $cjNB)[2]), 'username' => 'notebob', 'email' => 'notebob@x.com', 'password' => 'password123', 'age18' => '1', 'next' => '/'], $cjNB);
+[$s] = req('POST', '/register', ['csrf' => csrf(req('GET', '/register', [], $cjNB)[2]), 'username' => 'notebob', 'email' => 'notebob@x.com', 'password' => 'Password123', 'age18' => '1', 'next' => '/'], $cjNB);
 check('notify partner registered', $s === 302, (string) $s);
 [$s, , $appN] = req('GET', '/app', [], $cjNT);
 check('web app exposes notify prefs to the client', $s === 200 && str_contains($appN, 'data-notify-prefs'), (string) $s);

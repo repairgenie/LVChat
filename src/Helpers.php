@@ -26,6 +26,39 @@ function h(?string $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+/** Output a nonce attribute for inline <script> tags: nonce="..." */
+function nonce_attr(): string
+{
+    return 'nonce="' . h(CSP_NONCE) . '"';
+}
+
+/**
+ * Generate a random password that meets the complexity policy:
+ * at least 8 chars with uppercase, lowercase, and a digit.
+ * Used for admin-created accounts and password resets.
+ */
+function generate_password(int $length = 16): string
+{
+    $upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    $lower = 'abcdefghijklmnopqrstuvwxyz';
+    $digits = '0123456789';
+    $all = $upper . $lower . $digits;
+    // Ensure at least one from each required class.
+    $pw = $upper[random_int(0, strlen($upper) - 1)]
+        . $lower[random_int(0, strlen($lower) - 1)]
+        . $digits[random_int(0, strlen($digits) - 1)];
+    for ($i = 3; $i < $length; $i++) {
+        $pw .= $all[random_int(0, strlen($all) - 1)];
+    }
+    // Shuffle to avoid predictable positions.
+    $arr = str_split($pw);
+    for ($i = count($arr) - 1; $i > 0; $i--) {
+        $j = random_int(0, $i);
+        [$arr[$i], $arr[$j]] = [$arr[$j], $arr[$i]];
+    }
+    return implode('', $arr);
+}
+
 function redirect(string $path): never
 {
     header('Location: ' . $path);
@@ -350,6 +383,46 @@ function login_attempt_record(): void
 function login_attempt_clear(): void
 {
     Database::query('DELETE FROM login_attempts WHERE ip = ?', [client_ip() ?: '']);
+}
+
+/**
+ * Global per-IP rate limiter. Returns true if the request is allowed, false if
+ * rate-limited. Uses the existing rate_limits table with a "global:" bucket prefix.
+ * $max is the max requests per $windowSeconds.
+ */
+function global_rate_limit(int $max = 60, int $windowSeconds = 60): bool
+{
+    $ip = client_ip() ?: 'unknown';
+    $bucket = 'global:' . $ip;
+    $now = time();
+    $windowStart = $now - $windowSeconds;
+
+    // Clean old entries periodically (not every request).
+    if (mt_rand(1, 20) === 1) {
+        Database::query('DELETE FROM rate_limits WHERE window_start < ?', [$windowStart]);
+    }
+
+    $row = Database::row('SELECT hits, window_start FROM rate_limits WHERE bucket = ?', [$bucket]);
+    if ($row === null) {
+        Database::query(
+            'INSERT INTO rate_limits (bucket, hits, window_start) VALUES (?, 1, ?)',
+            [$bucket, $now]
+        );
+        return true;
+    }
+    if ((int) $row['window_start'] < $windowStart) {
+        // Window expired — reset.
+        Database::query(
+            'UPDATE rate_limits SET hits = 1, window_start = ? WHERE bucket = ?',
+            [$now, $bucket]
+        );
+        return true;
+    }
+    if ((int) $row['hits'] >= $max) {
+        return false;
+    }
+    Database::query('UPDATE rate_limits SET hits = hits + 1 WHERE bucket = ?', [$bucket]);
+    return true;
 }
 
 /** Max new accounts per IP inside the registration window (0 = unlimited). */

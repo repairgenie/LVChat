@@ -29,8 +29,9 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
   <title><?= h($title ?? (config_get('site_name', 'LVChat') ?: 'LVChat')) ?></title>
-  <script>
+  <script <?= nonce_attr() ?>>
   (function () {
     try {
       var t = localStorage.getItem('lvc.theme') || document.documentElement.getAttribute('data-theme') || '';
@@ -101,7 +102,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
       </div>
     </div>
     <div class="admin-drawer-backdrop" id="admin-drawer-backdrop"></div>
-    <script>
+    <script <?= nonce_attr() ?>>
     (function () {
       var toggle = document.getElementById('admin-nav-toggle');
       var backdrop = document.getElementById('admin-drawer-backdrop');
@@ -134,7 +135,7 @@ $layoutThemeMode = $layoutTheme['mode'] === 'light' ? 'light' : '';
     </div>
   </footer>
   <?php endif; ?>
-  <script>
+  <script <?= nonce_attr() ?>>
   (function () {
     var btn = document.getElementById('theme-toggle');
     if (!btn) return;

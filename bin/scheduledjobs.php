@@ -36,6 +36,7 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 require ROOT . '/src/jobs/EventSchedulerJob.php';
 require ROOT . '/src/jobs/RealtimeGatewayCheckJob.php';
 require ROOT . '/src/jobs/VoiceCleanupJob.php';
+require ROOT . '/src/jobs/DatabaseMaintenanceJob.php';
 
 // ── Job registry ────────────────────────────────────────────────────────────
 // Each entry must be a class with a public static run(): void method.
@@ -44,8 +45,7 @@ $jobs = [
     EventSchedulerJob::class,
     RealtimeGatewayCheckJob::class,
     VoiceCleanupJob::class,
-    // Future jobs:
-    // SubscriptionBillingJob::class,
+    DatabaseMaintenanceJob::class,
 ];
 
 // ── Runner ──────────────────────────────────────────────────────────────────

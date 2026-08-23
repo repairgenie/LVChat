@@ -52,5 +52,10 @@ chown -R www-data:www-data \
     "$APP_DIR/public/assets/avatars"
 
 # ── Supervisor ─────────────────────────────────────────────────────────────
-echo "[lvchat] starting supervisord (nginx + php-fpm + ws-server) ..."
+echo "[lvchat] installing cron schedule ..."
+cp /var/www/html/docker/crontab /etc/cron.d/lvchat
+chmod 0644 /etc/cron.d/lvchat
+crontab /etc/cron.d/lvchat
+
+echo "[lvchat] starting supervisord (nginx + php-fpm + ws-server + cron) ..."
 exec /usr/bin/supervisord -n "$@"

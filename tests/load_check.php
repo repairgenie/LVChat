@@ -50,7 +50,7 @@ curl_close($ch);
 preg_match('/name="csrf" value="([^"]+)"/', $html, $m);
 $t = $m[1] ?? '';
 $ch = curl_init($BASE . '/register');
-curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query(['csrf' => $t, 'username' => 'loaduser', 'email' => 'load@x.com', 'password' => 'password123']), CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar]);
+curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query(['csrf' => $t, 'username' => 'loaduser', 'email' => 'load@x.com', 'password' => 'Password123']), CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar]);
 curl_exec($ch);
 curl_close($ch);
 $ch = curl_init($BASE . '/c/general');

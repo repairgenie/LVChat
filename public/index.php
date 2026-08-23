@@ -31,6 +31,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
+// Global rate limit: 300 requests/minute per IP for unauthenticated, 500 for authenticated.
+// Skips static assets, healthcheck, debug/test mode, and module assets.
+$rlPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
+if (getenv('LVC_DEBUG') !== '1'
+    && !str_starts_with($rlPath, '/healthz')
+    && !preg_match('#\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?|wav|mp3|webp|json)$#', $rlPath)
+    && !str_starts_with($rlPath, '/modules/')) {
+    $isAuth = !empty($_SESSION['token']) || !empty($_SERVER['HTTP_X_LVC_SESSION']);
+    $rlMax = $isAuth ? 500 : 300;
+    if (!global_rate_limit($rlMax, 60)) {
+        $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+        if (str_contains($accept, 'application/json') || str_starts_with($rlPath, '/api/')) {
+            header('Retry-After: 60');
+            json_out(['error' => 'Rate limit exceeded. Please wait before making more requests.'], 429);
+        }
+        http_response_code(429);
+        header('Retry-After: 60');
+        $title = 'Rate limited';
+        $content = '';
+        ob_start();
+        require ROOT . '/views/errors/ratelimited.php';
+        $content = ob_get_clean();
+        require ROOT . '/views/layout.php';
+        exit;
+    }
+}
+
 $router = new Router();
 
 // Auth

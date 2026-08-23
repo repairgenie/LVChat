@@ -129,7 +129,8 @@
     },
     /* Confirm an admin action button, then submit its form while preserving the
      * button's name/value (a programmatic form.submit() would drop them, which
-     * is what routes /admin/action). */
+     * is what routes /admin/action). If the button has a data-extra-field
+     * attribute (JSON: {"name":"value",...}), those fields are also injected. */
     confirmSubmit: function (button, message) {
       return window.LVCDialog.confirm(message).then(function (ok) {
         if (!ok) return false;
@@ -138,6 +139,21 @@
         h.name = button.name;
         h.value = button.value;
         button.form.appendChild(h);
+        // Inject any extra hidden fields (e.g. confirm_promote for admin promotion).
+        var extra = button.dataset.extraField;
+        if (extra) {
+          try {
+            var fields = JSON.parse(extra);
+            for (var k in fields) {
+              if (!fields.hasOwnProperty(k)) continue;
+              var f = document.createElement('input');
+              f.type = 'hidden';
+              f.name = k;
+              f.value = fields[k];
+              button.form.appendChild(f);
+            }
+          } catch (e) {}
+        }
         button.form.submit();
         return true;
       });

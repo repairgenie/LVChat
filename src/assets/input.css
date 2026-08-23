@@ -303,6 +303,41 @@
 /* The chat app is always a full-viewport fixed layer. */
 body.chat-app { position: fixed; inset: 0; overflow: hidden; }
 
+/* Prevent accidental page refresh / browser navigation when scrolling the
+   message list. overscroll-behavior: contain stops the rubber-band effect
+   from propagating to the parent (the browser chrome). touch-action: pan-y
+   tells the browser to only handle vertical scrolls, avoiding gesture
+   conflicts with horizontal swipes. */
+#messages {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+/* Ensure buttons and interactive elements have adequate touch targets and
+   respond immediately on tap (no 300ms delay on older mobile browsers). */
+.btn, .btn-primary, .btn-ghost, button, a {
+  touch-action: manipulation;
+}
+
+/* Minimum 44px touch target for message action buttons on mobile. */
+@media (max-width: 767.98px) {
+  .msg-ctx-btn, .ctx-btn {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .actions button, .msg-actions button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .reaction-chip {
+    min-height: 36px;
+    padding: 4px 10px;
+  }
+}
+
 /* PWA safe areas: content fills behind the notch / home indicator when
    viewport-fit=cover is set. env() falls to 0 outside standalone mode. */
 .chat-app header { padding-top: env(safe-area-inset-top); }

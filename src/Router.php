@@ -59,12 +59,67 @@ final class Router
             }
             $params = $this->match($p, $path);
             if ($params !== null) {
-                $h($params);
+                try {
+                    $h($params);
+                } catch (\Throwable $e) {
+                    $this->handleException($e);
+                }
                 return;
             }
         }
         http_response_code(404);
-        echo 'Not found';
+        $this->renderError('notfound', 'Not found', 404);
+    }
+
+    /**
+     * Render a styled error page. Falls back to plain text if the template
+     * or layout cannot be loaded (e.g. during early bootstrap failures).
+     */
+    private function renderError(string $template, string $fallbackTitle, int $code): void
+    {
+        http_response_code($code);
+        $errorPage = ROOT . '/views/errors/' . $template . '.php';
+        if (is_file($errorPage)) {
+            $title = $fallbackTitle;
+            $content = '';
+            ob_start();
+            require $errorPage;
+            $content = ob_get_clean();
+            $layout = ROOT . '/views/layout.php';
+            if (is_file($layout)) {
+                require $layout;
+            } else {
+                echo $content;
+            }
+        } else {
+            echo h($fallbackTitle);
+        }
+    }
+
+    /**
+     * Catch unhandled exceptions and render a 500 page. Logs the full error
+     * server-side; shows only a generic message to the user (no leak of paths,
+     * stack traces, or DB details).
+     */
+    private function handleException(\Throwable $e): void
+    {
+        error_log('LVChat unhandled exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        if (PHP_SAPI === 'cli' || getenv('LVC_DEBUG') === '1') {
+            http_response_code(500);
+            echo "500 Internal Server Error\n\n";
+            echo $e->getMessage() . "\n";
+            echo $e->getFile() . ':' . $e->getLine() . "\n\n";
+            echo $e->getTraceAsString();
+            return;
+        }
+        // JSON endpoints get a JSON error; page requests get the styled 500 page.
+        $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+        $isApi = str_contains($accept, 'application/json')
+            || str_starts_with($_SERVER['REQUEST_URI'] ?? '', '/api/');
+        if ($isApi) {
+            json_out(['error' => 'Internal server error'], 500);
+        }
+        $this->renderError('servererror', 'Internal Server Error', 500);
     }
 
     private function match(string $pattern, string $path): ?array

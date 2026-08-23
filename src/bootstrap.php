@@ -45,6 +45,66 @@ if (PHP_SAPI === 'cli' || getenv('LVC_DEBUG') === '1') {
     ini_set('log_errors', '1');
 }
 
+// Global error and exception handlers: catch anything the Router's try/catch
+// misses (e.g. fatal errors in includes, shutdown handlers). In production we
+// log the full error and show a generic message; in debug mode we show details.
+if (PHP_SAPI !== 'cli' && getenv('LVC_DEBUG') !== '1') {
+    set_exception_handler(static function (\Throwable $e): void {
+        error_log('LVChat fatal exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        http_response_code(500);
+        $errorPage = ROOT . '/views/errors/servererror.php';
+        if (is_file($errorPage)) {
+            $title = 'Server Error';
+            ob_start();
+            require $errorPage;
+            $content = ob_get_clean();
+            $layout = ROOT . '/views/layout.php';
+            if (is_file($layout)) {
+                require $layout;
+            } else {
+                echo $content;
+            }
+        } else {
+            echo 'Internal Server Error';
+        }
+        exit;
+    });
+
+    set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline): bool {
+        // Only log actual errors (not notices/warnings which PHP handles natively).
+        if (!in_array($errno, [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            return false;
+        }
+        error_log("LVChat fatal error [$errno]: $errstr in $errfile:$errline");
+        http_response_code(500);
+        $errorPage = ROOT . '/views/errors/servererror.php';
+        if (is_file($errorPage)) {
+            $title = 'Server Error';
+            ob_start();
+            require $errorPage;
+            $content = ob_get_clean();
+            $layout = ROOT . '/views/layout.php';
+            if (is_file($layout)) {
+                require $layout;
+            } else {
+                echo $content;
+            }
+        } else {
+            echo 'Internal Server Error';
+        }
+        exit;
+    });
+
+    register_shutdown_function(static function (): void {
+        $error = error_get_last();
+        if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            error_log("LVChat shutdown error [{$error['type']}]: {$error['message']} in {$error['file']}:{$error['line']}");
+            http_response_code(500);
+            echo 'Internal Server Error';
+        }
+    });
+}
+
 // Sessions must survive cross-site iframe contexts (the public embed widget),
 // so use SameSite=None over HTTPS. Plain-HTTP/local installs fall back to Lax.
 // Check proxy headers (X-Forwarded-Proto, CF-Visitor) for TLS-terminating
@@ -201,10 +261,18 @@ if ($secure) {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }
 
+// Per-request CSP nonce: a random base64 token that allows only scripts tagged
+// with this nonce to execute, blocking XSS even if an attacker injects <script>.
+// Styles still use 'unsafe-inline' because Tailwind generates inline styles;
+// this can be hardened with nonces in a future pass.
+$__cspNonce = base64_encode(random_bytes(16));
+// Expose to views via a helper and as a constant.
+define('CSP_NONCE', $__cspNonce);
+
 // Security headers: CSP (restrictive baseline) and clickjacking protection.
-// The CSP allows 'unsafe-inline' for styles (Tailwind) and scripts (theme-switcher,
-// CSRF injection) — a nonce-based approach can replace this in a future hardening pass.
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+// The nonce replaces 'unsafe-inline' for scripts. 'unsafe-eval' is removed.
+// Styles still use 'unsafe-inline' (Tailwind inline styles).
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'nonce-{$__cspNonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
 header("X-Content-Type-Options: nosniff");
 header("Referrer-Policy: strict-origin-when-cross-origin");
 
@@ -225,4 +293,20 @@ if ($secure && $adminToken) {
         }
     }
     $_SESSION['admin_last_activity'] = time();
+}
+
+// UTM / referral tracking: capture traffic source parameters on the first visit
+// and store them in the session so they can be attributed on registration.
+if (!empty($_GET['utm_source']) || !empty($_GET['utm_medium']) || !empty($_GET['utm_campaign']) || !empty($_GET['ref'])) {
+    if (empty($_SESSION['referral'])) {
+        $_SESSION['referral'] = [
+            'utm_source'   => $_GET['utm_source'] ?? '',
+            'utm_medium'   => $_GET['utm_medium'] ?? '',
+            'utm_campaign' => $_GET['utm_campaign'] ?? '',
+            'utm_term'     => $_GET['utm_term'] ?? '',
+            'utm_content'  => $_GET['utm_content'] ?? '',
+            'ref'          => $_GET['ref'] ?? '',
+            'captured_at'  => gmdate('Y-m-d H:i:s'),
+        ];
+    }
 }
