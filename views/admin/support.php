@@ -148,7 +148,7 @@ require ROOT . '/views/admin/_page_header.php';
 </div>
 
 <script src="/assets/vendor/tiptap/tiptap-bundle.js"></script>
-<script>
+<script <?= nonce_attr() ?>
 (function () {
   var toggle = document.getElementById('new-ticket-toggle');
   var form = document.getElementById('new-ticket-form');

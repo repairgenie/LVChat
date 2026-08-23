@@ -100,7 +100,7 @@ require ROOT . '/views/admin/_page_header.php';
   </table>
 </div>
 
-<script>
+<script <?= nonce_attr() ?>
 function promptCopy(title, value) {
   navigator.clipboard.writeText(value).then(function() {
     LVCDialog.alert(title + ' copied to clipboard.');

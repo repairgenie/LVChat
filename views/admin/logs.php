@@ -70,7 +70,7 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
 </div>
 
-<script>
+<script <?= nonce_attr() ?>
 (() => {
   const modal = document.getElementById('log-modal');
   const title = document.getElementById('log-modal-title');

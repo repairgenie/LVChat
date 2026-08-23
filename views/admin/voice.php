@@ -139,7 +139,7 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
 </div>
 
-<script>
+<script <?= nonce_attr() ?>
 (function () {
   var csrf = '<?= Csrf::token() ?>';
   var sttUrl = <?= json_encode($settings['voice_stt_sidecar_url'] ?? 'http://127.0.0.1:8787') ?>;

@@ -150,7 +150,7 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
 </form>
 
-<script>
+<script <?= nonce_attr() ?>
 (function () {
   const csrf = document.body.dataset.csrf || '';
   const presets = <?= json_encode(array_column($presets, null, 'id')) ?>;

@@ -140,7 +140,7 @@ require ROOT . '/views/admin/_page_header.php';
     </tbody>
   </table>
 </div>
-<script>
+<script <?= nonce_attr() ?>
 function promptReason(event, msg) {
   event.preventDefault();
   LVCDialog.prompt(msg, '').then(function (reason) {

@@ -94,7 +94,7 @@ require ROOT . '/views/admin/_page_header.php';
 </form>
 
 <script src="/assets/vendor/tiptap/tiptap-bundle.js"></script>
-<script>
+<script <?= nonce_attr() ?>
 (function () {
   var bundle = window.TiptapBundle;
   if (!bundle) {

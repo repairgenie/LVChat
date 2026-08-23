@@ -350,7 +350,7 @@ require ROOT . '/views/admin/_page_header.php';
       <p class="text-xs text-discord-400 mt-1">How often the server writes "last seen" per user. Most polls become pure reads.</p>
     </div>
   </div>
-  <script>
+  <script <?= nonce_attr() ?>>
   document.querySelector('select[name="realtime"]').addEventListener('change', function() { syncRtUi(this.value); });
   // The WebSocket gateway panel, the force checkbox and the poll section are all
   // toggled from the live dropdown value on load (not baked in server-side), so
@@ -420,7 +420,7 @@ require ROOT . '/views/admin/_page_header.php';
     </div>
   </div>
 
-  <script>
+  <script <?= nonce_attr() ?>>
   document.querySelector('input[name="smtp_enabled"]').addEventListener('change', function() {
     var f = document.getElementById('smtp-fields');
     var controls = f.querySelectorAll('input, select');
@@ -435,16 +435,71 @@ require ROOT . '/views/admin/_page_header.php';
     }
   });
   </script>
-  <script>
+  <script <?= nonce_attr() ?>>
   (function () {
     var csrf = document.body.dataset.csrf || '';
+
+    // ── Deploy modal: streams bin/deploy.sh like a terminal ──────────────────
+    // Kept outside the WS-status guard so the deploy button always works.
+    var deployBtn = document.getElementById('deploy-run');
+    function openDeployModal() {
+      var modal = document.getElementById('deploy-modal');
+      var out = document.getElementById('deploy-modal-output');
+      if (!modal || !out) return null;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      out.textContent = '';
+      out.scrollTop = out.scrollHeight;
+      return out;
+    }
+    function closeDeployModal() {
+      var modal = document.getElementById('deploy-modal');
+      if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    }
+    if (deployBtn) deployBtn.addEventListener('click', function () {
+      if (deployBtn.disabled) return;
+      deployBtn.disabled = true;
+      var out = openDeployModal();
+      if (!out) { deployBtn.disabled = false; return; }
+      out.textContent += '$ bash bin/deploy.sh\n';
+      var fd = new FormData();
+      fd.append('csrf', csrf);
+      fetch('/admin/deploy/stream', { method: 'POST', body: fd })
+        .then(function (r) {
+          if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+          return r.body.getReader();
+        })
+        .then(function (reader) {
+          var decoder = new TextDecoder();
+          function pump() {
+            return reader.read().then(function (res) {
+              if (res.done) { deployBtn.disabled = false; return; }
+              out.textContent += decoder.decode(res.value, { stream: true });
+              out.scrollTop = out.scrollHeight;
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .catch(function (err) {
+          out.textContent += '\n[error: ' + (err && err.message ? err.message : 'request failed') + ']';
+          deployBtn.disabled = false;
+        });
+    });
+    document.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('#deploy-close')) closeDeployModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeDeployModal();
+    });
+
+    // ── WebSocket gateway status + controls ──────────────────────────────────
     var statusEl = document.getElementById('ws-status');
     var outEl = document.getElementById('ws-output');
     var startBtn = document.getElementById('ws-btn-start');
     var stopBtn = document.getElementById('ws-btn-stop');
     var restartBtn = document.getElementById('ws-btn-restart');
     var reconnectBtn = document.getElementById('ws-btn-reconnect');
-    var deployBtn = document.getElementById('deploy-run');
     if (!statusEl) return;
 
     function post(url, data, onOk) {
@@ -531,67 +586,6 @@ require ROOT . '/views/admin/_page_header.php';
         refreshStatus();
         reconnectBtn.disabled = false;
       });
-    });
-
-    // ── Deploy modal: streams bin/deploy.sh like a terminal ────────────────────
-    function openDeployModal() {
-      var modal = document.getElementById('deploy-modal');
-      var out = document.getElementById('deploy-modal-output');
-      if (!modal || !out) return null;
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
-      out.textContent = '';
-      out.scrollTop = out.scrollHeight;
-      return out;
-    }
-    function closeDeployModal() {
-      var modal = document.getElementById('deploy-modal');
-      if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
-    }
-
-    if (deployBtn) deployBtn.addEventListener('click', function () {
-      if (deployBtn.disabled) return;
-      deployBtn.disabled = true;
-      var out = openDeployModal();
-      if (!out) { deployBtn.disabled = false; return; }
-      out.textContent += '$ bash bin/deploy.sh\n';
-      var fd = new FormData();
-      fd.append('csrf', csrf);
-      fetch('/admin/deploy/stream', { method: 'POST', body: fd })
-        .then(function (r) {
-          if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
-          return r.body.getReader();
-        })
-        .then(function (reader) {
-          var decoder = new TextDecoder();
-          function pump() {
-            return reader.read().then(function (res) {
-              if (res.done) { deployBtn.disabled = false; refreshStatus(); return; }
-              out.textContent += decoder.decode(res.value, { stream: true });
-              out.scrollTop = out.scrollHeight;
-              return pump();
-            });
-          }
-          return pump();
-        })
-        .catch(function (err) {
-          out.textContent += '\n[error: ' + (err && err.message ? err.message : 'request failed') + ']';
-          deployBtn.disabled = false;
-        });
-      refreshStatus();
-    });
-
-    // The modal markup lives after this script block, so bind the X button via
-    // event delegation rather than a direct element lookup.
-    document.addEventListener('click', function (e) {
-      if (e.target && e.target.closest && e.target.closest('#deploy-close')) closeDeployModal();
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') closeDeployModal();
-    });
-    document.addEventListener('click', function (e) {
-      var modal = document.getElementById('deploy-modal');
-      if (modal && !modal.classList.contains('hidden') && e.target === modal) closeDeployModal();
     });
 
     refreshStatus();
