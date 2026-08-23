@@ -188,7 +188,8 @@ CREATE TABLE IF NOT EXISTS private_messages (
   content TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL DEFAULT 'message',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  read_at TEXT
+  read_at TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS memos (

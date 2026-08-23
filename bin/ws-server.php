@@ -240,6 +240,25 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
                         && ($st['sub']['target'] ?? '') === ($event['channel'] ?? '');
                 });
                 break;
+            case 'dm_update':
+                // A DM message was edited/deleted: deliver to both participants.
+                $dmFromId = (int) ($event['from_id'] ?? 0);
+                $dmFromG = (int) ($event['from_guest'] ?? 0);
+                $dmToId = (int) ($event['to_id'] ?? 0);
+                $dmToG = (int) ($event['to_guest'] ?? 0);
+                $broadcast(['dm_update' => [
+                    'action' => (string) ($event['action'] ?? ''),
+                    'message_id' => (int) ($event['message_id'] ?? 0),
+                    'content' => $event['content'] ?? null,
+                ]], static function (array $st) use ($dmFromId, $dmFromG, $dmToId, $dmToG): bool {
+                    if (($st['sub']['type'] ?? null) !== 'dm') {
+                        return false;
+                    }
+                    $uid = (int) ($st['user']['id'] ?? 0);
+                    $ug = (int) ($st['user']['guest'] ?? 0);
+                    return ($uid === $dmFromId && $ug === $dmFromG) || ($uid === $dmToId && $ug === $dmToG);
+                });
+                break;
             default:
                 break;
         }

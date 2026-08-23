@@ -338,6 +338,23 @@ final class Realtime
         ], $extra));
     }
 
+    /** Push a DM message edit/delete to both conversation participants. */
+    public static function dmUpdate(array $pm, string $action, int $messageId, array $extra = []): void
+    {
+        if (!self::enabled()) {
+            return;
+        }
+        self::publish(array_merge([
+            'type' => 'dm_update',
+            'action' => $action,
+            'message_id' => $messageId,
+            'from_id' => (int) ($pm['sender_id'] ?? 0),
+            'from_guest' => (int) ($pm['sender_guest_id'] ?? 0),
+            'to_id' => (int) ($pm['recipient_id'] ?? 0),
+            'to_guest' => (int) ($pm['recipient_guest_id'] ?? 0),
+        ], $extra));
+    }
+
     /** Refresh one user's notification bell on all their open tabs. */
     public static function bell(array $user): void
     {

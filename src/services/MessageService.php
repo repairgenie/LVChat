@@ -325,7 +325,7 @@ $params[] = $limit;
                     CASE WHEN pm.sender_guest_id IS NOT NULL THEN 1 ELSE 0 END AS guest,
                     NULL AS bot, NULL AS level
              FROM private_messages pm
-             WHERE pm.id > ? AND (
+             WHERE pm.id > ? AND pm.deleted = 0 AND (
                 ((pm.sender_id = ? OR pm.sender_guest_id = ?) AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?))
                 OR
                 ((pm.sender_id = ? OR pm.sender_guest_id = ?) AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?))
@@ -618,18 +618,31 @@ $params[] = $limit;
 
     public static function delete(int $messageId, array $actor): bool|string
     {
+        // Try channel messages first.
         $msg = Database::row('SELECT * FROM messages WHERE id = ?', [$messageId]);
-        if (!$msg) {
-            return 'Message not found.';
+        if ($msg) {
+            $isOwner = self::isGuest($actor)
+                ? ($msg['sender_guest_id'] !== null && (int) $msg['sender_guest_id'] === (int) $actor['id'])
+                : ($msg['sender_id'] !== null && (int) $msg['sender_id'] === (int) $actor['id']);
+            if ($actor['role'] !== 'admin' && !$isOwner) {
+                return 'You can only delete your own messages.';
+            }
+            Database::query('UPDATE messages SET deleted = 1, content = "" WHERE id = ?', [$messageId]);
+            return true;
         }
-        $isOwner = self::isGuest($actor)
-            ? ($msg['sender_guest_id'] !== null && (int) $msg['sender_guest_id'] === (int) $actor['id'])
-            : ($msg['sender_id'] !== null && (int) $msg['sender_id'] === (int) $actor['id']);
-        if ($actor['role'] !== 'admin' && !$isOwner) {
-            return 'You can only delete your own messages.';
+        // Try private messages (DMs).
+        $pm = Database::row('SELECT * FROM private_messages WHERE id = ?', [$messageId]);
+        if ($pm) {
+            $isOwner = self::isGuest($actor)
+                ? ($pm['sender_guest_id'] !== null && (int) $pm['sender_guest_id'] === (int) $actor['id'])
+                : ($pm['sender_id'] !== null && (int) $pm['sender_id'] === (int) $actor['id']);
+            if ($actor['role'] !== 'admin' && !$isOwner) {
+                return 'You can only delete your own messages.';
+            }
+            Database::query('UPDATE private_messages SET deleted = 1, content = "" WHERE id = ?', [$messageId]);
+            return true;
         }
-        Database::query('UPDATE messages SET deleted = 1, content = "" WHERE id = ?', [$messageId]);
-        return true;
+        return 'Message not found.';
     }
 
     public static function edit(int $messageId, string $content, array $actor): bool|string

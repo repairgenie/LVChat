@@ -1307,13 +1307,19 @@ final class ChatController
     /** Fan out a channel message edit/delete/reaction to the channel's viewers. */
     private static function pushMsgUpdate(int $messageId, string $action, array $extra = []): void
     {
+        // Try channel messages first.
         $cid = Database::scalar('SELECT channel_id FROM messages WHERE id = ?', [$messageId]);
-        if (!$cid) {
+        if ($cid) {
+            $slug = (string) (Database::scalar('SELECT slug FROM channels WHERE id = ?', [(int) $cid]) ?? '');
+            if ($slug !== '') {
+                Realtime::msgUpdate($slug, $action, $messageId, $extra);
+            }
             return;
         }
-        $slug = (string) (Database::scalar('SELECT slug FROM channels WHERE id = ?', [(int) $cid]) ?? '');
-        if ($slug !== '') {
-            Realtime::msgUpdate($slug, $action, $messageId, $extra);
+        // Try private messages (DMs) — broadcast to both sender and recipient.
+        $pm = Database::row('SELECT sender_id, sender_guest_id, recipient_id, recipient_guest_id FROM private_messages WHERE id = ?', [$messageId]);
+        if ($pm) {
+            Realtime::dmUpdate($pm, $action, $messageId, $extra);
         }
     }
 

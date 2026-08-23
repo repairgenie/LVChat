@@ -459,6 +459,14 @@ final class Database
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_channel_members_guest ON channel_members(guest_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pm_recipient ON private_messages(recipient_id, recipient_guest_id, read_at)');
 
+        // Soft-delete support for private messages.
+        if (in_array('private_messages', $tables, true)) {
+            $pmCols = array_column($pdo->query("PRAGMA table_info(private_messages)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('deleted', $pmCols, true)) {
+                $pdo->exec("ALTER TABLE private_messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
+            }
+        }
+
         // Global rate limiting table (used by WebRTC module and core rate limiter).
         if (!in_array('rate_limits', $tables, true)) {
             $pdo->exec('CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, hits INTEGER NOT NULL DEFAULT 1, window_start INTEGER NOT NULL DEFAULT 0)');

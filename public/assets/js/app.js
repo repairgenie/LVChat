@@ -1180,6 +1180,7 @@
     if (j.friends) updateFriendsSidebar(j.friends, j.friend_requests || []);
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
     if (j.msg_update) applyMsgUpdate(j.msg_update);
+    if (j.dm_update) applyMsgUpdate(j.dm_update);
     if (j.alerts) handleAlerts(j.alerts);
     if (j.typing) applyTyping(j.typing);
   }
@@ -4165,27 +4166,34 @@ if (j.mode) {
       else if (DM) wsSend({ action: 'subscribe', dm: DM });
     }
     function refreshTicket(done) {
-      fetch('/api/ws/ticket')
-        .then((r) => r.json())
+      fetch('/api/ws/ticket', { credentials: 'same-origin' })
+        .then((r) => {
+          if (!r.ok) throw new Error('ticket fetch ' + r.status);
+          return r.json();
+        })
         .then((j) => {
           if (j && j.ticket) { wsTicket = j.ticket; wsBase = j.url || wsBase; }
           done();
         })
-        .catch(() => done());
+        .catch(() => {
+          // Messenger never gives up on a failed fetch — retry after backoff.
+          wsFails++;
+          var delay = Math.min(30000, 2000 * Math.pow(2, Math.max(wsFails, 1) - 1));
+          wsRetryTimer = setTimeout(() => { if (!wsGone && !ws) refreshTicket(() => { if (!ws) openWs(); }); }, delay);
+        });
     }
     function giveUp() {
       if (reconcileTimer) { clearInterval(reconcileTimer); reconcileTimer = null; }
       onUnrecoverable();
       scheduleWsRetry();
     }
-    // A failed handshake used to stop retrying forever. Re-probe quietly every
-    // few minutes so a later proxy fix/daemon restart re-enables realtime.
+    // Messenger never gives up — exponential backoff keeps trying.
     function scheduleWsRetry() {
       if (wsRetryTimer) return;
       wsRetryTimer = setInterval(() => {
         if (wsGone || ws || document.hidden) return;
         wsFails = 0;
-        plainTried = false; // prefer the secure URL again next cycle
+        plainTried = false;
         refreshTicket(() => { if (!ws) openWs(); });
       }, 5 * 60 * 1000);
     }
@@ -4220,12 +4228,13 @@ if (j.mode) {
           return;
         }
         if (wsFails >= 3) { giveUp(); return; }
-        // A ticket only lives 60s; mint a fresh one before reconnecting.
-        refreshTicket(() => setTimeout(openWs, pollMs * (wsFails + 1)));
+        // Messenger-style: exponential backoff, never give up.
+        var delay = Math.min(30000, 2000 * Math.pow(2, wsFails - 1));
+        refreshTicket(() => setTimeout(openWs, delay));
       };
     }
     showTransport('connecting', false); // badge is visible from boot, not just after a fallback
-    openWs();
+    refreshTicket(() => openWs()); // always fetch a fresh ticket+URL like the messenger does
     // Presence heartbeat keeps last_seen fresh server-side and the connection
     // alive past idle timeouts.
     setInterval(() => wsSend({ action: 'ping' }), 30000);
@@ -4236,18 +4245,12 @@ if (j.mode) {
   }
 
   if (rtMode === 'ws' && window.WebSocket) {
-    if (body.dataset.rtTicket) {
-      // Normal mode: fall back to polling. Force mode: go offline + keep retrying.
-      setupWs(RT_FORCE
-        ? () => showTransport('none')
-        : () => { showTransport('poll'); startPolling(); });
-    } else if (RT_FORCE) {
-      // Forced but no handshake ticket — never downgrade; re-probe for one.
-      showTransport('none');
-      setupWs(() => showTransport('none'));
-    } else {
-      startPolling();
-    }
+    // Always attempt WebSocket — refreshTicket() fetches a fresh ticket+URL
+    // dynamically (like the messenger apps do), so we no longer depend on
+    // the static data-rt-ticket attribute being present at page load.
+    setupWs(RT_FORCE
+      ? () => showTransport('none')
+      : () => { showTransport('poll'); startPolling(); });
   } else if (rtMode === 'sse' && window.EventSource && !RT_FORCE) {
     let es = null;
     function openStream() {
