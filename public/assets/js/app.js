@@ -517,7 +517,9 @@
         const msg = btn.closest('.msg');
         const id = msg.dataset.id;
         if (!(await uiConfirm('Delete this message?'))) return;
-        post('/api/message/delete', { id }, () => msg.remove());
+        const data = { id };
+        if (msg.dataset.isPm === '1') data.pm = '1';
+        post('/api/message/delete', data, () => msg.remove());
       });
     });
     msgsEl.querySelectorAll('.msg-edit').forEach((btn) => {
@@ -1181,6 +1183,12 @@
     if (j.channel_invites) updateChannelInvites(j.channel_invites);
     if (j.msg_update) applyMsgUpdate(j.msg_update);
     if (j.dm_update) applyMsgUpdate(j.dm_update);
+    if (j.dm_deleted_ids && j.dm_deleted_ids.length) {
+      j.dm_deleted_ids.forEach((id) => {
+        const el = msgsEl ? msgsEl.querySelector('.msg[data-id="' + id + '"]') : null;
+        if (el) el.remove();
+      });
+    }
     if (j.alerts) handleAlerts(j.alerts);
     if (j.typing) applyTyping(j.typing);
   }
@@ -3113,7 +3121,11 @@ if (j.mode) {
       } });
     }
     if (mine || CAN_ADMIN || CAN_OP) {
-      items.push({ label: 'Delete', danger: true, onClick: () => post('/api/message/delete', { id }, () => el.remove()) });
+      items.push({ label: 'Delete', danger: true, onClick: () => {
+        const data = { id };
+        if (el.dataset.isPm === '1') data.pm = '1';
+        post('/api/message/delete', data, () => el.remove());
+      } });
     }
     if (author && author.toLowerCase() !== MY_NICK) {
       items.push({ label: 'Message ' + author, onClick: () => { window.location = '/app?dm=' + encodeURIComponent(author); } });

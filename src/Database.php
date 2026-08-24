@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '41';
+    private const SCHEMA_VERSION = '43';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -60,6 +60,9 @@ final class Database
         // (Fresh DBs have no tables yet, so skip straight to the slow path.)
         $schemaVersion = $fresh ? null : self::scalar('SELECT value FROM server_config WHERE key = "schema_version"');
         if ($schemaVersion === self::SCHEMA_VERSION) {
+            // Ensure tables that may have been missed by a partial deploy exist.
+            // CREATE TABLE IF NOT EXISTS is idempotent and fast.
+            $pdo->exec('CREATE TABLE IF NOT EXISTS dm_deletions (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL, sender_id INTEGER, sender_guest_id INTEGER, recipient_id INTEGER, recipient_guest_id INTEGER, deleted_at TEXT NOT NULL DEFAULT (datetime(\'now\')), UNIQUE (message_id))');
             return;
         }
 
@@ -465,6 +468,12 @@ final class Database
             if (!in_array('deleted', $pmCols, true)) {
                 $pdo->exec("ALTER TABLE private_messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
             }
+        }
+
+        // DM deletion tracking — records hard-deleted PMs so polling clients
+        // can learn about the deletion on their next poll.
+        if (!in_array('dm_deletions', $tables, true)) {
+            $pdo->exec('CREATE TABLE IF NOT EXISTS dm_deletions (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL, sender_id INTEGER, sender_guest_id INTEGER, recipient_id INTEGER, recipient_guest_id INTEGER, deleted_at TEXT NOT NULL DEFAULT (datetime(\'now\')), UNIQUE (message_id))');
         }
 
         // Global rate limiting table (used by WebRTC module and core rate limiter).

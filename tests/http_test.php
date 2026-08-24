@@ -546,8 +546,9 @@ $tA = csrf(req('GET', '/app', [], $cjA)[2]);
 [$s, , $b] = req('POST', '/api/send', ['csrf' => $tA, 'recipient' => 'bob', 'content' => 'hi bob'], $cjA);
 check('PM from alice to bob', $s === 200 && jsonDecode($b)['ok'] === true, $b);
 [$s, , $b] = req('GET', '/api/poll?dm=bob&since=0', [], $cjA);
-$j = jsonDecode($b);
-check('bob DM appears in alice poll', $s === 200 && count($j['messages'] ?? []) === 1, $b);
+$jA = jsonDecode($b);
+check('bob DM appears in alice poll', $s === 200 && count($jA['messages'] ?? []) === 1, $b);
+$dmMsgId = $jA['messages'][0]['id'] ?? 0;
 // A DM sent while the recipient is NOT on the DM page must still surface in
 // the recipient's poll via dm_list (this was the "DMs don't land" bug).
 [$s, , $b] = req('GET', '/api/poll?since=0', [], $cjB);
@@ -557,6 +558,40 @@ foreach (($j['dm_list'] ?? []) as $d) {
     if ($d['username'] === 'alice' && (int) $d['unread'] >= 1) $found = true;
 }
 check('channel-user poll surfaces the unread DM (dm_list)', $s === 200 && $found, $b);
+
+// ── DM deletion: delete a DM and verify it's gone from both participants ──
+// Refresh Alice's CSRF token (the one from line 545 may be stale).
+$tDel = csrf(req('GET', '/app', [], $cjA)[2]);
+[$s, , $b] = req('POST', '/api/message/delete', ['csrf' => $tDel, 'id' => (string) $dmMsgId, 'pm' => '1'], $cjA);
+check('alice deletes her own DM', $s === 200, "$s $b");
+// After deletion, alice's poll must not return it.
+[$s, , $b] = req('GET', '/api/poll?dm=bob&since=0', [], $cjA);
+$afterDel = jsonDecode($b);
+$stillThere = false;
+foreach (($afterDel['messages'] ?? []) as $m) {
+    if ((int) ($m['id'] ?? 0) === $dmMsgId) $stillThere = true;
+}
+check('deleted DM gone from alice poll', $s === 200 && !$stillThere, $b);
+// Bob's poll must not return it either.
+[$s, , $b] = req('GET', '/api/poll?dm=alice&since=0', [], $cjB);
+$afterDelB = jsonDecode($b);
+$stillThereB = false;
+foreach (($afterDelB['messages'] ?? []) as $m) {
+    if ((int) ($m['id'] ?? 0) === $dmMsgId) $stillThereB = true;
+}
+check('deleted DM gone from bob poll', $s === 200 && !$stillThereB, $b);
+// dm_deleted_ids must include the deleted message for polling clients.
+[$s, , $b] = req('GET', '/api/poll?dm=alice&since=0', [], $cjB);
+$delIds = jsonDecode($b)['dm_deleted_ids'] ?? [];
+check('dm_deleted_ids contains deleted DM', in_array($dmMsgId, $delIds), json_encode($delIds));
+// Verify the row is physically gone from private_messages.
+$pdoT = new PDO('sqlite:' . $DB);
+$gone = (int) $pdoT->query("SELECT COUNT(*) FROM private_messages WHERE id = $dmMsgId")->fetchColumn() === 0;
+check('DM row hard-deleted from DB', $gone, "count=" . $pdoT->query("SELECT COUNT(*) FROM private_messages WHERE id = $dmMsgId")->fetchColumn());
+// Verify deletion tracked in dm_deletions.
+$tracked = (int) $pdoT->query("SELECT COUNT(*) FROM dm_deletions WHERE message_id = $dmMsgId")->fetchColumn() > 0;
+check('DM deletion tracked in dm_deletions', $tracked);
+$pdoT = null;
 
 // ── Messenger: CORS + user-directory search + contact groups ────────────────
 echo "== messenger ==\n";

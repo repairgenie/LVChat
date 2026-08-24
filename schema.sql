@@ -192,6 +192,17 @@ CREATE TABLE IF NOT EXISTS private_messages (
   deleted INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS dm_deletions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  sender_id INTEGER,
+  sender_guest_id INTEGER,
+  recipient_id INTEGER,
+  recipient_guest_id INTEGER,
+  deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (message_id)
+);
+
 CREATE TABLE IF NOT EXISTS memos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

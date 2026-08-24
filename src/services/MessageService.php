@@ -371,7 +371,7 @@ $params[] = $limit;
                     CASE WHEN pm.sender_guest_id IS NOT NULL THEN 1 ELSE 0 END AS guest,
                     NULL AS bot, NULL AS level
              FROM private_messages pm
-             WHERE pm.id < ? AND (
+             WHERE pm.id < ? AND pm.deleted = 0 AND (
                 ((pm.sender_id = ? OR pm.sender_guest_id = ?) AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?))
                 OR
                 ((pm.sender_id = ? OR pm.sender_guest_id = ?) AND (pm.recipient_id = ? OR pm.recipient_guest_id = ?))
@@ -451,6 +451,28 @@ $params[] = $limit;
             ];
         }
         return $out;
+    }
+
+    /** DM message IDs that were hard-deleted since $sinceId (for poll sync). */
+    public static function recentDmDeletions(array $me, int $sinceId): array
+    {
+        [$meU, $meG] = self::actorPair($me);
+        $rows = Database::all(
+            'SELECT message_id FROM dm_deletions
+             WHERE id > ? AND (
+                (sender_id = ? OR sender_guest_id = ?)
+                OR (recipient_id = ? OR recipient_guest_id = ?)
+             )
+             ORDER BY id ASC',
+            [$sinceId, $meU, $meG, $meU, $meG]
+        );
+        return array_map('intval', array_column($rows, 'message_id'));
+    }
+
+    /** Clean up dm_deletions rows older than 7 days. */
+    public static function pruneDmDeletions(): void
+    {
+        Database::query('DELETE FROM dm_deletions WHERE deleted_at < datetime(\'now\', \'-7 days\')');
     }
 
     public static function recentDmPartners(array $me, int $limit = 30): array
@@ -616,9 +638,36 @@ $params[] = $limit;
         );
     }
 
-    public static function delete(int $messageId, array $actor): bool|string
+    public static function delete(int $messageId, array $actor, bool $isPm = false): bool|array|string
     {
-        // Try channel messages first.
+        // When $isPm is true, check private_messages first to avoid ID
+        // collision with the messages table (both use AUTOINCREMENT from 1).
+        if ($isPm) {
+            $pm = Database::row('SELECT * FROM private_messages WHERE id = ?', [$messageId]);
+            if ($pm) {
+                $isOwner = self::isGuest($actor)
+                    ? ($pm['sender_guest_id'] !== null && (int) $pm['sender_guest_id'] === (int) $actor['id'])
+                    : ($pm['sender_id'] !== null && (int) $pm['sender_id'] === (int) $actor['id']);
+                if ($actor['role'] !== 'admin' && !$isOwner) {
+                    return 'You can only delete your own messages.';
+                }
+                // Record the deletion so polling clients learn about it.
+                Database::query(
+                    'INSERT OR IGNORE INTO dm_deletions (message_id, sender_id, sender_guest_id, recipient_id, recipient_guest_id) VALUES (?, ?, ?, ?, ?)',
+                    [$messageId, $pm['sender_id'], $pm['sender_guest_id'], $pm['recipient_id'], $pm['recipient_guest_id']]
+                );
+                Database::query('DELETE FROM private_messages WHERE id = ?', [$messageId]);
+                return [
+                    'sender_id' => $pm['sender_id'],
+                    'sender_guest_id' => $pm['sender_guest_id'],
+                    'recipient_id' => $pm['recipient_id'],
+                    'recipient_guest_id' => $pm['recipient_guest_id'],
+                ];
+            }
+            // Fallback: try channel messages if PM wasn't found.
+        }
+
+        // Try channel messages.
         $msg = Database::row('SELECT * FROM messages WHERE id = ?', [$messageId]);
         if ($msg) {
             $isOwner = self::isGuest($actor)
@@ -630,18 +679,31 @@ $params[] = $limit;
             Database::query('UPDATE messages SET deleted = 1, content = "" WHERE id = ?', [$messageId]);
             return true;
         }
-        // Try private messages (DMs).
-        $pm = Database::row('SELECT * FROM private_messages WHERE id = ?', [$messageId]);
-        if ($pm) {
-            $isOwner = self::isGuest($actor)
-                ? ($pm['sender_guest_id'] !== null && (int) $pm['sender_guest_id'] === (int) $actor['id'])
-                : ($pm['sender_id'] !== null && (int) $pm['sender_id'] === (int) $actor['id']);
-            if ($actor['role'] !== 'admin' && !$isOwner) {
-                return 'You can only delete your own messages.';
+
+        // Try private messages (DMs) — hard-delete so the data is permanently gone.
+        if (!$isPm) {
+            $pm = Database::row('SELECT * FROM private_messages WHERE id = ?', [$messageId]);
+            if ($pm) {
+                $isOwner = self::isGuest($actor)
+                    ? ($pm['sender_guest_id'] !== null && (int) $pm['sender_guest_id'] === (int) $actor['id'])
+                    : ($pm['sender_id'] !== null && (int) $pm['sender_id'] === (int) $actor['id']);
+                if ($actor['role'] !== 'admin' && !$isOwner) {
+                    return 'You can only delete your own messages.';
+                }
+                Database::query(
+                    'INSERT OR IGNORE INTO dm_deletions (message_id, sender_id, sender_guest_id, recipient_id, recipient_guest_id) VALUES (?, ?, ?, ?, ?)',
+                    [$messageId, $pm['sender_id'], $pm['sender_guest_id'], $pm['recipient_id'], $pm['recipient_guest_id']]
+                );
+                Database::query('DELETE FROM private_messages WHERE id = ?', [$messageId]);
+                return [
+                    'sender_id' => $pm['sender_id'],
+                    'sender_guest_id' => $pm['sender_guest_id'],
+                    'recipient_id' => $pm['recipient_id'],
+                    'recipient_guest_id' => $pm['recipient_guest_id'],
+                ];
             }
-            Database::query('UPDATE private_messages SET deleted = 1, content = "" WHERE id = ?', [$messageId]);
-            return true;
         }
+
         return 'Message not found.';
     }
 

@@ -610,6 +610,16 @@ function handlePoll (body) {
     }
   }
 
+  // Hard-deleted DM IDs — remove from the local message list.
+  if (Array.isArray(body.dm_deleted_ids) && body.dm_deleted_ids.length && state.open) {
+    let changed = false
+    for (const id of body.dm_deleted_ids) {
+      const idx = state.messages.findIndex((m) => Number(m.id) === Number(id))
+      if (idx !== -1) { state.messages.splice(idx, 1); changed = true }
+    }
+    if (changed) renderStream()
+  }
+
   if (state.open && state.open.type === 'room' && body.channel === state.open.id) {
     if (Array.isArray(body.presence)) state.open.members = body.presence
     if (typeof body.topic === 'string') state.open.topic = body.topic
@@ -1188,6 +1198,15 @@ function wsHandle (j) {
   }
   if (j.msg_update && state.open && state.open.type === 'room') {
     const u = j.msg_update
+    const idx = state.messages.findIndex((m) => Number(m.id) === Number(u.message_id))
+    if (idx !== -1) {
+      if (u.action === 'delete') { state.messages.splice(idx, 1); renderStream() }
+      else if (u.action === 'edit' && typeof u.content === 'string') { state.messages[idx].content = u.content; renderStream() }
+    }
+    return
+  }
+  if (j.dm_update && state.open && state.open.type === 'dm') {
+    const u = j.dm_update
     const idx = state.messages.findIndex((m) => Number(m.id) === Number(u.message_id))
     if (idx !== -1) {
       if (u.action === 'delete') { state.messages.splice(idx, 1); renderStream() }

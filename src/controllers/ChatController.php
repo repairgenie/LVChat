@@ -214,6 +214,8 @@ final class ChatController
             }
         }
 
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+
         render_view('chat/app', [
             'user' => $user,
             'channel' => $channel,
@@ -715,6 +717,11 @@ final class ChatController
                     'role' => $t['role'],
                     'guest' => MessageService::isGuest($t) ? 1 : 0,
                 ], Auth::statusInfo($t));
+                // Hard-deleted DM IDs since the client's watermark.
+                $deletedIds = MessageService::recentDmDeletions($user, $since);
+                if ($deletedIds) {
+                    $out['dm_deleted_ids'] = $deletedIds;
+                }
             }
             return $out;
         }
@@ -778,6 +785,7 @@ final class ChatController
         // appear ghost-online. Runs at most once every 60 seconds per process.
         self::presenceSweep();
         TypingService::sweep();
+        MessageService::pruneDmDeletions();
         json_out(self::pollPayload($user, $since));
     }
 
@@ -1276,14 +1284,20 @@ final class ChatController
         $user = self::requireUser();
         self::requireCsrf();
         $id = (int) ($_POST['id'] ?? 0);
-        error_log("[deleteMessage] user={$user['id']} role={$user['role']} id={$id} guest=" . (int) MessageService::isGuest($user));
-        $r = MessageService::delete($id, $user);
-        if ($r !== true) {
+        $isPm = ($_POST['pm'] ?? '') === '1';
+        error_log("[deleteMessage] user={$user['id']} role={$user['role']} id={$id} pm=" . ($isPm ? '1' : '0') . " guest=" . (int) MessageService::isGuest($user));
+        $r = MessageService::delete($id, $user, $isPm);
+        if ($r !== true && !is_array($r)) {
             error_log("[deleteMessage] DENIED id={$id} reason={$r}");
             json_out(['error' => $r], 403);
         }
         log_audit('message_delete', 'msg#' . $id);
-        self::pushMsgUpdate($id, 'delete');
+        if (is_array($r)) {
+            // DM hard-delete — push using the participant info we got back.
+            Realtime::dmUpdate($r, 'delete', $id);
+        } else {
+            self::pushMsgUpdate($id, 'delete');
+        }
         error_log("[deleteMessage] OK id={$id}");
         json_out(['ok' => true]);
     }
