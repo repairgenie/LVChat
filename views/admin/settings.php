@@ -187,10 +187,27 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
   <div class="flex items-center justify-between card p-4">
     <div>
-      <div class="text-sm font-medium text-white">Image uploads</div>
-      <div class="text-xs text-discord-400">Allow members to upload and post images in channels</div>
+      <div class="text-sm font-medium text-white">File uploads</div>
+      <div class="text-xs text-discord-400">Allow members to upload and share files in channels and DMs</div>
     </div>
     <input type="checkbox" name="uploads_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['uploads_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div>
+      <label class="label">Max upload size (MB)</label>
+      <input class="input" type="number" min="1" step="1" name="upload_max_mb" value="<?= (int) ($settings['upload_max_mb'] ?? 5) ?>">
+      <p class="text-xs text-discord-400 mt-1">Per-file size limit. SaaS plan limits cannot exceed this.</p>
+    </div>
+    <div>
+      <label class="label">File expiration (days)</label>
+      <input class="input" type="number" min="0" name="upload_expiry_days" value="<?= (int) ($settings['upload_expiry_days'] ?? 60) ?>">
+      <p class="text-xs text-discord-400 mt-1">Auto-delete uploaded files after this many days. 0 = never expire.</p>
+    </div>
+    <div>
+      <label class="label">Long message collapse (chars)</label>
+      <input class="input" type="number" min="0" step="50" name="long_msg_threshold" value="<?= (int) ($settings['long_msg_threshold'] ?? 300) ?>">
+      <p class="text-xs text-discord-400 mt-1">Messages longer than this are auto-collapsed. 0 = disable.</p>
+    </div>
   </div>
   <div class="flex items-center justify-between card p-4">
     <div>

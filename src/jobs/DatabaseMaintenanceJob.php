@@ -33,6 +33,25 @@ class DatabaseMaintenanceJob
             return;
         }
         Database::maintenance();
+        self::pruneExpiredFiles();
         config_set('db_maintenance_last_run', $today);
+    }
+
+    /**
+     * Delete uploaded files that have passed their expiry date.
+     * Files with expires_at = NULL never expire (admin set expiry to 0).
+     */
+    private static function pruneExpiredFiles(): void
+    {
+        $expiryDays = (int) config_get('upload_expiry_days', 60);
+        if ($expiryDays <= 0) {
+            return;
+        }
+        $pdo = Database::instance();
+        $rows = $pdo->query('SELECT id, url FROM uploaded_files WHERE expires_at IS NOT NULL AND expires_at < datetime("now")')->fetchAll(\PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            UploadService::remove($row['url']);
+        }
+        $pdo->exec('DELETE FROM uploaded_files WHERE expires_at IS NOT NULL AND expires_at < datetime("now")');
     }
 }

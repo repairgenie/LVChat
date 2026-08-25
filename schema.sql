@@ -368,6 +368,21 @@ CREATE TABLE IF NOT EXISTS user_sound_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_sound_overrides_user ON user_sound_overrides(user_id);
 
+-- Uploaded files: tracks every file uploaded to chat for expiry/cleanup.
+CREATE TABLE IF NOT EXISTS uploaded_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT NOT NULL,
+  original_name TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL DEFAULT 0,
+  uploader_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL DEFAULT 'upload',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_uploaded_files_expires ON uploaded_files(expires_at);
+CREATE INDEX IF NOT EXISTS idx_uploaded_files_url ON uploaded_files(url);
+
 -- Incoming webhooks: POST /api/webhooks/<token> posts into a channel as a bot.
 -- token_hash stores the SHA-256 of the secret (never the raw token).
 CREATE TABLE IF NOT EXISTS webhooks (

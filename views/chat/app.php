@@ -364,6 +364,7 @@ function presence_label(array $u): string {
       data-push-all-off="<?= (int) (!(int) ($user['guest'] ?? 0) && (int) $pushPrefs['channels'] === 0 && (int) $pushPrefs['dms'] === 0 && (int) $pushPrefs['invites'] === 0) ?>"
       data-push-prefs="<?= h(json_encode(['channels' => (int) $pushPrefs['channels'], 'dms' => (int) $pushPrefs['dms'], 'invites' => (int) $pushPrefs['invites']])) ?>"
       data-my-level="<?= h($currentLevel) ?>"
+      data-long-msg-threshold="<?= (int) config_get('long_msg_threshold', 300) ?>"
       data-me-status="<?= h($user['status_mode'] ?? 'online') ?>"
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
@@ -728,8 +729,8 @@ function presence_label(array $u): string {
                  <?= ($channel || $dm) ? '' : 'disabled' ?>></textarea>
           <div class="flex items-center gap-0.5 shrink-0">
             <button type="button" id="mic-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Dictate a message"><?= icon('mic', 'w-4 h-4') ?></button>
-            <button type="button" id="upload-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? 'inline-flex' : 'hidden' ?>" title="Upload an image"><?= icon('paperclip', 'w-4 h-4') ?></button>
-            <input type="file" id="upload-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+            <button type="button" id="upload-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? 'inline-flex' : 'hidden' ?>" title="Upload a file"><?= icon('paperclip', 'w-4 h-4') ?></button>
+            <input type="file" id="upload-file" class="hidden">
             <button type="button" id="emoji-btn" class="btn-ghost !p-1.5 !rounded-lg <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Emoji"><?= icon('smile', 'w-4 h-4') ?></button>
             <button type="button" id="gif-btn" class="btn-ghost !p-1.5 !rounded-lg text-xs font-bold <?= ($channel || $dm) ? '' : 'hidden' ?>" title="Send a GIF">GIF</button>
             <button type="submit" id="send-btn" class="btn-primary !p-2 !rounded-lg" title="Send"><?= icon('send', 'w-4 h-4') ?></button>

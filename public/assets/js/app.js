@@ -170,6 +170,22 @@
     flushList();
     flushQuote();
     blocks.forEach((b, i) => { html = html.replace('\x02BLK' + i + '\x03', b); });
+
+    // Auto-collapse long messages.
+    const threshold = parseInt(document.body.dataset.longMsgThreshold || '300', 10);
+    if (threshold > 0) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      const plain = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+      if (plain.length > threshold) {
+        const lineCount = (html.match(/\n/g) || []).length + 1;
+        html = `<details class="long-message my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40">`
+          + `<summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">`
+          + `Large message — click to expand (${lineCount} line${lineCount !== 1 ? 's' : ''})</summary>`
+          + `<div class="px-3 py-2 text-sm leading-relaxed">${html}</div></details>`;
+      }
+    }
+
     return html;
   }
 
@@ -224,10 +240,54 @@
       if (caption) html += `<div class="mt-1">${linkify(caption)}</div>`;
       return html;
     }
+    if (m.kind === 'file') {
+      return fileCardHtml(m);
+    }
     if (m.kind === 'ai_response' || m.bot === 1) {
       return renderAiContent(m.content);
     }
     return linkify(m.content);
+  }
+
+  function fileIconSvg(mime) {
+    if (mime === 'application/pdf') return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
+    if (['application/zip','application/x-rar-compressed','application/x-rar','application/x-7z-compressed','application/x-tar','application/gzip'].includes(mime)) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-amber-400"><path d="M21 8v13H3V3h13z"/><path d="M14 2v6h6"/><rect x="8" y="12" width="2" height="2" fill="currentColor"/><rect x="12" y="12" width="2" height="2" fill="currentColor"/><rect x="8" y="16" width="2" height="2" fill="currentColor"/><rect x="10" y="14" width="2" height="2" fill="currentColor"/></svg>';
+    if (mime && mime.startsWith('video/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-purple-400"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2" ry="2"/></svg>';
+    if (mime && mime.startsWith('audio/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-green-400"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+    if (mime && mime.startsWith('text/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-sky-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
+    if (mime && mime.startsWith('image/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-pink-400"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
+    if (mime && (mime.includes('word') || mime.includes('document'))) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-blue-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+    if (mime && (mime.includes('sheet') || mime.includes('excel'))) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-emerald-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/></svg>';
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-discord-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  }
+
+  function fileCardHtml(m) {
+    const parts = String(m.content || '').split('\n');
+    const url = (parts.shift() || '').trim();
+    const filename = (parts.shift() || 'file').trim();
+    const caption = parts.join('\n').trim();
+    if (!url) return '';
+    const ext = (filename.split('.').pop() || '').toLowerCase();
+    const extMimeMap = {
+      pdf:'application/pdf',zip:'application/zip',rar:'application/x-rar','7z':'application/x-7z-compressed',
+      mp3:'audio/mpeg',wav:'audio/wav',ogg:'audio/ogg',mp4:'video/mp4',webm:'video/webm',
+      txt:'text/plain',md:'text/plain',js:'text/javascript',ts:'text/typescript',
+      jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',
+      doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    };
+    const mime = extMimeMap[ext] || 'application/octet-stream';
+    const icon = fileIconSvg(mime);
+    let html = '<div class="file-card flex items-center gap-3 p-3 rounded-lg border border-discord-700 bg-discord-850 my-1 max-w-md">'
+      + icon
+      + '<div class="min-w-0 flex-1">'
+      + '<div class="text-sm text-discord-200 truncate">' + esc(filename) + '</div>'
+      + '<div class="text-[11px] text-discord-500">' + ext.toUpperCase() + '</div>'
+      + '</div>'
+      + '<a href="' + esc(url) + '" download="' + esc(filename) + '" class="shrink-0 text-xs text-blurple hover:text-blurple-300 font-semibold px-2 py-1 rounded hover:bg-blurple/10 transition-colors">Download</a>'
+      + '</div>';
+    if (caption) html += '<div class="mt-1">' + linkify(caption) + '</div>';
+    return html;
   }
 
   function initAiStyles() {
@@ -259,6 +319,7 @@
       .msg[data-kind="ai_response"] .msg-content hr { border: none; border-top: 1px solid #383a40; margin: 0.75em 0; }
       .ai-thinking summary::-webkit-details-marker { display: none; }
       .ai-tool-card summary::-webkit-details-marker { display: none; }
+      .long-message summary::-webkit-details-marker { display: none; }
       .username .bot-badge { display: inline-block; font-size: 9px; padding: 0 4px; border-radius: 3px; background: #5865f2; color: white; font-weight: 700; text-transform: uppercase; vertical-align: middle; margin-left: 4px; letter-spacing: 0.5px; }
     `;
     document.head.appendChild(style);
@@ -2593,12 +2654,11 @@
           uiAlert('Upload failed.');
         });
     });
-    // Drag & drop an image onto the timeline.
+    // Drag & drop a file onto the timeline.
     document.addEventListener('dragover', (e) => { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') !== -1) e.preventDefault(); });
     document.addEventListener('drop', (e) => {
       if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
       const f = e.dataTransfer.files[0];
-      if (f.type && f.type.indexOf('image/') === -1) return;
       e.preventDefault();
       const dt = new DataTransfer();
       dt.items.add(f);
@@ -2636,13 +2696,23 @@
   function showAttachPreview(file) {
     if (!attachPreview || !uploadFile) return;
     clearAttachPreview();
-    const url = URL.createObjectURL(file);
-    attachPreviewCleanup = url;
+    const isImage = file.type && file.type.startsWith('image/');
     const wrap = document.createElement('div');
     wrap.className = 'flex items-center gap-2 rounded-lg border border-discord-600 bg-discord-850 p-1.5 pr-2 max-w-xs';
-    wrap.innerHTML = '<img src="' + url + '" alt="' + esc(file.name || 'image') + '" class="w-9 h-9 rounded-md object-cover shrink-0">'
-      + '<span class="min-w-0 flex-1"><span class="block text-xs text-discord-200 truncate">' + esc(file.name || 'image') + '</span>'
-      + '<span class="block text-[10px] text-discord-500">' + (file.size ? Math.round(file.size / 1024) + ' KB' : '') + '</span></span>'
+    let preview = '';
+    if (isImage) {
+      const url = URL.createObjectURL(file);
+      attachPreviewCleanup = url;
+      preview = '<img src="' + url + '" alt="' + esc(file.name || 'file') + '" class="w-9 h-9 rounded-md object-cover shrink-0">';
+    } else {
+      preview = '<div class="w-9 h-9 rounded-md bg-discord-800 flex items-center justify-center shrink-0">' + fileIconSvg(file.type || 'application/octet-stream') + '</div>';
+    }
+    const sizeStr = file.size >= 1048576 ? (file.size / 1048576).toFixed(1) + ' MB'
+      : file.size >= 1024 ? Math.round(file.size / 1024) + ' KB'
+      : file.size + ' B';
+    wrap.innerHTML = preview
+      + '<span class="min-w-0 flex-1"><span class="block text-xs text-discord-200 truncate">' + esc(file.name || 'file') + '</span>'
+      + '<span class="block text-[10px] text-discord-500">' + sizeStr + '</span></span>'
       + '<button type="button" class="text-discord-400 hover:text-white p-1 shrink-0" title="Remove attachment">' + window.icon('x', 'w-3.5 h-3.5') + '</button>';
     wrap.querySelector('button').addEventListener('click', () => {
       clearAttachPreview();

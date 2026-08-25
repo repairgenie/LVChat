@@ -301,6 +301,9 @@ final class UserController
         if (!$v['ok']) {
             json_out(['error' => $v['error']], 400);
         }
+        if (!UploadService::isImageMime($v['mime'] ?? '')) {
+            json_out(['error' => 'Avatars must be images (JPEG, PNG, WebP, GIF).'], 400);
+        }
         $stored = UploadService::store($_FILES['avatar'], 'avatar');
         if (!$stored['ok']) {
             json_out(['error' => $stored['error']], 500);

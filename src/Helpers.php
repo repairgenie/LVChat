@@ -679,6 +679,125 @@ function chat_markup_rich(string $text): string
     foreach ($blocks as $i => $b) {
         $html = str_replace("\x02BLK$i\x03", $b, $html);
     }
+
+    // Auto-collapse long messages: if the plain-text content exceeds the
+    // threshold, wrap in a collapsible <details> element.
+    $threshold = (int) config_get('long_msg_threshold', 300);
+    if ($threshold > 0) {
+        $plainText = strip_tags($html);
+        $plainText = preg_replace('/\s+/', ' ', $plainText);
+        if (mb_strlen(trim($plainText)) > $threshold) {
+            $lineCount = substr_count($html, "\n") + 1;
+            $html = '<details class="long-message my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40">'
+                . '<summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">'
+                . 'Large message — click to expand (' . $lineCount . ' line' . ($lineCount !== 1 ? 's' : '') . ')</summary>'
+                . '<div class="px-3 py-2 text-sm leading-relaxed">' . $html . '</div></details>';
+        }
+    }
+
+    return $html;
+}
+
+/**
+ * Return an inline SVG icon for a file based on its MIME type.
+ * All icons are 24×24 with currentColor stroke so they inherit text color.
+ */
+function file_icon_svg(string $mime): string
+{
+    // PDF
+    if ($mime === 'application/pdf') {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
+    }
+    // Archives (zip, rar, 7z, tar, gz)
+    if (in_array($mime, ['application/zip', 'application/x-rar-compressed', 'application/x-rar', 'application/x-7z-compressed', 'application/x-tar', 'application/gzip', 'application/x-bzip2'], true)) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-amber-400"><path d="M21 8v13H3V3h13z"/><path d="M14 2v6h6"/><rect x="8" y="12" width="2" height="2" fill="currentColor"/><rect x="12" y="12" width="2" height="2" fill="currentColor"/><rect x="8" y="16" width="2" height="2" fill="currentColor"/><rect x="10" y="14" width="2" height="2" fill="currentColor"/></svg>';
+    }
+    // Video
+    if (str_starts_with($mime, 'video/')) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-purple-400"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2" ry="2"/></svg>';
+    }
+    // Audio
+    if (str_starts_with($mime, 'audio/')) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-green-400"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+    }
+    // Text / code
+    if (str_starts_with($mime, 'text/')) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-sky-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
+    }
+    // Images
+    if (str_starts_with($mime, 'image/')) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-pink-400"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
+    }
+    // Documents (doc, docx, odt, etc.)
+    if (str_contains($mime, 'word') || str_contains($mime, 'document') || in_array($mime, ['application/vnd.oasis.opendocument.text'], true)) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-blue-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+    }
+    // Spreadsheets
+    if (str_contains($mime, 'sheet') || str_contains($mime, 'excel') || in_array($mime, ['application/vnd.oasis.opendocument.spreadsheet'], true)) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-emerald-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/></svg>';
+    }
+    // Default file icon
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-discord-400"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+}
+
+/**
+ * Format a byte count into a human-readable size string.
+ */
+function human_file_size(int $bytes): string
+{
+    if ($bytes >= 1048576) {
+        return round($bytes / 1048576, 1) . ' MB';
+    }
+    if ($bytes >= 1024) {
+        return round($bytes / 1024) . ' KB';
+    }
+    return $bytes . ' B';
+}
+
+/**
+ * Render a file attachment card for kind === 'file' messages.
+ *
+ * Content format: line 1 = URL, line 2 = original filename, line 3 = optional caption.
+ */
+function file_card_html(array $m): string
+{
+    $lines = explode("\n", (string) $m['content'], 3);
+    $url = trim($lines[0] ?? '');
+    $filename = trim($lines[1] ?? 'file');
+    $caption = trim($lines[2] ?? '');
+    if ($url === '') {
+        return '';
+    }
+    // Guess MIME from extension for icon.
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $extMimeMap = [
+        'pdf' => 'application/pdf',
+        'zip' => 'application/zip', 'rar' => 'application/x-rar', '7z' => 'application/x-7z-compressed',
+        'mp3' => 'audio/mpeg', 'wav' => 'audio/wav', 'ogg' => 'audio/ogg',
+        'mp4' => 'video/mp4', 'webm' => 'video/webm',
+        'txt' => 'text/plain', 'md' => 'text/plain',
+        'js' => 'text/javascript', 'ts' => 'text/typescript',
+        'py' => 'text/x-python', 'rb' => 'text/x-ruby',
+        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png',
+        'gif' => 'image/gif', 'webp' => 'image/webp', 'svg' => 'image/svg+xml',
+        'doc' => 'application/msword', 'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls' => 'application/vnd.ms-excel', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ];
+    $mime = $extMimeMap[$ext] ?? 'application/octet-stream';
+    $icon = file_icon_svg($mime);
+    $size = (int) ($m['file_size'] ?? 0);
+    $sizeStr = $size > 0 ? human_file_size($size) : '';
+    $html = '<div class="file-card flex items-center gap-3 p-3 rounded-lg border border-discord-700 bg-discord-850 my-1 max-w-md">'
+        . $icon
+        . '<div class="min-w-0 flex-1">'
+        . '<div class="text-sm text-discord-200 truncate">' . h($filename) . '</div>'
+        . '<div class="text-[11px] text-discord-500">' . h(strtoupper($ext)) . ($sizeStr !== '' ? ' · ' . $sizeStr : '') . '</div>'
+        . '</div>'
+        . '<a href="' . h(url($url)) . '" download="' . h($filename) . '" class="shrink-0 text-xs text-blurple hover:text-blurple-300 font-semibold px-2 py-1 rounded hover:bg-blurple/10 transition-colors">Download</a>'
+        . '</div>';
+    if ($caption !== '') {
+        $html .= '<div class="mt-1">' . chat_markup_rich($caption) . '</div>';
+    }
     return $html;
 }
 
@@ -718,6 +837,9 @@ function chat_content_html(array $m): string
             $html .= '<div class="mt-1">' . chat_markup_rich($caption) . '</div>';
         }
         return $html;
+    }
+    if (($m['kind'] ?? '') === 'file') {
+        return file_card_html($m);
     }
     if (($m['kind'] ?? '') === 'ai_response' || (int) ($m['bot'] ?? 0) === 1) {
         return chat_markup_ai((string) $m['content']);

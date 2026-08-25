@@ -488,7 +488,7 @@ final class ChatController
         ]);
     }
 
-    /** POST /api/upload — upload an image and post it as an image message
+    /** POST /api/upload — upload a file and post it as a message
      *  (channel, or DM when `dm` is given). */
     public static function upload(): void
     {
@@ -499,28 +499,43 @@ final class ChatController
             json_out(['error' => $restriction], 403);
         }
         if (config_get('uploads_enabled', '1') !== '1') {
-            json_out(['error' => 'Image uploads are disabled on this server.'], 403);
+            json_out(['error' => 'File uploads are disabled on this server.'], 403);
         }
         if (self::rateLimited($user)) {
             json_out(['error' => 'You are sending messages too quickly. Slow down.'], 429);
         }
         if (!isset($_FILES['file']) || !UploadService::isImageUpload($_FILES['file'])) {
-            json_out(['error' => 'Choose an image file first.'], 400);
+            json_out(['error' => 'Choose a file to upload.'], 400);
         }
         $stored = UploadService::store($_FILES['file'], 'upload', $user);
         if (!$stored['ok']) {
             json_out(['error' => $stored['error']], 400);
         }
-        // Downscale to a max 1600px image (keeps large photos manageable).
-        $abs = UploadService::dir('upload') . '/' . basename($stored['url']);
-        $scaled = UploadService::downscale($abs, (string) $stored['ext'], 1600);
-        $url = $scaled === false
-            ? $stored['url']
-            : str_replace('\\', '/', substr($scaled, strlen(ROOT . '/public')));
+        $isImage = UploadService::isImageMime($stored['mime'] ?? '');
+        $url = $stored['url'];
+        // Downscale images to a max 1600px (keeps large photos manageable).
+        if ($isImage) {
+            $abs = UploadService::dir('upload') . '/' . basename($stored['url']);
+            $scaled = UploadService::downscale($abs, (string) $stored['ext'], 1600);
+            if ($scaled !== false) {
+                $url = str_replace('\\', '/', substr($scaled, strlen(ROOT . '/public')));
+            }
+        }
         $caption = mb_substr(trim((string) ($_POST['caption'] ?? '')), 0, 300);
-        $content = $url . ($caption !== '' ? "\n" . $caption : '');
+        // Content format: line 1 = URL, line 2+ = caption (for images) or original filename (for files).
+        $originalName = $stored['original_name'] ?? basename((string) $_FILES['file']['name']);
+        $content = $url;
+        if ($isImage) {
+            $content .= ($caption !== '' ? "\n" . $caption : '');
+        } else {
+            $content .= "\n" . $originalName;
+            if ($caption !== '') {
+                $content .= "\n" . $caption;
+            }
+        }
+        $msgKind = $isImage ? 'image' : 'file';
 
-        // Private-message upload: send an image PM, same rules as /msg.
+        // Private-message upload: send a file PM, same rules as /msg.
         $dm = trim((string) ($_POST['dm'] ?? ''));
         if ($dm !== '') {
             $t = Auth::findActor($dm);
@@ -549,13 +564,13 @@ final class ChatController
                     json_out(['error' => 'Message blocked by the word filter.'], 403);
                 }
             }
-            $pmId = MessageService::insertPm($user, $t, $content, 'image');
+            $pmId = MessageService::insertPm($user, $t, $content, $msgKind);
             MessageService::notifyDm($t, $user, $pmId);
             MessageService::logPm((int) $user['id'], $user['username'], $t['username'], $content, MessageService::isGuest($user) ? 1 : 0);
             $row = Database::row('SELECT * FROM private_messages WHERE id = ?', [$pmId]);
             $pmMessage = [
                 'id' => (int) $row['id'],
-                'kind' => $row['kind'] ?? 'image',
+                'kind' => $row['kind'] ?? $msgKind,
                 'content' => $row['content'],
                 'created_at' => $row['created_at'],
                 'username' => $user['username'],
@@ -582,7 +597,7 @@ final class ChatController
         if ($blocked) {
             json_out(['error' => $blocked], 403);
         }
-        // Image uploads run the same spamfilter + word filter as text messages
+        // File uploads run the same spamfilter + word filter as text messages
         // (the caption is visible text), recording any hit on the queue.
         $blocked = BanService::sendBlocked($user, $content, 'c');
         if ($blocked) {
@@ -597,7 +612,7 @@ final class ChatController
                 json_out(['error' => 'Message blocked by the word filter.'], 403);
             }
         }
-        $msg = MessageService::send((int) $channel['id'], $user, $content, 'image');
+        $msg = MessageService::send((int) $channel['id'], $user, $content, $msgKind);
         $msg['channel'] = $channel['slug'];
         Realtime::message($channel['slug'], $msg);
         json_out(['ok' => true, 'message' => $msg]);

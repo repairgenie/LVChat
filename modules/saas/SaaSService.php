@@ -62,7 +62,7 @@ final class SaaSService
         'connections' => 'Concurrent connections',
         'owned_channels' => 'Owned channels',
         'memberships' => 'Channel memberships',
-        'upload_max_bytes' => 'Max file size (bytes)',
+        'upload_max_bytes' => 'Max file size (bytes, admin ceiling applies)',
         'events_concurrent' => 'Concurrent events',
         'openclaw_bot_count' => 'OpenClaw bot count',
         'open_tickets' => 'Open support tickets',

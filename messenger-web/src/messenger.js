@@ -2947,6 +2947,69 @@ function buildMessageEl (m) {
   return wrap
 }
 
+function messengerFileIconSvg(mime) {
+  if (mime === 'application/pdf') return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#f87171"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>'
+  if (['application/zip','application/x-rar-compressed','application/x-rar','application/x-7z-compressed'].includes(mime)) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#fbbf24"><path d="M21 8v13H3V3h13z"/><path d="M14 2v6h6"/></svg>'
+  if (mime && mime.startsWith('video/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#a78bfa"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2" ry="2"/></svg>'
+  if (mime && mime.startsWith('audio/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#4ade80"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'
+  if (mime && mime.startsWith('text/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#38bdf8"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>'
+  if (mime && mime.startsWith('image/')) return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#f472b6"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" style="color:#9ca3af"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>'
+}
+
+function fileCardEl (content) {
+  const lines = String(content || '').split('\n')
+  const url = (lines[0] || '').trim()
+  const filename = (lines[1] || 'file').trim()
+  const caption = lines.slice(2).join(' ').trim()
+  if (!url) return null
+
+  const ext = (filename.split('.').pop() || '').toLowerCase()
+  const extMimeMap = {
+    pdf:'application/pdf',zip:'application/zip',rar:'application/x-rar','7z':'application/x-7z-compressed',
+    mp3:'audio/mpeg',wav:'audio/wav',ogg:'audio/ogg',mp4:'video/mp4',webm:'video/webm',
+    txt:'text/plain',md:'text/plain',js:'text/javascript',
+    jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp'
+  }
+  const mime = extMimeMap[ext] || 'application/octet-stream'
+
+  const wrap = document.createElement('div')
+  wrap.className = 'file-card'
+
+  const iconWrap = document.createElement('div')
+  iconWrap.className = 'file-card-icon'
+  iconWrap.innerHTML = messengerFileIconSvg(mime)
+  wrap.appendChild(iconWrap)
+
+  const info = document.createElement('div')
+  info.className = 'file-card-info'
+  const nameEl = document.createElement('div')
+  nameEl.className = 'file-card-name'
+  nameEl.textContent = filename
+  const metaEl = document.createElement('div')
+  metaEl.className = 'file-card-meta'
+  metaEl.textContent = ext.toUpperCase()
+  info.append(nameEl, metaEl)
+  wrap.appendChild(info)
+
+  const dl = document.createElement('a')
+  dl.href = LvApi.abs(url)
+  dl.download = filename
+  dl.target = '_blank'
+  dl.rel = 'noopener'
+  dl.className = 'file-card-download'
+  dl.textContent = 'Download'
+  wrap.appendChild(dl)
+
+  if (caption) {
+    const cap = document.createElement('div')
+    cap.className = 'caption'
+    cap.textContent = caption
+    wrap.appendChild(cap)
+  }
+  return wrap
+}
+
 function contentEl (kind, content) {
   const div = document.createElement('div')
   div.className = 'msg-content'
@@ -2972,11 +3035,36 @@ function contentEl (kind, content) {
     return div
   }
 
-  // Plain text with @mention highlighting + autolinked URLs.
-  const text = document.createElement('span')
-  text.textContent = lines.join('\n')
-  text.innerHTML = renderMarkup(text.textContent)
-  div.appendChild(text)
+  if (kind === 'file') {
+    const card = fileCardEl(content)
+    if (card) {
+      div.appendChild(card)
+      return div
+    }
+  }
+
+  // Plain text with @mention highlighting + autolinked URLs + long-message collapse.
+  const rendered = renderMarkup(lines.join('\n'))
+  const LONG_MSG_THRESHOLD = 300
+  const tmp = document.createElement('div')
+  tmp.innerHTML = rendered
+  const plain = (tmp.textContent || '').replace(/\s+/g, ' ').trim()
+  if (plain.length > LONG_MSG_THRESHOLD) {
+    const lineCount = (rendered.match(/\n/g) || []).length + 1
+    const details = document.createElement('details')
+    details.className = 'long-message'
+    const summary = document.createElement('summary')
+    summary.textContent = `Large message — click to expand (${lineCount} line${lineCount !== 1 ? 's' : ''})`
+    const body = document.createElement('div')
+    body.className = 'long-message-body'
+    body.innerHTML = rendered
+    details.append(summary, body)
+    div.appendChild(details)
+  } else {
+    const text = document.createElement('span')
+    text.innerHTML = rendered
+    div.appendChild(text)
+  }
   return div
 }
 

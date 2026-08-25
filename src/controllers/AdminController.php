@@ -1140,6 +1140,9 @@ final class AdminController
                 config_set('registration_rate_limit', (string) max(0, (int) ($_POST['registration_rate_limit'] ?? 20)));
                 config_set('spamfilter_enabled', ($_POST['spamfilter_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('uploads_enabled', ($_POST['uploads_enabled'] ?? '0') === '1' ? '1' : '0');
+                config_set('upload_max_mb', (string) max(1, (int) ($_POST['upload_max_mb'] ?? 5)));
+                config_set('upload_expiry_days', (string) max(0, (int) ($_POST['upload_expiry_days'] ?? 60)));
+                config_set('long_msg_threshold', (string) max(0, (int) ($_POST['long_msg_threshold'] ?? 300)));
                 config_set('reactions_enabled', ($_POST['reactions_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('gifs_enabled', ($_POST['gifs_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('giphy_api_key', trim((string) ($_POST['giphy_api_key'] ?? '')));
@@ -1279,6 +1282,11 @@ final class AdminController
                 if (!$stored['ok']) {
                     $ok = false;
                     $message = $stored['error'];
+                    break;
+                }
+                if (!UploadService::isImageMime($stored['mime'] ?? '')) {
+                    $ok = false;
+                    $message = 'Theme backgrounds must be images (JPEG, PNG, WebP, GIF).';
                     break;
                 }
                 $current = ThemeService::globalTheme();

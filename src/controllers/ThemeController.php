@@ -101,6 +101,9 @@ final class ThemeController
         if (!$stored['ok']) {
             json_out(['error' => $stored['error']], 400);
         }
+        if (!UploadService::isImageMime($stored['mime'] ?? '')) {
+            json_out(['error' => 'Theme backgrounds must be images (JPEG, PNG, WebP, GIF).'], 400);
+        }
 
         // Keep every other personal-theme field, swap the image in.
         $current = ThemeService::userTheme($user);

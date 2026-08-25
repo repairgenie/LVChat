@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '43';
+    private const SCHEMA_VERSION = '44';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void

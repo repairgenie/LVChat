@@ -323,6 +323,9 @@ final class ChannelController
             if (!$stored['ok']) {
                 json_out(['error' => $stored['error']], 400);
             }
+            if (!UploadService::isImageMime($stored['mime'] ?? '')) {
+                json_out(['error' => 'Channel backgrounds must be images (JPEG, PNG, WebP, GIF).'], 400);
+            }
             if (!empty($channel['bg_image'])) {
                 UploadService::remove((string) $channel['bg_image']);
             }
