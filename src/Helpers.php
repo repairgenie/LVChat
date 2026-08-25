@@ -680,21 +680,6 @@ function chat_markup_rich(string $text): string
         $html = str_replace("\x02BLK$i\x03", $b, $html);
     }
 
-    // Auto-collapse long messages: if the plain-text content exceeds the
-    // threshold, wrap in a collapsible <details> element.
-    $threshold = (int) config_get('long_msg_threshold', 300);
-    if ($threshold > 0) {
-        $plainText = strip_tags($html);
-        $plainText = preg_replace('/\s+/', ' ', $plainText);
-        if (mb_strlen(trim($plainText)) > $threshold) {
-            $lineCount = substr_count($html, "\n") + 1;
-            $html = '<details class="long-message my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40">'
-                . '<summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">'
-                . 'Large message — click to expand (' . $lineCount . ' line' . ($lineCount !== 1 ? 's' : '') . ')</summary>'
-                . '<div class="px-3 py-2 text-sm leading-relaxed">' . $html . '</div></details>';
-        }
-    }
-
     return $html;
 }
 

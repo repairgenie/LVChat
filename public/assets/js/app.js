@@ -171,21 +171,6 @@
     flushQuote();
     blocks.forEach((b, i) => { html = html.replace('\x02BLK' + i + '\x03', b); });
 
-    // Auto-collapse long messages.
-    const threshold = parseInt(document.body.dataset.longMsgThreshold || '300', 10);
-    if (threshold > 0) {
-      const tmp = document.createElement('div');
-      tmp.innerHTML = html;
-      const plain = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
-      if (plain.length > threshold) {
-        const lineCount = (html.match(/\n/g) || []).length + 1;
-        html = `<details class="long-message my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40">`
-          + `<summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">`
-          + `Large message — click to expand (${lineCount} line${lineCount !== 1 ? 's' : ''})</summary>`
-          + `<div class="px-3 py-2 text-sm leading-relaxed">${html}</div></details>`;
-      }
-    }
-
     return html;
   }
 
@@ -246,7 +231,20 @@
     if (m.kind === 'ai_response' || m.bot === 1) {
       return renderAiContent(m.content);
     }
-    return linkify(m.content);
+    // Auto-collapse long plain-text messages.
+    const threshold = parseInt(document.body.dataset.longMsgThreshold || '300', 10);
+    let msgHtml = linkify(m.content);
+    if (threshold > 0) {
+      const stripped = msgHtml.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+      if (stripped.length > threshold) {
+        const lineCount = (stripped.match(/\n/g) || []).length + 1;
+        msgHtml = `<details class="long-message my-1.5 rounded-lg border border-discord-700/50 bg-discord-900/40">`
+          + `<summary class="px-3 py-1.5 text-xs text-discord-400 cursor-pointer select-none hover:text-discord-300">`
+          + `Large message — click to expand (${lineCount} line${lineCount !== 1 ? 's' : ''})</summary>`
+          + `<div class="px-3 py-2 text-sm leading-relaxed">${msgHtml}</div></details>`;
+      }
+    }
+    return msgHtml;
   }
 
   function fileIconSvg(mime) {

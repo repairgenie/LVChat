@@ -3046,11 +3046,9 @@ function contentEl (kind, content) {
   // Plain text with @mention highlighting + autolinked URLs + long-message collapse.
   const rendered = renderMarkup(lines.join('\n'))
   const LONG_MSG_THRESHOLD = 300
-  const tmp = document.createElement('div')
-  tmp.innerHTML = rendered
-  const plain = (tmp.textContent || '').replace(/\s+/g, ' ').trim()
-  if (plain.length > LONG_MSG_THRESHOLD) {
-    const lineCount = (rendered.match(/\n/g) || []).length + 1
+  const stripped = rendered.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
+  if (stripped.length > LONG_MSG_THRESHOLD) {
+    const lineCount = (stripped.match(/\n/g) || []).length + 1
     const details = document.createElement('details')
     details.className = 'long-message'
     const summary = document.createElement('summary')
