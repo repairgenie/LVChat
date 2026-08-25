@@ -258,6 +258,18 @@ function member_html(array $m, bool $online): string {
 
 /* Tailwind dot class for a user's presence (mirrors presenceDot in app.js). */
 function presence_dot_class(array $u): string {
+    // Honour the is_online flag first (set by Auth::statusInfo in channel member lists).
+    if (isset($u['is_online']) && !$u['is_online']) {
+        return 'bg-discord-500';
+    }
+    // Fallback: when is_online isn't set (online sidebar, DM header) check last_seen
+    // against the presence window so stale rows never show a green dot.
+    if (!isset($u['is_online']) && !empty($u['last_seen'])) {
+        $ts = strtotime($u['last_seen'] . ' UTC');
+        if ($ts !== false && (time() - $ts) > presence_window()) {
+            return 'bg-discord-500';
+        }
+    }
     $m = (string) ($u['status_mode'] ?? '');
     if (!in_array($m, ['online', 'away', 'dnd', 'invisible', 'custom'], true)) {
         $m = !empty($u['away']) ? 'away' : 'online';
