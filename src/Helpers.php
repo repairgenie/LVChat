@@ -452,11 +452,18 @@ function site_logo(): ?string
     return $url !== '' ? $url : null;
 }
 
-/** Number of people currently connected (registered users + guests, last 30s). */
+/** Seconds after which a user is considered offline (matches presence_throttle). */
+function presence_window(): int
+{
+    return max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+}
+
+/** Number of people currently connected (registered users + guests, last presence_window). */
 function online_count(): int
 {
-    $users = (int) Database::scalar("SELECT COUNT(*) FROM users WHERE away IS NULL AND last_seen >= datetime('now', '-30 seconds')");
-    $guests = (int) Database::scalar("SELECT COUNT(*) FROM guests WHERE last_seen >= datetime('now', '-30 seconds')");
+    $w = presence_window();
+    $users = (int) Database::scalar("SELECT COUNT(*) FROM users WHERE away IS NULL AND last_seen >= datetime('now', '-' || ? || ' seconds')", [$w]);
+    $guests = (int) Database::scalar("SELECT COUNT(*) FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')", [$w]);
     return $users + $guests;
 }
 

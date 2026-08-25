@@ -423,7 +423,8 @@ check('normal user cannot /kick', str_contains($res['replies'][0] ?? '', 'permis
 $res = CommandParser::run('/mode #test +m', $alice, $ch);
 check('/mode +m', $res['replies'][0] === 'Modes updated.');
 $res = CommandParser::run('/me waves', $alice, $ch);
-check('/me action', $res['replies'] === []);
+check('/me action returns message', isset($res['message']) && $res['message']['kind'] === 'action');
+check('/me action content', ($res['message']['content'] ?? '') === 'waves');
 $res = CommandParser::run('/nosuchcommand', $alice, $ch);
 check('unknown command error', str_contains($res['replies'][0] ?? '', 'Unknown command'));
 

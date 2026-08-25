@@ -410,6 +410,15 @@ async function startMain (me) {
   $('#me-avatar').appendChild(stDot)
   updateMeStatus()
 
+  // Mark the user offline immediately on tab/window close so they don't
+  // ghost-online for the full 30-second presence window.
+  window.addEventListener('beforeunload', () => {
+    const fd = new FormData()
+    fd.append('action', 'offline')
+    fd.append('csrf', state.csrf || '')
+    navigator.sendBeacon('/api/heartbeat', fd)
+  })
+
   // Session is live — close the profile manager window.
   window.msg.loginComplete()
 
@@ -2105,6 +2114,8 @@ function addMuteBlockItems (menu, user) {
   })
   menu.appendChild(blockItem)
 
+  const isSelf = state.me && user.username &&
+    String(user.username).toLowerCase() === String(state.me.username).toLowerCase()
   const blocked = isBlocked(user)
   const item = menuItem(blocked ? 'Unblock' : 'Block', async () => {
     if (!blocked) {
@@ -2116,7 +2127,7 @@ function addMuteBlockItems (menu, user) {
     closeContextMenu()
   })
   item.classList.add('danger')
-  menu.appendChild(item)
+  if (!isSelf) menu.appendChild(item)
 }
 
 function openContextMenu (x, y, user) {
@@ -2414,21 +2425,24 @@ function renderChat () {
     if (partnerId != null && muteBtn && blockBtn) {
       const muted = isMuted({ id: partnerId, muted: dmRow && dmRow.muted })
       const blocked = isBlocked({ username: open.id })
+      const isSelf = state.me && String(open.id).toLowerCase() === String(state.me.username).toLowerCase()
       muteBtn.hidden = false
       muteBtn.textContent = muted ? 'Unmute' : 'Mute'
       muteBtn.onclick = async () => {
         await setUserMuted({ id: partnerId, username: open.id }, muted)
         renderChat()
       }
-      blockBtn.hidden = false
-      blockBtn.textContent = blocked ? 'Unblock' : 'Block'
-      blockBtn.onclick = async () => {
-        if (!blocked) {
-          const ok = await appConfirm('Block ' + open.id + '? They will be removed from your friends list.')
-          if (!ok) return
+      blockBtn.hidden = isSelf
+      if (!isSelf) {
+        blockBtn.textContent = blocked ? 'Unblock' : 'Block'
+        blockBtn.onclick = async () => {
+          if (!blocked) {
+            const ok = await appConfirm('Block ' + open.id + '? They will be removed from your friends list.')
+            if (!ok) return
+          }
+          await setUserBlocked({ username: open.id }, blocked)
+          renderChat()
         }
-        await setUserBlocked({ username: open.id }, blocked)
-        renderChat()
       }
     } else {
       if (muteBtn) muteBtn.hidden = true

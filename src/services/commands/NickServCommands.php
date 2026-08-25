@@ -239,7 +239,7 @@ CommandRegistry::register('info', [
             ]];
         }
         $users = (int) Database::scalar('SELECT COUNT(*) FROM users');
-        $online = (int) Database::scalar('SELECT COUNT(*) FROM users WHERE last_seen >= datetime("now", "-30 seconds") AND away IS NULL');
+        $online = (int) Database::scalar('SELECT COUNT(*) FROM users WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND away IS NULL', [presence_window()]);
         $channels = (int) Database::scalar('SELECT COUNT(*) FROM channels');
         $msgs = (int) Database::scalar('SELECT COUNT(*) FROM messages');
         return ['replies' => [

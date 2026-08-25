@@ -141,6 +141,7 @@ $router->get('/api/online', [UserController::class, 'online']);
 $router->post('/api/password', [UserController::class, 'changePassword']);
 $router->post('/api/profile', [UserController::class, 'updateProfile']);
 $router->post('/api/status', [UserController::class, 'status']);
+$router->post('/api/heartbeat', [UserController::class, 'heartbeat']);
 $router->post('/api/avatar', [UserController::class, 'uploadAvatar']);
 $router->post('/api/avatar/remove', [UserController::class, 'removeAvatar']);
 $router->post('/api/mfa/begin', [UserController::class, 'mfaBegin']);

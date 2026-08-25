@@ -68,6 +68,25 @@ final class UserController
         json_out(['ok' => true, 'status' => Auth::statusInfo($row), 'away' => $row['away']]);
     }
 
+    /** POST /api/heartbeat — presence keepalive / offline signal from beforeunload beacons. */
+    public static function heartbeat(): void
+    {
+        $user = Auth::require();
+        $action = (string) ($_POST['action'] ?? '');
+        if ($action === 'offline') {
+            // Mark the user offline immediately (same offset as WS close).
+            // CSRF is skipped: sendBeacon in beforeunload cannot fetch a token
+            // asynchronously.  The session check above prevents cross-origin abuse.
+            Database::query(
+                'UPDATE users SET last_seen = datetime("now", "-60 seconds") WHERE id = ?',
+                [(int) $user['id']]
+            );
+        } else {
+            Csrf::verify();
+        }
+        json_out(['ok' => true]);
+    }
+
     /** GET /api/csrf — the session's CSRF token for app clients that post JSON/form bodies.
      *  Requires an authenticated session so an unauthenticated cross-origin page
      *  cannot read a victim's token (defense-in-depth behind the credentialed
@@ -185,11 +204,12 @@ final class UserController
     public static function online(): void
     {
         $user = Auth::require();
+        $pw = presence_window();
         $rows = Database::all(
             'SELECT id, username, away, status_mode, custom_status FROM users
-             WHERE last_seen >= datetime("now", "-30 seconds") AND status_mode != \'invisible\' AND id != ?
+             WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND status_mode != \'invisible\' AND away IS NULL AND id != ?
              ORDER BY username COLLATE NOCASE',
-            [$user['id']]
+            [$pw, $user['id']]
         );
         json_out(['ok' => true, 'online' => $rows]);
     }

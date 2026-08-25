@@ -185,6 +185,7 @@ final class FriendController
         if ($q === '') {
             json_out(['ok' => true, 'results' => []]);
         }
+        $pw = presence_window();
         $rows = Database::all(
             "SELECT id, username, avatar, role, away, last_seen, status_mode, custom_status, searchable
              FROM users
@@ -194,9 +195,9 @@ final class FriendController
                AND NOT EXISTS (SELECT 1 FROM friendships fb WHERE fb.status = 'blocked'
                                AND ((fb.user_id = ? AND fb.friend_id = users.id)
                                  OR (fb.user_id = users.id AND fb.friend_id = ?)))
-             ORDER BY (last_seen >= datetime('now', '-30 seconds')) DESC, username COLLATE NOCASE
+             ORDER BY (last_seen >= datetime('now', '-' || ? || ' seconds')) DESC, username COLLATE NOCASE
              LIMIT ?",
-            [(int) $user['id'], '%' . addcslashes($q, '%_\\') . '%', (int) $user['id'], (int) $user['id'], (int) $user['id'], $limit]
+            [(int) $user['id'], '%' . addcslashes($q, '%_\\') . '%', (int) $user['id'], (int) $user['id'], (int) $user['id'], $pw, $limit]
         );
         $results = [];
         foreach ($rows as $r) {

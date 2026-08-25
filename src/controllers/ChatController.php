@@ -135,11 +135,13 @@ final class ChatController
              WHERE ' . (MessageService::isGuest($user) ? 'n.guest_user_id = ?' : 'n.user_id = ?') . ' AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
             [$user['id']]
         );
+        $pw = presence_window();
         $onlineUsers = Database::all(
-            "SELECT id, username, role, guest, away, status_mode FROM users WHERE last_seen >= datetime('now', '-30 seconds') AND status_mode != 'invisible'
+            "SELECT id, username, role, guest, away, status_mode FROM users WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible'
              UNION ALL
-             SELECT id, nick, 'user', 1, NULL, 'online' FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
-             ORDER BY username"
+             SELECT id, nick, 'user', 1, NULL, 'online' FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
+             ORDER BY username",
+            [$pw, $pw]
         );
         // Name -> slug for every channel the SESSION can access, so #channel
         // references in messages render as clickable links. This must NOT
@@ -178,12 +180,13 @@ final class ChatController
         // Registered (non-guest) users for the @mention autocomplete pool,
         // ordered so the most recently active online users come first.
         // searchable = 0 accounts opt out of being found by name (Issue #14).
+        $pw = presence_window();
         $mentionUsers = Database::all(
             "SELECT id, username,
-                    CASE WHEN last_seen >= datetime('now', '-30 seconds') AND away IS NULL THEN 1 ELSE 0 END AS online
+                    CASE WHEN last_seen >= datetime('now', '-' || ? || ' seconds') AND away IS NULL THEN 1 ELSE 0 END AS online
              FROM users WHERE guest = 0 AND status = 'active' AND id != ? AND searchable = 1
              ORDER BY online DESC, last_seen DESC, username COLLATE NOCASE LIMIT 2000",
-            [$user['id']]
+            [$pw, $user['id']]
         );
         $motd = (string) config_get('motd', '');
 
@@ -640,13 +643,15 @@ final class ChatController
         // Live "Online" sidebar list (registered + guest users seen recently).
         // Mirrors the app view's list (including the current user) so the first
         // poll doesn't drop the caller's own row from the sidebar.
+        $pw = presence_window();
         $out['online_users'] = Database::all(
             "SELECT id, username, role, guest, away, status_mode, custom_status
              FROM users
-             WHERE last_seen >= datetime('now', '-30 seconds') AND status_mode != 'invisible'
+             WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible' AND away IS NULL
              UNION ALL
-             SELECT id, nick, 'user', 1, NULL, 'online', '' FROM guests WHERE last_seen >= datetime('now', '-30 seconds')
-             ORDER BY username COLLATE NOCASE"
+             SELECT id, nick, 'user', 1, NULL, 'online', '' FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
+             ORDER BY username COLLATE NOCASE",
+            [$pw, $pw]
         );
 
         $notifyCount = (int) Database::scalar(
@@ -814,6 +819,19 @@ final class ChatController
                AND status_mode = 'online'
                AND last_seen < datetime('now', '-' || ? || ' seconds')",
             [$grace]
+        );
+        // Registered users: mark as offline if their last_seen is stale.
+        // This catches users whose connection dropped without a clean WebSocket
+        // close and who have no active polling/SSE tab.  We only touch users
+        // with an explicit 'online' status who are not away — we never override
+        // an explicit away/dnd/invisible choice.
+        Database::query(
+            "UPDATE users SET last_seen = datetime('now', '-' || ? || ' seconds')
+             WHERE status_mode = 'online'
+               AND away IS NULL
+               AND last_seen IS NOT NULL
+               AND last_seen < datetime('now', '-' || ? || ' seconds')",
+            [$grace, $grace]
         );
         // Guests: simply mark them as not recently seen so they don't show
         // in the online list. (Guests have no status_mode.)

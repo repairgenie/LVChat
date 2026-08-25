@@ -595,8 +595,10 @@ CommandRegistry::register('clients', [
     'desc' => 'List users currently online.',
     'usage' => '/clients',
     'run' => function (array $args, array $user, ?array $channel) {
+        $pw = presence_window();
         $online = Database::all(
-            'SELECT username, role FROM users WHERE last_seen >= datetime("now", "-30 seconds") AND away IS NULL ORDER BY username'
+            'SELECT username, role FROM users WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND away IS NULL ORDER BY username',
+            [$pw]
         );
         if (!$online) {
             return ['replies' => ['Nobody is online right now.']];

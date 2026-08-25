@@ -344,12 +344,14 @@ final class ChannelService
     /** Count of registered members who are currently present (not guests, not invisible). */
     public static function memberCount(int|string $channelId): int
     {
+        $pw = presence_window();
         return (int) Database::scalar(
             "SELECT COUNT(*) FROM channel_members cm
              JOIN users u ON u.id = cm.user_id
              WHERE cm.channel_id = ? AND u.status_mode != 'invisible'
-               AND u.last_seen >= datetime('now', '-30 seconds')",
-            [$channelId]
+               AND u.away IS NULL
+               AND u.last_seen >= datetime('now', '-' || ? || ' seconds')",
+            [$channelId, $pw]
         );
     }
 
@@ -415,10 +417,11 @@ final class ChannelService
     {
         $cols = 'c.id, c.name, c.slug, c.topic, c.visibility, c.moderated, c.owner_id, c.bg_image, c.bg_color, c.bg_fit, c.bg_overlay, c.channel_url';
         // Online chatter count: members (users + guests) seen within 30s, users not away.
+        $pw = presence_window();
         $onlineSql = '((SELECT COUNT(*) FROM channel_members om JOIN users ou ON ou.id = om.user_id
-                         WHERE om.channel_id = c.id AND ou.status_mode != \'invisible\' AND ou.last_seen >= datetime("now", "-30 seconds"))
+                         WHERE om.channel_id = c.id AND ou.status_mode != \'invisible\' AND ou.away IS NULL AND ou.last_seen >= datetime("now", "-" || ' . $pw . ' || " seconds"))
                         + (SELECT COUNT(*) FROM channel_members om JOIN guests og ON og.id = om.guest_id
-                         WHERE om.channel_id = c.id AND og.last_seen >= datetime("now", "-30 seconds")))';
+                         WHERE om.channel_id = c.id AND og.last_seen >= datetime("now", "-" || ' . $pw . ' || " seconds")))';
         if (Auth::isGuest($actor)) {
             $rows = Database::all(
                 "SELECT $cols,
@@ -637,28 +640,30 @@ final class ChannelService
         if (Auth::isGuest($actor)) {
             return [];
         }
+        $pw = presence_window();
         return Database::all(
             "SELECT DISTINCT c.*,
                 (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id
-                 WHERE cm.channel_id = c.id AND u.away IS NULL AND u.last_seen >= datetime('now', '-30 seconds')) AS members
+                 WHERE cm.channel_id = c.id AND u.away IS NULL AND u.last_seen >= datetime('now', '-' || ? || ' seconds')) AS members
              FROM channels c
              LEFT JOIN channel_members fm ON fm.channel_id = c.id AND fm.user_id = ? AND fm.level = 'founder'
              WHERE c.forbidden = 0 AND (c.owner_id = ? OR fm.id IS NOT NULL)
              ORDER BY (c.registered_at IS NULL) ASC, c.name COLLATE NOCASE",
-            [$actor['id'], $actor['id']]
+            [$pw, $actor['id'], $actor['id']]
         );
     }
 
     public static function publicChannels(string $term = ''): array
     {
+        $pw = presence_window();
         $sql = "SELECT c.*,
                     (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id
                      WHERE cm.channel_id = c.id AND u.away IS NULL
-                       AND u.last_seen >= datetime('now', '-30 seconds')) AS members
+                       AND u.last_seen >= datetime('now', '-' || ? || ' seconds')) AS members
                 FROM channels c
                 WHERE c.visibility = 'public'
                 AND c.forbidden = 0";
-        $params = [];
+        $params = [$pw];
         if ($term !== '') {
             $sql .= ' AND c.name LIKE ? COLLATE NOCASE';
             $params[] = '%' . $term . '%';

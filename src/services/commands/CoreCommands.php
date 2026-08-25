@@ -143,8 +143,9 @@ CommandRegistry::register('me', [
         if ($blocked) {
             return ['replies' => [$blocked]];
         }
-        MessageService::send($channel['id'], $user, $text, 'action');
-        return null;
+        $msg = MessageService::send($channel['id'], $user, $text, 'action');
+        Realtime::message($channel['slug'], $msg);
+        return ['message' => $msg];
     },
 ]);
 
@@ -488,16 +489,17 @@ CommandRegistry::register('who', [
             return ['replies' => $lines];
         }
         $like = '%' . str_replace(['*', '?'], ['%', '_'], strtolower($arg ?? '*')) . '%';
+        $pw = presence_window();
         $rows = Database::all(
             'SELECT username, role, status_mode, away FROM users
-             WHERE username LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-30 seconds")
+             WHERE username LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-" || ? || " seconds")
              ORDER BY username',
-            [$like]
+            [$like, $pw]
         );
         $guests = Database::all(
-            'SELECT nick FROM guests WHERE nick LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-30 seconds")
+            'SELECT nick FROM guests WHERE nick LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-" || ? || " seconds")
              ORDER BY nick',
-            [$like]
+            [$like, $pw]
         );
         if (!$rows && !$guests) {
             return ['replies' => ['No users match ' . ($arg ?: '*') . '.']];

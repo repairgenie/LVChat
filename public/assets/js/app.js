@@ -2056,13 +2056,39 @@
     input.value = '';
     hideAutocomplete();
     if (text[0] === '/') {
+      const isMe = text.startsWith('/me ');
+      let meTmpId = null;
+      if (isMe && (CHANNEL || DM)) {
+        meTmpId = 'pending-' + Date.now();
+        const tmp = {
+          id: 0,
+          kind: 'action',
+          is_pm: DM ? 1 : 0,
+          username: MY_NICK,
+          sender_id: MY_ID,
+          level: MY_LEVEL,
+          content: text.slice(4),
+          created_at: new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
+        };
+        appendPendingMsg(tmp, meTmpId);
+      }
       post('/api/command', { channel: CHANNEL, text }, (j) => {
+        if (meTmpId) {
+          const el = msgsEl ? msgsEl.querySelector('.msg[data-pending="' + meTmpId + '"]') : null;
+          if (el) el.remove();
+          if (j.message) appendMsg(j.message);
+        }
         if (j.redirect) { window.location = j.redirect; return; }
         if (j.action === 'clear') { msgsEl.innerHTML = ''; return; }
         if (j.action === 'browse') { openBrowse(); (j.replies || []).forEach((r) => showReply(r)); return; }
         if (j.copy) copyText(j.copy);
         (j.replies || []).forEach((r) => showReply(r));
         refreshHeaderTopic(j);
+      }, () => {
+        if (meTmpId) {
+          const el = msgsEl ? msgsEl.querySelector('.msg[data-pending="' + meTmpId + '"]') : null;
+          if (el) el.remove();
+        }
       });
     } else if (CHANNEL || DM) {
       const payload = DM
@@ -3879,7 +3905,7 @@ if (j.mode) {
   const dmBlockBtn = document.getElementById('dm-block-btn');
   if (dmBlockBtn) dmBlockBtn.addEventListener('click', async () => {
     const nick = dmBlockBtn.dataset.username;
-    if (nick && await uiConfirm('Block ' + nick + '?')) {
+    if (nick && nick.toLowerCase() !== MY_NICK && await uiConfirm('Block ' + nick + '?')) {
       post('/api/friend/block', { username: nick }, () => showReply(nick + ' has been blocked.'));
     }
   });
@@ -4288,6 +4314,17 @@ if (j.mode) {
   } else {
     startPolling();
   }
+
+  // Mark the user offline immediately on tab/window close so they don't
+  // ghost-online for the full 30-second presence window.  sendBeacon is
+  // the only reliable async call during beforeunload; the server sets
+  // last_seen to -60 seconds (same as a clean WebSocket close).
+  window.addEventListener('beforeunload', () => {
+    const fd = new FormData();
+    fd.append('action', 'offline');
+    fd.append('csrf', CSRF);
+    navigator.sendBeacon('/api/heartbeat', fd);
+  });
 
   // ── Channel browser modal ──────────────────────────────────────────────────
   const browseModal = document.getElementById('browse-modal');
