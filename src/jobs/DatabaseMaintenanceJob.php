@@ -34,6 +34,7 @@ class DatabaseMaintenanceJob
         }
         Database::maintenance();
         self::pruneExpiredFiles();
+        self::pruneOldPreviews();
         config_set('db_maintenance_last_run', $today);
     }
 
@@ -43,7 +44,7 @@ class DatabaseMaintenanceJob
      */
     private static function pruneExpiredFiles(): void
     {
-        $expiryDays = (int) config_get('upload_expiry_days', 60);
+        $expiryDays = (int) config_get('upload_expiry_days', '60');
         if ($expiryDays <= 0) {
             return;
         }
@@ -53,5 +54,13 @@ class DatabaseMaintenanceJob
             UploadService::remove($row['url']);
         }
         $pdo->exec('DELETE FROM uploaded_files WHERE expires_at IS NOT NULL AND expires_at < datetime("now")');
+    }
+
+    /** Delete link previews older than 30 days and their orphaned images. */
+    private static function pruneOldPreviews(): void
+    {
+        if (LinkPreviewService::enabled()) {
+            LinkPreviewService::purgeOld();
+        }
     }
 }

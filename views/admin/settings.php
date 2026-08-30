@@ -225,6 +225,13 @@ require ROOT . '/views/admin/_page_header.php';
   </div>
   <div class="flex items-center justify-between card p-4">
     <div>
+      <div class="text-sm font-medium text-white">Link previews (OpenGraph)</div>
+      <div class="text-xs text-discord-400">Show rich preview cards when a message contains a single URL</div>
+    </div>
+    <input type="checkbox" name="link_preview_enabled" value="1" class="w-5 h-5 accent-blurple" <?= ($settings['link_preview_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+  </div>
+  <div class="flex items-center justify-between card p-4">
+    <div>
       <div class="text-sm font-medium text-white">Chat logging</div>
       <div class="text-xs text-discord-400">Record all channel and DM messages in the append-only archive (Admin → Logs). When off, no new messages are logged. Individual channels can also disable logging with /mode +L (opers only).</div>
     </div>

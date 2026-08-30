@@ -92,6 +92,7 @@ $router->get('/embed/{slug}', [ChannelController::class, 'embed']);
 $router->get('/api/version', [ChatController::class, 'version']);
 $router->get('/api/updater', [ChatController::class, 'updater']);
 $router->get('/api/commands', [ChatController::class, 'commands']);
+$router->get('/api/link-preview', [ChatController::class, 'linkPreview']);
 $router->post('/api/send', [ChatController::class, 'send']);
 $router->post('/api/upload', [ChatController::class, 'upload']);
 $router->post('/api/command', [ChatController::class, 'command']);

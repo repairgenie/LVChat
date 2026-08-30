@@ -80,6 +80,23 @@ final class ChatController
         json_out(['commands' => CommandRegistry::names()]);
     }
 
+    /** GET /api/link-preview?url=… — return cached OpenGraph preview for a URL. */
+    public static function linkPreview(): void
+    {
+        Auth::require();
+        if (!LinkPreviewService::enabled()) {
+            json_out(['ok' => true, 'preview' => null]);
+            return;
+        }
+        $url = trim((string) ($_GET['url'] ?? ''));
+        if ($url === '') {
+            json_out(['ok' => false, 'error' => 'No URL provided.'], 400);
+            return;
+        }
+        $preview = LinkPreviewService::getByUrl($url);
+        json_out(['ok' => true, 'preview' => $preview]);
+    }
+
     public static function app(): void
     {
         $user = Auth::require();
@@ -392,7 +409,18 @@ final class ChatController
                 'guest' => MessageService::isGuest($user) ? 1 : 0,
                 'level' => 'normal',
                 'is_pm' => true,
+                'preview' => null,
             ];
+            // Fetch link preview for DMs.
+            if (LinkPreviewService::shouldPreview($content) && $gifKind === false) {
+                $url = LinkPreviewService::extractFirstUrl($content);
+                if ($url !== null) {
+                    $preview = LinkPreviewService::getPreview($url);
+                    if ($preview !== null) {
+                        $pmMessage['preview'] = $preview;
+                    }
+                }
+            }
             // Push the PM to both participants' open tabs + refresh the bell.
             Realtime::dm($user, $t, $pmMessage);
             Realtime::bell($t);
@@ -446,6 +474,16 @@ final class ChatController
             }
         $msg = MessageService::send((int) $channel['id'], $user, $content, $gifKind ? 'gif' : 'message', $replyTo);
         $msg['channel'] = $channel['slug'];
+        // Fetch link preview in the background (synchronous with timeout).
+        if (LinkPreviewService::shouldPreview($content) && $gifKind === false) {
+            $url = LinkPreviewService::extractFirstUrl($content);
+            if ($url !== null) {
+                $preview = LinkPreviewService::getPreview($url);
+                if ($preview !== null) {
+                    $msg['preview'] = $preview;
+                }
+            }
+        }
         // Fan the message out to everyone viewing this channel in realtime.
         Realtime::message($channel['slug'], $msg);
         self::finish(['ok' => true, 'message' => $msg], $back);

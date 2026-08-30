@@ -76,7 +76,7 @@ final class UploadService
      */
     public static function chatMaxBytes(?array $actor = null): int
     {
-        $adminMax = ((int) config_get('upload_max_mb', 5)) * 1024 * 1024;
+        $adminMax = ((int) config_get('upload_max_mb', '5')) * 1024 * 1024;
         if ($adminMax <= 0) {
             $adminMax = 5 * 1024 * 1024;
         }
@@ -232,7 +232,7 @@ final class UploadService
      */
     private static function trackUpload(string $url, string $originalName, string $mime, int $size, ?array $actor, string $kind): void
     {
-        $expiryDays = (int) config_get('upload_expiry_days', 60);
+        $expiryDays = (int) config_get('upload_expiry_days', '60');
         $expiresAt = $expiryDays > 0 ? gmdate('Y-m-d H:i:s', time() + $expiryDays * 86400) : null;
         $uploaderId = $actor !== null ? (int) ($actor['id'] ?? 0) : null;
         Database::run(

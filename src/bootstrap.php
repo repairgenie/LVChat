@@ -164,6 +164,7 @@ require ROOT . '/src/services/UpdaterService.php';
 require ROOT . '/src/services/CommandParser.php';
 require ROOT . '/src/services/CommandRegistry.php';
 require ROOT . '/src/services/EmbedService.php';
+require ROOT . '/src/services/LinkPreviewService.php';
 require ROOT . '/src/services/EventLogService.php';
 require ROOT . '/src/services/commands/CoreCommands.php';
 require ROOT . '/src/services/commands/OpCommands.php';

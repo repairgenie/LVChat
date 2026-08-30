@@ -409,6 +409,22 @@ CREATE TABLE IF NOT EXISTS banned_urls (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS link_previews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT NOT NULL UNIQUE,
+  title TEXT,
+  description TEXT,
+  image_url TEXT,
+  original_image_url TEXT,
+  site_name TEXT,
+  fetched_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  http_status INTEGER,
+  error_message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_link_previews_url ON link_previews(url);
+CREATE INDEX IF NOT EXISTS idx_link_previews_fetched ON link_previews(fetched_at);
+
 CREATE TABLE IF NOT EXISTS server_config (
   key TEXT PRIMARY KEY,
   value TEXT

@@ -459,6 +459,46 @@ html.light .bg-red-500 .text-white { color: #fff; }
 #channel-url-pane { min-height: 0; }
 #channel-url-pane.url-pane-collapsed #url-frame { display: none; }
 
+/* Link preview cards (Facebook/Slack style). */
+.link-preview-card {
+  max-width: 100%;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+}
+.link-preview-card:hover {
+  text-decoration: none;
+  color: inherit;
+}
+.link-preview-image img {
+  transition: opacity .15s ease;
+}
+.link-preview-card:hover .link-preview-image img {
+  opacity: .92;
+}
+.link-preview-nsfw .link-preview-image img {
+  filter: blur(20px);
+  transform: scale(1.05);
+}
+.link-preview-nsfw .link-preview-text {
+  filter: blur(4px);
+  user-select: none;
+}
+.link-preview-nsfw-overlay {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.link-preview-card.link-preview-nsfw:hover .link-preview-nsfw-overlay {
+  opacity: 1;
+}
+.link-preview-card.link-preview-nsfw:hover .link-preview-image img {
+  filter: blur(20px);
+}
+.link-preview-wrap {
+  position: relative;
+}
+
 /* Channel settings modal: lock muted tabs to the server theme. */
 #chan-settings-modal .cs-tab:disabled { cursor: not-allowed; opacity: .55; }
 

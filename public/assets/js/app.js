@@ -244,6 +244,13 @@
           + `<div class="px-3 py-2 text-sm leading-relaxed">${msgHtml}</div></details>`;
       }
     }
+    // Append link preview card if available.
+    if (m.preview && m.preview.title) {
+      const previewUrl = (m.content || '').match(/(https?:\/\/[^\s<>"')]+)/i);
+      if (previewUrl) {
+        msgHtml += renderPreviewCard(m.preview, previewUrl[1]);
+      }
+    }
     return msgHtml;
   }
 
@@ -285,6 +292,34 @@
       + '<a href="' + esc(url) + '" download="' + esc(filename) + '" class="shrink-0 text-xs text-blurple hover:text-blurple-300 font-semibold px-2 py-1 rounded hover:bg-blurple/10 transition-colors">Download</a>'
       + '</div>';
     if (caption) html += '<div class="mt-1">' + linkify(caption) + '</div>';
+    return html;
+  }
+
+  function renderPreviewCard(preview, url) {
+    if (!preview || !preview.title) return '';
+    const siteName = esc(preview.site_name || '');
+    const title = esc(preview.title || '');
+    const desc = esc(preview.description || '');
+    const imageUrl = preview.image_url || '';
+    const nsfw = preview.nsfw ? ' link-preview-nsfw' : '';
+    let html = '<div class="link-preview-wrap relative">'
+      + '<a href="' + esc(url) + '" target="_blank" rel="noopener" class="link-preview-card block mt-2 border border-discord-600/60 rounded-lg overflow-hidden hover:border-discord-400/80 transition-colors max-w-full' + nsfw + '">';
+    if (imageUrl) {
+      html += '<div class="link-preview-image aspect-video w-full bg-discord-800 overflow-hidden">'
+        + '<img src="' + esc(imageUrl) + '" alt="" loading="lazy" class="w-full h-full object-cover">'
+        + '</div>';
+    }
+    html += '<div class="link-preview-text px-4 py-3">';
+    if (siteName) html += '<div class="text-[11px] text-discord-400 uppercase tracking-wide leading-tight">' + siteName + '</div>';
+    if (title) html += '<div class="text-[13px] font-semibold text-discord-100 mt-1 leading-snug line-clamp-2">' + title + '</div>';
+    if (desc) html += '<div class="text-[12px] text-discord-400 mt-1 leading-snug line-clamp-2">' + desc + '</div>';
+    html += '</div></a>';
+    if (preview.nsfw) {
+      html += '<div class="link-preview-nsfw-overlay flex items-center justify-center absolute inset-0 bg-black/60 rounded-lg">'
+        + '<span class="text-sm font-medium text-white/80">NSFW — Click to view</span>'
+        + '</div>';
+    }
+    html += '</div>';
     return html;
   }
 

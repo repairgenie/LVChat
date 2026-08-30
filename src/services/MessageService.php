@@ -216,7 +216,9 @@ final class MessageService
              LIMIT ?',
             [$channelId, $since, $limit]
         );
-        return array_map([self::class, 'present'], $rows);
+        $msgs = array_map([self::class, 'present'], $rows);
+        self::loadPreviews($msgs);
+        return $msgs;
     }
 
     /**
@@ -296,7 +298,9 @@ $params[] = $limit;
              LIMIT ?',
             $floorId !== null ? [$channelId, $floorId, $limit] : [$channelId, $limit]
         );
-        return array_map([self::class, 'present'], array_reverse($rows));
+        $msgs = array_map([self::class, 'present'], array_reverse($rows));
+        self::loadPreviews($msgs);
+        return $msgs;
     }
 
     /** Older messages than $beforeId (pagination). Returns ascending oldest→newest. */
@@ -309,7 +313,9 @@ $params[] = $limit;
              LIMIT ?',
             $floorId !== null ? [$channelId, $beforeId, $floorId, $limit] : [$channelId, $beforeId, $limit]
         );
-        return array_map([self::class, 'present'], array_reverse($rows));
+        $msgs = array_map([self::class, 'present'], array_reverse($rows));
+        self::loadPreviews($msgs);
+        return $msgs;
     }
 
     public static function forDm(array $me, array $other, int $since = 0, int $limit = 100): array
@@ -997,6 +1003,42 @@ $params[] = $limit;
             'edited_at' => $m['edited_at'],
             'deleted' => (int) $m['deleted'],
             'is_pm' => false,
+            'preview' => $m['preview'] ?? null,
         ];
+    }
+
+    /**
+     * Batch-load link previews for an array of presented messages.
+     * Mutates each message in-place, adding a 'preview' key.
+     */
+    public static function loadPreviews(array &$messages): void
+    {
+        if (!LinkPreviewService::enabled() || empty($messages)) {
+            return;
+        }
+        $ids = array_map(fn($m) => (int) $m['id'], $messages);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $rows = Database::all(
+            "SELECT m.id AS msg_id, lp.title, lp.description, lp.image_url, lp.site_name, lp.url, lp.status
+             FROM link_previews lp
+             JOIN messages m ON m.content = lp.url
+             WHERE m.id IN ($placeholders) AND lp.status = 'success'",
+            $ids
+        );
+        $previews = [];
+        foreach ($rows as $row) {
+            $nsfw = LinkPreviewService::isNsfwUrl((string) $row['url']);
+            $previews[(int) $row['msg_id']] = [
+                'title' => $row['title'] ?: null,
+                'description' => $row['description'] ?: null,
+                'image_url' => $row['image_url'] ? url((string) $row['image_url']) : null,
+                'site_name' => $row['site_name'] ?: null,
+                'nsfw' => $nsfw,
+            ];
+        }
+        foreach ($messages as &$m) {
+            $m['preview'] = $previews[(int) $m['id']] ?? null;
+        }
+        unset($m);
     }
 }

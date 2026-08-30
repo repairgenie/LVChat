@@ -829,7 +829,62 @@ function chat_content_html(array $m): string
     if (($m['kind'] ?? '') === 'ai_response' || (int) ($m['bot'] ?? 0) === 1) {
         return chat_markup_ai((string) $m['content']);
     }
-    return chat_markup_rich((string) $m['content']);
+    $html = chat_markup_rich((string) $m['content']);
+    // Append link preview card if available.
+    if (!empty($m['preview']) && is_array($m['preview']) && !empty($m['preview']['title'])) {
+        $previewUrl = LinkPreviewService::extractFirstUrl((string) $m['content']);
+        if ($previewUrl !== null) {
+            $html .= link_preview_html($m['preview'], $previewUrl);
+        }
+    }
+    return $html;
+}
+
+/**
+ * Render a Facebook/Slack-style link preview card.
+ * @param array{title:?string, description:?string, image_url:?string, site_name:?string, nsfw:bool} $preview
+ * @param string $url The original URL from the message.
+ */
+function link_preview_html(array $preview, string $url): string
+{
+    $title = h((string) ($preview['title'] ?? ''));
+    $desc = h((string) ($preview['description'] ?? ''));
+    $siteName = h((string) ($preview['site_name'] ?? ''));
+    $imageUrl = h((string) ($preview['image_url'] ?? ''));
+    $nsfw = !empty($preview['nsfw']);
+    $nsfwClass = $nsfw ? ' link-preview-nsfw' : '';
+
+    $html = '<div class="link-preview-wrap relative">';
+    $html .= '<a href="' . h($url) . '" target="_blank" rel="noopener" '
+        . 'class="link-preview-card block mt-2 border border-discord-600/60 rounded-lg overflow-hidden hover:border-discord-400/80 transition-colors max-w-full' . $nsfwClass . '">';
+
+    if ($imageUrl !== '') {
+        $html .= '<div class="link-preview-image aspect-video w-full bg-discord-800 overflow-hidden">';
+        $html .= '<img src="' . $imageUrl . '" alt="" loading="lazy" class="w-full h-full object-cover">';
+        $html .= '</div>';
+    }
+
+    $html .= '<div class="link-preview-text px-4 py-3">';
+    if ($siteName !== '') {
+        $html .= '<div class="text-[11px] text-discord-400 uppercase tracking-wide leading-tight">' . $siteName . '</div>';
+    }
+    if ($title !== '') {
+        $html .= '<div class="text-[13px] font-semibold text-discord-100 mt-1 leading-snug line-clamp-2">' . $title . '</div>';
+    }
+    if ($desc !== '') {
+        $html .= '<div class="text-[12px] text-discord-400 mt-1 leading-snug line-clamp-2">' . $desc . '</div>';
+    }
+    $html .= '</div>';
+    $html .= '</a>';
+
+    if ($nsfw) {
+        $html .= '<div class="link-preview-nsfw-overlay flex items-center justify-center absolute inset-0 bg-black/60 rounded-lg">';
+        $html .= '<span class="text-sm font-medium text-white/80">NSFW — Click to view</span>';
+        $html .= '</div>';
+    }
+
+    $html .= '</div>';
+    return $html;
 }
 
 function chat_markup_ai(string $text): string

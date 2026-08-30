@@ -1146,6 +1146,7 @@ final class AdminController
                 config_set('reactions_enabled', ($_POST['reactions_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('gifs_enabled', ($_POST['gifs_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('giphy_api_key', trim((string) ($_POST['giphy_api_key'] ?? '')));
+                config_set('link_preview_enabled', ($_POST['link_preview_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('webhooks_enabled', ($_POST['webhooks_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('chat_logging_enabled', ($_POST['chat_logging_enabled'] ?? '0') === '1' ? '1' : '0');
                 config_set('max_channels_per_user', (string) max(1, (int) ($_POST['max_channels_per_user'] ?? 100)));

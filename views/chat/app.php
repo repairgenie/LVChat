@@ -364,7 +364,7 @@ function presence_label(array $u): string {
       data-push-all-off="<?= (int) (!(int) ($user['guest'] ?? 0) && (int) $pushPrefs['channels'] === 0 && (int) $pushPrefs['dms'] === 0 && (int) $pushPrefs['invites'] === 0) ?>"
       data-push-prefs="<?= h(json_encode(['channels' => (int) $pushPrefs['channels'], 'dms' => (int) $pushPrefs['dms'], 'invites' => (int) $pushPrefs['invites']])) ?>"
       data-my-level="<?= h($currentLevel) ?>"
-      data-long-msg-threshold="<?= (int) config_get('long_msg_threshold', 300) ?>"
+      data-long-msg-threshold="<?= (int) config_get('long_msg_threshold', '300') ?>"
       data-me-status="<?= h($user['status_mode'] ?? 'online') ?>"
       data-can-op="<?= $myLevelWeight >= 3 || $user['role'] === 'admin' ? '1' : '0' ?>"
       data-can-admin="<?= $user['role'] === 'admin' ? '1' : '0' ?>"
