@@ -281,7 +281,20 @@ if (class_exists('Realtime') && Realtime::enabled()) {
         $__wsOrigin = $__wsParsed['scheme'] . '://' . $__wsParsed['host'] . (!empty($__wsParsed['port']) ? ':' . $__wsParsed['port'] : '');
     }
 }
-$__connectSrc = "'self'" . ($__wsOrigin !== '' ? " {$__wsOrigin}" : '');
+// Voice (LiveKit): the browser opens its own WebSocket straight to the media
+// server, which normally listens on a different port (7880) or host than the
+// app. Without that origin in connect-src the browser blocks room.connect():
+// the call rings (ring/accept is plain HTTP), then never carries a single
+// audio or video track. This is the media leg every client shares.
+$__voiceSrc = '';
+if (class_exists('LiveKitService')) {
+    $__lk = parse_url(LiveKitService::url());
+    if (!empty($__lk['host'])) {
+        $__lkHostPort = $__lk['host'] . (!empty($__lk['port']) ? ':' . (int) $__lk['port'] : '');
+        $__voiceSrc = ' ws://' . $__lkHostPort . ' wss://' . $__lkHostPort;
+    }
+}
+$__connectSrc = "'self'" . ($__wsOrigin !== '' ? " {$__wsOrigin}" : '') . $__voiceSrc;
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'nonce-{$__cspNonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src {$__connectSrc}; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
 header("X-Content-Type-Options: nosniff");
 header("Referrer-Policy: strict-origin-when-cross-origin");

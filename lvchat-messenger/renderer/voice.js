@@ -98,7 +98,13 @@
       var el = HOST.headerEl();
       if (el) return el;
     }
-    return document.querySelector('header .relative.ml-auto.flex.items-center.gap-2');
+    // NB: do not pin a spacing utility here. The chat header uses gap-1, and
+    // matching on gap-2 made querySelector return null — ensureEls() then
+    // bailed, els.dropdown stayed null and render() returned before the
+    // incoming-ring block, so calls never rang anywhere the default host runs.
+    return document.querySelector('header .relative.ml-auto.flex.items-center')
+      || document.querySelector('header .chat-head-actions')
+      || document.querySelector('header');
   }
 
   function hostOpenChannel(slug) {
