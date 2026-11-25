@@ -259,6 +259,8 @@ final class Realtime
      *   ['type' => 'message', 'channel' => '<slug>', 'message' => <hydrated msg>]
      *   ['type' => 'dm', 'from' => '<nick>', 'to' => '<nick>', 'message' => <hydrated pm>]
      *   ['type' => 'bell', 'user_id' => <id>, 'notify_count' => <n>]
+     *   ['type' => 'call', 'action' => 'ring|accept|decline|end',
+     *    'call_id' => <id>, 'room' => <room>, 'targets' => [['id'=>n,'guest'=>0|1]]]
      */
     public static function publish(array $event): void
     {
@@ -392,6 +394,39 @@ final class Realtime
             'channel' => $channelSlug,
             'reason' => $reason,
         ]);
+    }
+
+    /**
+     * Push a call event to the participants' open tabs: a ring, an accept or a
+     * hang-up. Delivered to the named actors (id + guest flag) regardless of
+     * which channel or DM each tab is viewing, so a call reaches every open
+     * client instantly instead of on the next 2s voice status poll. The frame
+     * is a hint only — clients re-read /api/webrtc/voice/status, which stays
+     * authoritative (and is the only path when realtime runs in poll/SSE mode).
+     */
+    public static function call(string $action, array $call, array $targets, array $extra = []): void
+    {
+        if (!self::enabled()) {
+            return;
+        }
+        // Cap the fan-out so a large call can't bloat a single push event.
+        $fan = [];
+        foreach (array_slice($targets, 0, 64) as $t) {
+            $id = (int) ($t['id'] ?? 0);
+            if ($id > 0) {
+                $fan[] = ['id' => $id, 'guest' => (int) ($t['guest'] ?? 0)];
+            }
+        }
+        if (!$fan) {
+            return;
+        }
+        self::publish(array_merge([
+            'type' => 'call',
+            'action' => $action,
+            'call_id' => (int) ($call['id'] ?? 0),
+            'room' => (string) ($call['room'] ?? ''),
+            'targets' => $fan,
+        ], $extra));
     }
 
     /**

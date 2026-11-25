@@ -1259,6 +1259,10 @@
       return;
     }
     if (j.error) return;
+    // A call rang / was accepted / was hung up. The gateway pushes it to every
+    // tab of a participant (not just the open conversation), so voice.js can
+    // re-read its status at once instead of waiting for its 2s poll.
+    if (j.call) document.dispatchEvent(new CustomEvent('lvchat:call', { detail: j.call }));
     if (j.messages && j.messages.length) {
       j.messages.forEach(appendMsg);
     }

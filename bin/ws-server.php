@@ -222,6 +222,27 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
                         && strtolower((string) ($st['sub']['target'] ?? '')) === $removedChan;
                 });
                 break;
+            case 'call':
+                // A call rang / was accepted / was hung up: deliver to the named
+                // participants (id + guest flag), whatever channel or DM each of
+                // their tabs is viewing — calls are not tied to a subscription.
+                // The frame is a hint: the client re-reads
+                // /api/webrtc/voice/status, so a dropped frame only costs the
+                // poll interval it was meant to skip.
+                $callTargets = [];
+                foreach ((array) ($event['targets'] ?? []) as $t) {
+                    $tId = (int) ($t['id'] ?? 0);
+                    if ($tId > 0) {
+                        $callTargets[$tId . ':' . (int) ($t['guest'] ?? 0)] = true;
+                    }
+                }
+                $callFrame = $event;
+                unset($callFrame['type'], $callFrame['targets']);
+                $broadcast(['call' => $callFrame], static function (array $st) use ($callTargets): bool {
+                    $key = (int) ($st['user']['id'] ?? 0) . ':' . (int) ($st['user']['guest'] ?? 0);
+                    return isset($callTargets[$key]);
+                });
+                break;
             case 'reconnect':
                 // Admin-forced: every connected WS client reloads on this frame so
                 // it re-renders with the current gateway config (poll/SSE clients

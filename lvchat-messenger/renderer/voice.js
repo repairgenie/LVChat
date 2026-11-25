@@ -2127,6 +2127,12 @@
     loadPrefs();
     ensureEls();
     document.addEventListener('keydown', onKeydown);
+    /* Call push: the gateway delivers a `call` frame (ring / accept / decline /
+     * end) to every open tab of a participant and the chat shell re-dispatches
+     * it as this DOM event. Re-read the status at once so the ring, the connect
+     * and the hang-up are immediate instead of up to POLL_MS late. The poll
+     * stays the source of truth and the only path on poll/SSE transports. */
+    document.addEventListener('lvchat:call', function () { pollStatus(); });
     pollStatus();
     setInterval(pollStatus, POLL_MS);
   }

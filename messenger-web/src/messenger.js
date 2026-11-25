@@ -1223,6 +1223,9 @@ function wsRefreshTicket (done) {
 
 function wsHandle (j) {
   if (j.pong) return
+  // Call ring / accept / hang-up: re-dispatched for voice.js, which re-reads
+  // its status immediately instead of on the next 2s poll.
+  if (j.call) { document.dispatchEvent(new CustomEvent('lvchat:call', { detail: j.call })); return }
   if (j.reconnect) { location.reload(); return }
   if (j.redirect) {
     leaveRoomForRemoval(j.reason || 'You were removed from this channel.')

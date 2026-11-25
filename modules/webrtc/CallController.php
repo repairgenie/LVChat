@@ -178,6 +178,43 @@ final class CallController
         ];
     }
 
+    /**
+     * Actor targets (id + guest flag) for a call: everyone still invited or
+     * joined, minus the actor who caused the event. Feeds the realtime call
+     * push (see Realtime::call) so the other side reacts at once.
+     */
+    private static function callTargets(array $call, ?array $except = null): array
+    {
+        $exceptId = $except === null ? 0 : (int) $except['id'];
+        $exceptGuest = ($except !== null && Auth::isGuest($except)) ? 1 : 0;
+        $targets = [];
+        $rows = Database::all(
+            "SELECT user_id, guest_id FROM call_participants
+             WHERE call_id = ? AND status IN ('invited', 'joined')",
+            [(int) $call['id']]
+        );
+        foreach ($rows as $row) {
+            $uid = (int) ($row['user_id'] ?? 0);
+            $gid = (int) ($row['guest_id'] ?? 0);
+            $id = $uid > 0 ? $uid : $gid;
+            $guest = $uid > 0 ? 0 : 1;
+            if ($id <= 0 || ($id === $exceptId && $guest === $exceptGuest)) {
+                continue;
+            }
+            $targets[] = ['id' => $id, 'guest' => $guest];
+        }
+        return $targets;
+    }
+
+    /** Push a call event ('ring' | 'accept' | 'decline' | 'end') to the peers. */
+    private static function pushCall(string $action, array $call, ?array $actor): void
+    {
+        if (!class_exists('Realtime')) {
+            return;
+        }
+        Realtime::call($action, $call, self::callTargets($call, $actor));
+    }
+
     private static function endSessionsForCall(array $call): void
     {
         Database::query(
@@ -287,6 +324,9 @@ final class CallController
             [$callId, $isTargetGuest ? null : (int) $target['id'], $isTargetGuest ? (int) $target['id'] : null]
         );
 
+        // Ring the callee's open tabs now; the caller stays on its own poll.
+        self::pushCall('ring', self::resolveCall($callId) ?: ['id' => $callId, 'room' => $room], $actor);
+
         json_out([
             'ok' => true,
             'call_id' => $callId,
@@ -326,6 +366,7 @@ final class CallController
         $added = [];
         $unknown = [];
         $busy = [];
+        $newTargets = [];
         foreach ($nicks as $nick) {
             $target = Auth::findActor($nick);
             if (!$target) {
@@ -354,6 +395,13 @@ final class CallController
                 // Extend the auto-title as the call grows.
             }
             $added[] = (string) $target['username'];
+            $newTargets[] = ['id' => (int) $target['id'], 'guest' => $isGuest ? 1 : 0];
+        }
+
+        // Ring only the people just added — everyone already on the call is
+        // connected and does not need another ring.
+        if ($newTargets) {
+            Realtime::call('ring', $call, $newTargets);
         }
 
         log_audit('call_invite', (string) $call['id'], count($added) . ' added: ' . implode(', ', $added));
@@ -389,7 +437,10 @@ final class CallController
                 json_out(['error' => 'You are not invited to this call.'], 409);
             }
         }
-        json_out(self::joinPayload($call, $actor));
+        $payload = self::joinPayload($call, $actor);
+        // The caller is waiting on its outgoing ring: let it connect at once.
+        self::pushCall('accept', $call, $actor);
+        json_out($payload);
     }
 
     /** POST /api/webrtc/call/decline — anyone invited may decline. */
@@ -409,11 +460,13 @@ final class CallController
             }
             Database::query("UPDATE call_sessions SET status = 'declined' WHERE id = ?", [(int) $call['id']]);
             LiveKitService::logCallOutcome($call, 'declined');
+            self::pushCall('decline', $call, $actor);
             json_out(['ok' => true]);
         }
         if ($row) {
             Database::query("UPDATE call_participants SET status = 'declined' WHERE id = ?", [(int) $row['id']]);
         }
+        self::pushCall('decline', $call, $actor);
         json_out(['ok' => true]);
     }
 
@@ -444,6 +497,9 @@ final class CallController
         if (!$call || !self::isParticipant($call, $actor)) {
             json_out(['error' => 'Call not found.'], 404);
         }
+        // Collect who to notify BEFORE the status updates below erase the
+        // roster, so a hang-up tears the other side's UI down immediately.
+        $notify = self::callTargets($call, $actor);
         $durationSec = null;
         if ($call['answered_at']) {
             $durationSec = max(0, (int) (time() - strtotime((string) $call['answered_at'])));
@@ -453,6 +509,9 @@ final class CallController
             Database::query("UPDATE call_sessions SET status = 'cancelled' WHERE id = ?", [(int) $call['id']]);
             LiveKitService::logCallOutcome($call, 'cancelled');
             self::endSessionsForCall($call);
+            if ($notify) {
+                Realtime::call('end', $call, $notify);
+            }
             json_out(['ok' => true]);
         }
 
@@ -481,6 +540,9 @@ final class CallController
                 'DELETE FROM voice_sessions WHERE room = ? AND ' . (Auth::isGuest($actor) ? 'guest_id' : 'user_id') . ' = ?',
                 [$call['room'], (int) $actor['id']]
             );
+        }
+        if ($notify) {
+            Realtime::call('end', $call, $notify);
         }
         json_out(['ok' => true]);
     }
