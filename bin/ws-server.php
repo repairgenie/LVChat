@@ -80,7 +80,10 @@ if (preg_match('#^http://([^:/]+)(?::(\d+))?(/.*)?$#', $pushUrl, $m)) {
     $pushPort = (int) ($m[2] ?? 9001);
     $pushPath = $m[3] !== '' ? $m[3] : '/push';
 }
-$presenceThrottle = presence_throttle();
+// presence_throttle is admin-tunable and read fresh on every application ping
+// (see onMessage): one indexed config-row lookup, measured at ~4 us here, while
+// pings arrive at most every 10-30 s per socket. Caching it would only add a
+// staleness window, so a settings change applies to live sockets immediately.
 // End-to-end liveness. The gateway sends a WebSocket PING frame to every live
 // connection and closes it when nothing at all (pong or app message) arrives
 // within the timeout. Browsers answer PING frames in the network stack, so this
@@ -97,7 +100,7 @@ function rt_log(string $msg): void
 }
 
 /** Write last_seen for an actor. $offset is 'now' or a SQLite relative modifier. */
-$writePresence = function (array $actor, string $offset = 'now') use ($presenceThrottle): void {
+$writePresence = function (array $actor, string $offset = 'now'): void {
     $isGuest = (int) ($actor['guest'] ?? 0) === 1;
     $table = $isGuest ? 'guests' : 'users';
     if ($offset === 'now') {
@@ -125,7 +128,7 @@ if ($wsSsl) {
 $ws->name = 'lvchat-ws';
 $ws->count = 1;
 
-$ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, $writePresence, $pushHost, $pushPort, $pushPath, $wsPort, $wsPingInterval, $wsPongTimeout): void {
+$ws->onWorkerStart = function (Worker $worker) use (&$state, $writePresence, $pushHost, $pushPort, $pushPath, $wsPort, $wsPingInterval, $wsPongTimeout): void {
     // We forked from the master process which already opened the SQLite
     // connection; re-open it inside this worker so each process owns its PDO.
     Database::close();
@@ -408,7 +411,7 @@ $ws->onWebSocketPong = function (TcpConnection $conn, string $data) use (&$state
     }
 };
 
-$ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $presenceThrottle, $writePresence): void {
+$ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $writePresence): void {
     $st = &$state[$conn->id];
     if (!is_array($st)) {
         return;
@@ -432,7 +435,7 @@ $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $pre
         case 'ping':
             // Presence heartbeat: refresh last_seen on a throttled cadence so
             // every existing isOnline() check keeps working unchanged.
-            if (time() - (int) $st['presence_ts'] >= $presenceThrottle) {
+            if (time() - (int) $st['presence_ts'] >= presence_throttle()) {
                 $writePresence($st['user'], 'now');
                 Realtime::touchClient($st['user'], (string) ($st['client'] ?? ''), 'ws');
                 $st['presence_ts'] = time();

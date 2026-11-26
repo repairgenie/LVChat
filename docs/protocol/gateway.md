@@ -88,6 +88,18 @@ inbound frame (including `{pong:true}` replies to their own application pings)
 and force-close the socket after 2.5 ping cycles with no frame, so a one-way
 blackhole the server cannot observe also triggers a reconnect.
 
+### Presence throttle changes
+
+`presence_throttle` is admin-tunable at runtime. The gateway reads it fresh in
+the application-`ping` handler — a single indexed `server_config` lookup, so
+cheap that caching it would only add staleness — therefore a change in
+Admin → Settings applies to already-connected sockets on their next ping, with
+no restart. There is no tuning knob for this. HTTP clients pick it up
+immediately too (`presence_window()` per request, and `ping_ms` on the next
+`GET /api/ws/ticket`), and close/beacon offline writes read the window per call.
+Listener settings (`ws_ip`, `ws_port`, TLS certs, `ws_allowed_origin`) still
+need the usual `start|restart`.
+
 ---
 
 ## 3. Internal push endpoint (`POST /push`)
