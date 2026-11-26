@@ -113,12 +113,27 @@ final class Realtime
      * Mark an actor offline, but only when this was the last live client. The
      * caller's own row(s) are removed first so another tab/device keeps the
      * account online. Returns true when last_seen was written offline.
+     *
+     * A beacon must name the client it closes: an empty or malformed client id,
+     * or one with no live row for this actor, writes nothing at all. Otherwise a
+     * stale/forged beacon could hide an account whose real client is still up.
      */
     public static function markOfflineIfLast(array $actor, string $client = '', ?string $transport = null): bool
     {
-        if ($client !== '') {
-            self::dropClient($actor, $client, $transport);
+        $client = self::clientKey($client);
+        if ($client === '') {
+            return false;
         }
+        $sql = 'SELECT COUNT(*) FROM rt_clients WHERE client = ? AND actor_id = ? AND guest = ?';
+        $args = [$client, (int) ($actor['id'] ?? 0), (int) ($actor['guest'] ?? 0) === 1 ? 1 : 0];
+        if ($transport !== null) {
+            $sql .= ' AND transport = ?';
+            $args[] = $transport;
+        }
+        if ((int) Database::scalar($sql, $args) === 0) {
+            return false;
+        }
+        self::dropClient($actor, $client, $transport);
         if (self::liveClients($actor) > 0) {
             return false;
         }

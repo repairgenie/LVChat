@@ -1935,5 +1935,44 @@ check('explicit 30 s window still reports a 200 s old row offline', Auth::status
 config_set('presence_throttle', $presencePrevThrottle);
 check('default throttle keeps an 80 s old row online', Auth::statusInfo($presenceRow(80))['is_online'] === 1);
 
+// --- Per-client offline rule ---
+// The beforeunload beacon names one client. Closing it must not hide an
+// account that another tab/device is still polling, and a beacon without a
+// usable client id must write nothing at all.
+echo "== per-client presence ==\n";
+$presenceActor = Database::row('SELECT * FROM users WHERE id = ?', [(int) $alice['id']]);
+$actorRow = static fn (): array => Database::row('SELECT * FROM users WHERE id = ?', [(int) $alice['id']]);
+$resetPresence = static function (array $actor): void {
+    Database::query('DELETE FROM rt_clients WHERE actor_id = ? AND guest = 0', [(int) $actor['id']]);
+    Database::query("UPDATE users SET last_seen = datetime('now') WHERE id = ?", [(int) $actor['id']]);
+};
+$resetPresence($presenceActor);
+
+Realtime::touchClient($presenceActor, 'smoke-tab-a', 'poll');
+Realtime::touchClient($presenceActor, 'smoke-tab-b', 'ws');
+check('per-client: closing one of two clients keeps the actor online', Realtime::markOfflineIfLast($presenceActor, 'smoke-tab-a', 'poll') === false);
+check('per-client: one client row remains after the first close', Realtime::liveClients($presenceActor) === 1);
+check('per-client: last_seen stays fresh with a client left', Auth::isOnline($actorRow()) === true);
+check('per-client: closing the last client marks the actor offline', Realtime::markOfflineIfLast($presenceActor, 'smoke-tab-b', 'ws') === true);
+check('per-client: no client rows remain after the last close', Realtime::liveClients($presenceActor) === 0);
+check('per-client: last client close writes the offline marker', Auth::isOnline($actorRow()) === false);
+
+$resetPresence($presenceActor);
+Realtime::touchClient($presenceActor, 'smoke-ws', 'ws');
+Realtime::touchClient($presenceActor, 'smoke-poll', 'poll');
+check('per-client: ws-only close stays online while a poll client lives', Realtime::markOfflineIfLast($presenceActor, 'smoke-ws', 'ws') === false);
+check('per-client: ws-only close leaves the polling row', Realtime::liveClients($presenceActor) === 1);
+check('per-client: ws-only close keeps last_seen fresh', Auth::isOnline($actorRow()) === true);
+Realtime::markOfflineIfLast($presenceActor, 'smoke-poll', 'poll');
+
+$resetPresence($presenceActor);
+$beforeBeacon = $actorRow();
+check('per-client: beacon with an unknown client writes nothing', Realtime::markOfflineIfLast($presenceActor, 'smoke-never-seen') === false);
+check('per-client: unknown client leaves last_seen untouched', $actorRow()['last_seen'] === $beforeBeacon['last_seen']);
+check('per-client: beacon with a missing client writes nothing', Realtime::markOfflineIfLast($presenceActor, '') === false);
+check('per-client: missing client leaves last_seen untouched', $actorRow()['last_seen'] === $beforeBeacon['last_seen']);
+
+$resetPresence($presenceActor);
+
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);

@@ -77,7 +77,7 @@ final class UserController
         if ($action === 'offline') {
             // Offline only when this was the last live client: closing one tab
             // or device must not hide an account that is active elsewhere. A
-            // missing/unknown client id deletes nothing, so the presence window
+            // missing/unknown client id writes nothing, so the presence window
             // expires naturally instead of guessing the account is gone.
             // CSRF is skipped: sendBeacon in beforeunload cannot fetch a token
             // asynchronously.  The session check above prevents cross-origin abuse.
