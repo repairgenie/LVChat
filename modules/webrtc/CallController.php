@@ -29,6 +29,16 @@
  *   POST /api/webrtc/call/decline    {call_id} → any invited participant declinal
  *   POST /api/webrtc/call/join       {call_id} → re-enter an active call (token)
  *   POST /api/webrtc/call/end        {call_id} → hang up (host ends for all)
+ *   POST /api/webrtc/p2p/signal      {call_id, kind, payload} → relay SDP/ICE
+ *   GET  /api/webrtc/p2p/signals     {call_id, after} → drain my SDP/ICE inbox
+ *
+ * A 1:1 call is negotiated directly between the two browsers (peer-to-peer
+ * WebRTC): the media never reaches LiveKit, so it costs no SFU capacity. The
+ * app only relays signaling — `call_signals` is a short-lived mailbox that the
+ * peers drain through /api/webrtc/p2p/signals, woken early by a `call` push.
+ * Channel voice and calls that grew to 3+ people stay on the SFU; `join`/
+ * `accept` return a `p2p` block instead of a token when the call is still 1:1
+ * and the client asked for a direct link.
  *
  * A call is a LiveKit room named `call_<hex>`. The legacy 1:1 shape is
  * preserved on call_sessions (caller/callee columns); call_participants
@@ -154,9 +164,59 @@ final class CallController
         }
     }
 
-    private static function joinPayload(array $call, array $actor): array
+    /**
+     * A call can go direct only while it is still the original 1:1 pair and the
+     * admin has not switched direct calls off. Group calls (and channel voice)
+     * are always relayed by the SFU — a full mesh does not scale.
+     */
+    private static function p2pEligible(array $call): bool
     {
-        $token = LiveKitService::token($call['room'], $actor, LiveKitService::maxUsers());
+        if (!LiveKitService::p2pEnabled() || self::isGroupCall($call)) {
+            return false;
+        }
+        $n = (int) Database::scalar(
+            "SELECT COUNT(*) FROM call_participants WHERE call_id = ? AND status IN ('invited', 'joined', 'declined')",
+            [(int) $call['id']]
+        );
+        return $n === 2;
+    }
+
+    /** 'u12' / 'g3' identity for a user or guest id pair. */
+    private static function identityOf(int $userId, int $guestId): string
+    {
+        return $userId > 0 ? 'u' . $userId : ($guestId > 0 ? 'g' . $guestId : '');
+    }
+
+    /**
+     * What a browser needs to open a direct connection to its peer: its own
+     * identity, the peer's, which side yields in a glare (perfect negotiation),
+     * whether the caller asked for video, and the ICE servers (STUN/TURN).
+     */
+    private static function p2pConfig(array $call, array $actor): array
+    {
+        $isGuest = Auth::isGuest($actor);
+        $me = (int) $actor['id'];
+        $iAmCaller = $isGuest
+            ? (int) ($call['caller_guest_id'] ?? 0) === $me
+            : (int) ($call['caller_user_id'] ?? 0) === $me;
+        return [
+            'self' => LiveKitService::identity($actor),
+            'peer' => $iAmCaller
+                ? self::identityOf((int) ($call['callee_user_id'] ?? 0), (int) ($call['callee_guest_id'] ?? 0))
+                : self::identityOf((int) ($call['caller_user_id'] ?? 0), (int) ($call['caller_guest_id'] ?? 0)),
+            // The caller keeps its offer on a collision; the callee rolls back.
+            'polite' => !$iAmCaller,
+            'video' => (int) ($call['video'] ?? 0) === 1,
+            'ice' => LiveKitService::iceServers(),
+        ];
+    }
+
+    private static function joinPayload(array $call, array $actor, bool $direct = false): array
+    {
+        // Direct calls hold a session row (roster/presence) but no LiveKit token:
+        // their audio/video/screen tracks never reach the SFU.
+        $p2p = $direct && self::p2pEligible($call);
+        $token = $p2p ? '' : LiveKitService::token($call['room'], $actor, LiveKitService::maxUsers());
         Database::query(
             'DELETE FROM voice_sessions WHERE ' . (Auth::isGuest($actor) ? 'guest_id' : 'user_id') . ' = ?',
             [(int) $actor['id']]
@@ -168,14 +228,17 @@ final class CallController
         );
         self::markJoined($call, $actor);
         $title = (string) ($call['title'] ?? '');
-        return [
+        $payload = [
             'ok' => true,
-            'url' => LiveKitService::url(),
+            'url' => $p2p ? '' : LiveKitService::url(),
             'token' => $token,
             'room' => $call['room'],
+            'call_id' => (int) $call['id'],
             'peer' => self::peer($call, $actor),
             'title' => $title !== '' ? $title : (self::isGroupCall($call) ? 'Group call' : self::peer($call, $actor)),
+            'p2p' => $p2p ? self::p2pConfig($call, $actor) : null,
         ];
+        return $payload;
     }
 
     /**
@@ -221,6 +284,8 @@ final class CallController
             'DELETE FROM voice_sessions WHERE room = ?',
             [$call['room']]
         );
+        // A finished call needs no more signaling: drop the mailbox too.
+        Database::query('DELETE FROM call_signals WHERE call_id = ?', [(int) $call['id']]);
     }
 
     /** The actor already sits in a live call? (busy gate, invite gate.) */
@@ -300,9 +365,10 @@ final class CallController
         $isTargetGuest = Auth::isGuest($target);
         $room = 'call_' . bin2hex(random_bytes(6));
         $title = trim((string) ($_POST['title'] ?? ''));
+        $video = (string) ($_POST['video'] ?? '0') === '1' ? 1 : 0;
         Database::query(
-            'INSERT INTO call_sessions (room, caller_user_id, caller_guest_id, callee_user_id, callee_guest_id, title, status)
-             VALUES (?, ?, ?, ?, ?, ?, "ringing")',
+            'INSERT INTO call_sessions (room, caller_user_id, caller_guest_id, callee_user_id, callee_guest_id, title, video, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, "ringing")',
             [
                 $room,
                 $isCallerGuest ? null : (int) $actor['id'],
@@ -310,6 +376,7 @@ final class CallController
                 $isTargetGuest ? null : (int) $target['id'],
                 $isTargetGuest ? (int) $target['id'] : null,
                 $title !== '' ? $title : null,
+                $video,
             ]
         );
         $callId = (int) Database::lastId();
@@ -403,6 +470,12 @@ final class CallController
         if ($newTargets) {
             Realtime::call('ring', $call, $newTargets);
         }
+        // The call just grew past two people: a direct 1:1 pair must move its
+        // tracks to the SFU. The push only prompts an immediate status poll;
+        // the poll sees p2p=false on the active call and migrates.
+        if ($added) {
+            Realtime::call('switch', $call, self::callTargets($call, null));
+        }
 
         log_audit('call_invite', (string) $call['id'], count($added) . ' added: ' . implode(', ', $added));
         json_out(['ok' => true, 'added' => $added, 'unknown' => $unknown, 'busy' => $busy]);
@@ -437,7 +510,7 @@ final class CallController
                 json_out(['error' => 'You are not invited to this call.'], 409);
             }
         }
-        $payload = self::joinPayload($call, $actor);
+        $payload = self::joinPayload($call, $actor, (string) ($_POST['p2p'] ?? '0') === '1');
         // The caller is waiting on its outgoing ring: let it connect at once.
         self::pushCall('accept', $call, $actor);
         json_out($payload);
@@ -460,6 +533,7 @@ final class CallController
             }
             Database::query("UPDATE call_sessions SET status = 'declined' WHERE id = ?", [(int) $call['id']]);
             LiveKitService::logCallOutcome($call, 'declined');
+            Database::query('DELETE FROM call_signals WHERE call_id = ?', [(int) $call['id']]);
             self::pushCall('decline', $call, $actor);
             json_out(['ok' => true]);
         }
@@ -485,7 +559,95 @@ final class CallController
         if ($call['status'] !== 'active') {
             json_out(['error' => 'Call is not active yet.'], 409);
         }
-        json_out(self::joinPayload($call, $actor));
+        json_out(self::joinPayload($call, $actor, (string) ($_POST['p2p'] ?? '0') === '1'));
+    }
+
+    /**
+     * POST /api/webrtc/p2p/signal — relay one SDP/ICE message (or a hang-up
+     * notice) to the other participant. Stored in call_signals so it survives
+     * poll/SSE transports and a dropped push; the peer drains it and the row is
+     * deleted.
+     */
+    public static function signal(): void
+    {
+        $actor = self::requireActor();
+        self::requireCsrf();
+        $call = self::resolveCall((int) ($_POST['call_id'] ?? 0));
+        if (!$call || !self::isParticipant($call, $actor)) {
+            json_out(['error' => 'Call not found.'], 404);
+        }
+        if (!in_array($call['status'], ['ringing', 'active'], true)) {
+            json_out(['ok' => true, 'delivered' => 0]);
+        }
+        $kind = (string) ($_POST['kind'] ?? '');
+        if (!in_array($kind, ['description', 'candidate', 'bye'], true)) {
+            json_out(['error' => 'Unknown signal.'], 400);
+        }
+        $payload = (string) ($_POST['payload'] ?? '');
+        if (strlen($payload) > 65536) {
+            json_out(['error' => 'Signal too large.'], 413);
+        }
+        if (!LiveKitService::rateLimit('p2p-signal:' . LiveKitService::identity($actor), 300, 60)) {
+            json_out(['error' => 'Too many call signals.'], 429);
+        }
+
+        $isGuest = Auth::isGuest($actor);
+        $targets = self::callTargets($call, $actor);
+        foreach ($targets as $t) {
+            Database::query(
+                'INSERT INTO call_signals (call_id, from_user_id, from_guest_id, to_user_id, to_guest_id, kind, payload)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    (int) $call['id'],
+                    $isGuest ? null : (int) $actor['id'],
+                    $isGuest ? (int) $actor['id'] : null,
+                    ((int) ($t['guest'] ?? 0)) === 1 ? null : (int) $t['id'],
+                    ((int) ($t['guest'] ?? 0)) === 1 ? (int) $t['id'] : null,
+                    $kind,
+                    $payload,
+                ]
+            );
+        }
+        // Opportunistic prune: signals are useless once their call is over.
+        Database::query("DELETE FROM call_signals WHERE created_at < datetime('now', '-2 minutes')");
+        if ($targets && $kind !== 'bye') {
+            Realtime::call('signal', $call, $targets, ['kind' => $kind]);
+        }
+        json_out(['ok' => true, 'delivered' => count($targets)]);
+    }
+
+    /** GET /api/webrtc/p2p/signals?call_id=&after= — drain my signaling inbox. */
+    public static function signals(): void
+    {
+        $actor = self::requireActor();
+        $call = self::resolveCall((int) ($_GET['call_id'] ?? 0));
+        if (!$call || !self::isParticipant($call, $actor)) {
+            json_out(['error' => 'Call not found.'], 404);
+        }
+        $after = max(0, (int) ($_GET['after'] ?? 0));
+        $col = Auth::isGuest($actor) ? 'to_guest_id' : 'to_user_id';
+        $rows = Database::all(
+            "SELECT id, kind, payload FROM call_signals
+             WHERE call_id = ? AND $col = ? AND id > ? ORDER BY id LIMIT 200",
+            [(int) $call['id'], (int) $actor['id'], $after]
+        );
+        $messages = [];
+        $next = $after;
+        foreach ($rows as $row) {
+            $next = max($next, (int) $row['id']);
+            $messages[] = [
+                'id' => (int) $row['id'],
+                'kind' => (string) $row['kind'],
+                'payload' => (string) $row['payload'],
+            ];
+        }
+        if ($next > $after) {
+            Database::query(
+                "DELETE FROM call_signals WHERE call_id = ? AND $col = ? AND id <= ?",
+                [(int) $call['id'], (int) $actor['id'], $next]
+            );
+        }
+        json_out(['ok' => true, 'messages' => $messages, 'next' => $next]);
     }
 
     /** POST /api/webrtc/call/end — hang up. Host ends for everyone. */

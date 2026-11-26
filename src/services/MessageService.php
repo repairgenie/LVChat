@@ -485,15 +485,15 @@ $params[] = $limit;
     {
         [$meU, $meG] = self::actorPair($me);
         return Database::all(
-            "SELECT p.id, p.username, p.role, p.guest, p.last_seen, p.away, 1 AS all_read
+            "SELECT p.id, p.username, p.role, p.guest, p.last_seen, p.away, p.status_mode, p.custom_status, 1 AS all_read
              FROM (
-               SELECT 'user' AS ptype, u.id AS id, u.username, u.role, u.guest, u.last_seen, u.away
+               SELECT 'user' AS ptype, u.id AS id, u.username, u.role, u.guest, u.last_seen, u.away, u.status_mode, u.custom_status
                FROM users u WHERE u.id IN (
                  SELECT recipient_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
                  UNION SELECT sender_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?
                )
                UNION ALL
-               SELECT 'guest', g.id, g.nick, 'user', 1, g.last_seen, NULL
+               SELECT 'guest', g.id, g.nick, 'user', 1, g.last_seen, NULL, 'online', ''
                FROM guests g WHERE g.id IN (
                  SELECT recipient_guest_id FROM private_messages WHERE sender_id = ? OR sender_guest_id = ?
                  UNION SELECT sender_guest_id FROM private_messages WHERE recipient_id = ? OR recipient_guest_id = ?

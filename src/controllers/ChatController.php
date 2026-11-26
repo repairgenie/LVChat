@@ -193,7 +193,8 @@ final class ChatController
         $pw = presence_window();
         $mentionUsers = Database::all(
             "SELECT id, username,
-                    CASE WHEN last_seen >= datetime('now', '-' || ? || ' seconds') AND away IS NULL THEN 1 ELSE 0 END AS online
+                    CASE WHEN last_seen >= datetime('now', '-' || ? || ' seconds')
+                              AND status_mode != 'invisible' THEN 1 ELSE 0 END AS online
              FROM users WHERE guest = 0 AND status = 'active' AND id != ? AND searchable = 1
              ORDER BY online DESC, last_seen DESC, username COLLATE NOCASE LIMIT 2000",
             [$pw, $user['id']]
@@ -687,9 +688,8 @@ final class ChatController
     {
         $pw = presence_window();
         return Database::all(
-            // is_online is true by construction (the window filter above); the
-            // renderer's dot helper needs it because the roster doesn't carry
-            // last_seen, and the poll's JS sets the same flag.
+            // Rows are fresh by construction; the renderer's dot helper needs
+            // this flag because the roster carries no last_seen.
             "SELECT id, username, role, guest, away, status_mode, custom_status, 1 AS is_online
              FROM users
              WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible'
@@ -934,7 +934,6 @@ final class ChatController
         // Let the script die when the client disconnects (connection_aborted()
         // then turns true), so idle streams never pin a worker forever.
 
-        $interval = max(1, (int) (config_get('poll_interval', '2') ?? 2));
         $start = time();
         $last = 0;
         // Refresh presence inside the loop so a long-lived stream never goes
@@ -986,7 +985,9 @@ final class ChatController
                 $send(': keepalive');
                 $heartbeat = time();
             }
-            sleep($interval);
+            // Re-read the cadence each tick so an admin change reaches an open
+            // stream; a captured value would only apply after a reconnect.
+            sleep(max(1, (int) (config_get('poll_interval', '2') ?? 2)));
         }
         exit;
     }

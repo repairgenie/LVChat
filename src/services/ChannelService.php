@@ -349,7 +349,6 @@ final class ChannelService
             "SELECT COUNT(*) FROM channel_members cm
              JOIN users u ON u.id = cm.user_id
              WHERE cm.channel_id = ? AND u.status_mode != 'invisible'
-               AND u.away IS NULL
                AND u.last_seen >= datetime('now', '-' || ? || ' seconds')",
             [$channelId, $pw]
         );
@@ -419,7 +418,7 @@ final class ChannelService
         // Online chatter count: members (users + guests) seen within 30s, users not away.
         $pw = presence_window();
         $onlineSql = '((SELECT COUNT(*) FROM channel_members om JOIN users ou ON ou.id = om.user_id
-                         WHERE om.channel_id = c.id AND ou.status_mode != \'invisible\' AND ou.away IS NULL AND ou.last_seen >= datetime("now", "-" || ' . $pw . ' || " seconds"))
+                         WHERE om.channel_id = c.id AND ou.status_mode != \'invisible\' AND ou.last_seen >= datetime("now", "-" || ' . $pw . ' || " seconds"))
                         + (SELECT COUNT(*) FROM channel_members om JOIN guests og ON og.id = om.guest_id
                          WHERE om.channel_id = c.id AND og.last_seen >= datetime("now", "-" || ' . $pw . ' || " seconds")))';
         if (Auth::isGuest($actor)) {
@@ -644,7 +643,8 @@ final class ChannelService
         return Database::all(
             "SELECT DISTINCT c.*,
                 (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id
-                 WHERE cm.channel_id = c.id AND u.away IS NULL AND u.last_seen >= datetime('now', '-' || ? || ' seconds')) AS members
+                 WHERE cm.channel_id = c.id AND u.status_mode != 'invisible'
+                   AND u.last_seen >= datetime('now', '-' || ? || ' seconds')) AS members
              FROM channels c
              LEFT JOIN channel_members fm ON fm.channel_id = c.id AND fm.user_id = ? AND fm.level = 'founder'
              WHERE c.forbidden = 0 AND (c.owner_id = ? OR fm.id IS NOT NULL)
@@ -658,7 +658,7 @@ final class ChannelService
         $pw = presence_window();
         $sql = "SELECT c.*,
                     (SELECT COUNT(*) FROM channel_members cm JOIN users u ON u.id = cm.user_id
-                     WHERE cm.channel_id = c.id AND u.away IS NULL
+                     WHERE cm.channel_id = c.id AND u.status_mode != 'invisible'
                        AND u.last_seen >= datetime('now', '-' || ? || ' seconds')) AS members
                 FROM channels c
                 WHERE c.visibility = 'public'

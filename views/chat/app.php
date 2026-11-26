@@ -458,7 +458,7 @@ function presence_label(array $u): string {
           <?php if (!$dmPartners): ?>
           <div class="px-2 py-1 text-xs text-discord-500">No conversations yet</div>
           <?php endif; ?>
-          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = Auth::isOnline($d); $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
+          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = Auth::appearsOnline($d); $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
           <a href="/app?dm=<?= h(rawurlencode($d['username'])) ?>"
              data-ctx-user="<?= h($d['username']) ?>"
              data-user-id="<?= (int) ($d['id'] ?? 0) ?>"

@@ -235,7 +235,7 @@ final class UploadService
         $expiryDays = (int) config_get('upload_expiry_days', '60');
         $expiresAt = $expiryDays > 0 ? gmdate('Y-m-d H:i:s', time() + $expiryDays * 86400) : null;
         $uploaderId = $actor !== null ? (int) ($actor['id'] ?? 0) : null;
-        Database::run(
+        Database::query(
             'INSERT INTO uploaded_files (url, original_name, mime, size, uploader_id, kind, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [$url, $originalName, $mime, $size, $uploaderId, $kind, $expiresAt]
         );
@@ -246,7 +246,7 @@ final class UploadService
      */
     public static function untrackUpload(string $url): void
     {
-        Database::run('DELETE FROM uploaded_files WHERE url = ?', [$url]);
+        Database::query('DELETE FROM uploaded_files WHERE url = ?', [$url]);
     }
 
     /** Re-encode to a downscaled WebP (best effort). Returns new path or false. */

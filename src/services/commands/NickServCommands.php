@@ -210,7 +210,7 @@ CommandRegistry::register('status', [
         if (!$t) {
             return ['replies' => ["No such user: $nick"]];
         }
-        $state = Auth::isOnline($t) ? 'online' : 'offline';
+        $state = Auth::appearsOnline($t) ? 'online' : 'offline';
         $isAdmin = $t['role'] === 'admin' ? ' (IRC Operator)' : '';
         return ['replies' => ["$nick is registered, $state$isAdmin."]];
     },
@@ -239,7 +239,7 @@ CommandRegistry::register('info', [
             ]];
         }
         $users = (int) Database::scalar('SELECT COUNT(*) FROM users');
-        $online = (int) Database::scalar('SELECT COUNT(*) FROM users WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND away IS NULL', [presence_window()]);
+        $online = (int) Database::scalar('SELECT COUNT(*) FROM users WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND status_mode != \'invisible\'', [presence_window()]);
         $channels = (int) Database::scalar('SELECT COUNT(*) FROM channels');
         $msgs = (int) Database::scalar('SELECT COUNT(*) FROM messages');
         return ['replies' => [

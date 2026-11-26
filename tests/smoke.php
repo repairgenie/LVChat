@@ -1147,6 +1147,9 @@ $onlineBeforeInvisible = online_count();
 Database::query('UPDATE users SET status_mode = ? WHERE id = ?', ['invisible', $bob['id']]);
 check('online_count hides invisible users', online_count() === $onlineBeforeInvisible - 1, (string) online_count());
 Database::query('UPDATE users SET status_mode = ? WHERE id = ?', ['online', $bob['id']]);
+Database::query('UPDATE users SET away = ?, away_at = datetime("now"), status_mode = ? WHERE id = ?', ['stepped out', 'away', $bob['id']]);
+check('online_count includes away users', online_count() === $onlineBeforeInvisible, (string) online_count());
+Database::query('UPDATE users SET away = NULL, away_at = NULL, status_mode = ? WHERE id = ?', ['online', $bob['id']]);
 record_peak();
 check('peak_online tracks concurrent users', (int) config_get('peak_online', '0') >= 2);
 

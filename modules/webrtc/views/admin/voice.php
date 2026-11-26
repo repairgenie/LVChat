@@ -128,6 +128,37 @@ $s = $settings;
       </div>
     </div>
 
+    <div class="card p-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-medium text-white">Direct 1:1 calls (peer-to-peer)</div>
+          <div class="text-xs text-discord-400 mt-0.5">Negotiates 1:1 calls (voice, video and screen share) straight between the two browsers, so the media never touches the SFU. Channel voice and calls with 3+ people always use LiveKit. A direct link that cannot connect falls back to the SFU automatically.</div>
+        </div>
+        <input type="checkbox" name="p2p_calls" value="1" class="w-5 h-5 accent-blurple" <?= ($s['p2p_calls'] ?? '1') === '1' ? 'checked' : '' ?>>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="label">STUN server</label>
+          <input class="input font-mono text-xs" name="p2p_stun_url" value="<?= h($s['p2p_stun_url'] ?? '') ?>" placeholder="stun:stun.l.google.com:19302" spellcheck="false" autocomplete="off">
+          <p class="text-xs text-discord-400 mt-1">Lets each browser learn its public address. Leave blank for the public default.</p>
+        </div>
+        <div>
+          <label class="label">TURN server (optional)</label>
+          <input class="input font-mono text-xs" name="p2p_turn_url" value="<?= h($s['p2p_turn_url'] ?? '') ?>" placeholder="turn:turn.example.com:3478?transport=udp" spellcheck="false" autocomplete="off">
+          <p class="text-xs text-discord-400 mt-1">Relays direct calls when both peers sit behind strict NAT. Use <code>turns:</code> on a TLS port for production.</p>
+        </div>
+        <div>
+          <label class="label">TURN username</label>
+          <input class="input font-mono text-xs" name="p2p_turn_username" value="<?= h($s['p2p_turn_username'] ?? '') ?>" spellcheck="false" autocomplete="off">
+        </div>
+        <div>
+          <label class="label">TURN credential</label>
+          <input class="input font-mono text-xs" name="p2p_turn_credential" type="password" placeholder="<?= ($s['p2p_turn_credential'] ?? '') !== '' ? '•••••• (stored — leave blank to keep)' : '' ?>" autocomplete="new-password">
+          <p class="text-xs text-discord-400 mt-1">Write-only, like the LiveKit secret. Sent to the two call peers only.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="flex items-center justify-between card p-4">
       <div>
         <div class="text-sm font-medium text-white">Allow meeting recording (egress)</div>

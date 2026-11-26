@@ -492,7 +492,8 @@ CommandRegistry::register('who', [
         $pw = presence_window();
         $rows = Database::all(
             'SELECT username, role, status_mode, away FROM users
-             WHERE username LIKE ? COLLATE NOCASE AND last_seen >= datetime("now", "-" || ? || " seconds")
+             WHERE username LIKE ? COLLATE NOCASE AND status_mode != \'invisible\'
+               AND last_seen >= datetime("now", "-" || ? || " seconds")
              ORDER BY username',
             [$like, $pw]
         );

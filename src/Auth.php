@@ -529,9 +529,14 @@ final class Auth
         return $u;
     }
 
+    /**
+     * Canonical online predicate: fresh within the window and not invisible.
+     * Away users are online (they render with the amber dot). Kept as the old
+     * name for existing callers; prefer appearsOnline() in new code.
+     */
     public static function isOnline(array $user, ?int $within = null): bool
     {
-        return $user['away'] === null && self::actuallyOnline($user, $within);
+        return self::appearsOnline($user, $within);
     }
 
     public const STATUS_MODES = ['online', 'away', 'dnd', 'invisible', 'custom'];

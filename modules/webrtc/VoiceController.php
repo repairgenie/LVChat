@@ -200,6 +200,10 @@ final class WebRTCVoiceController
                 'peer' => $peer,
                 'title' => (string) ($call['title'] ?? ''),
                 'group' => self::callIsGroup($call),
+                // True while this call is a direct (peer-to-peer) 1:1 link. The
+                // client migrates to the SFU when a call stops being direct.
+                'p2p' => self::callP2p($call),
+                'video' => (int) ($call['video'] ?? 0) === 1,
                 'incoming' => !$isCaller && $call['status'] === 'ringing',
                 'started' => (int) (strtotime((string) $call['created_at'] . ' UTC') * 1000),
             ];
@@ -246,6 +250,8 @@ final class WebRTCVoiceController
                 'peer' => self::callPeer($call['caller_user_id'], $call['caller_guest_id']),
                 'title' => (string) ($call['title'] ?? ''),
                 'group' => true,
+                'p2p' => false,
+                'video' => (int) ($call['video'] ?? 0) === 1,
                 'started' => (int) (strtotime((string) $call['created_at'] . ' UTC') * 1000),
             ];
             if ($seen) {
@@ -460,6 +466,22 @@ final class WebRTCVoiceController
             return $g ? (string) $g['nick'] : 'guest';
         }
         return 'unknown';
+    }
+
+    /**
+     * Whether this call is still a direct 1:1 link (see CallController's
+     * p2pEligible): direct calls and group calls must agree, or a client would
+     * try to negotiate peer-to-peer with a third person present.
+     */
+    private static function callP2p(array $call): bool
+    {
+        if (!LiveKitService::p2pEnabled() || self::callIsGroup($call)) {
+            return false;
+        }
+        return (int) Database::scalar(
+            "SELECT COUNT(*) FROM call_participants WHERE call_id = ? AND status IN ('invited', 'joined', 'declined')",
+            [(int) $call['id']]
+        ) === 2;
     }
 
     /** A call is a group call once anyone beyond the original 1:1 pair was invited. */

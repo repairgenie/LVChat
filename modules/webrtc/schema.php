@@ -65,6 +65,35 @@ return static function (PDO $pdo): void {
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_call_sessions_callee ON call_sessions(callee_user_id, callee_guest_id, status)');
     }
 
+    // Direct (peer-to-peer) 1:1 calls: the media is negotiated between the two
+    // browsers, so nothing is relayed by the SFU. `video` records that the
+    // caller asked for a camera call so the callee's client answers with its
+    // camera on.
+    $callSignalCols = array_column($pdo->query("PRAGMA table_info('call_sessions')")->fetchAll(PDO::FETCH_ASSOC), 'name');
+    if (!in_array('video', $callSignalCols, true)) {
+        $pdo->exec('ALTER TABLE call_sessions ADD COLUMN video INTEGER NOT NULL DEFAULT 0');
+    }
+
+    // Signaling mailbox for direct calls: SDP/ICE messages relayed between the
+    // two peers by the app, drained by GET /api/webrtc/p2p/signals. Rows are
+    // deleted once delivered, and pruned by age if a peer never collects them.
+    if (!in_array('call_signals', $tables, true)) {
+        $pdo->exec(
+            "CREATE TABLE call_signals (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              call_id INTEGER NOT NULL,
+              from_user_id INTEGER,
+              from_guest_id INTEGER,
+              to_user_id INTEGER,
+              to_guest_id INTEGER,
+              kind TEXT NOT NULL,              -- description|candidate|bye
+              payload TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_call_signals_inbox ON call_signals(call_id, to_user_id, to_guest_id, id)');
+    }
+
     // Per-channel voice opt-in ("channels can be enabled as voice").
     $channels = array_column(
         $pdo->query("SELECT name FROM pragma_table_info('channels')")->fetchAll(PDO::FETCH_ASSOC),
@@ -108,6 +137,12 @@ return static function (PDO $pdo): void {
     // Group call label (1:1 calls leave it null).
     if (!in_array('title', $callCols, true)) {
         $pdo->exec("ALTER TABLE call_sessions ADD COLUMN title TEXT");
+    }
+
+    // Video call marker for direct 1:1 calls (idempotent; also added above for
+    // fresh installs).
+    if (!in_array('video', $callCols, true)) {
+        $pdo->exec('ALTER TABLE call_sessions ADD COLUMN video INTEGER NOT NULL DEFAULT 0');
     }
 
     // Per-actor rate-limit buckets for voice/call/event spam guards.

@@ -671,6 +671,26 @@ $j = jsonDecode($b);
 $invis = false;
 foreach (($j['online'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $invis = true; }
 check('invisible user excluded from /api/online', !$invis, $b);
+[$s, , $appInv] = req('GET', '/app', [], $cjA);
+preg_match('~<div id="online-section".*?</nav>~s', $appInv, $mInv);
+$invSection = $mInv[0] ?? '';
+check(
+    'invisible user absent from the initial /app roster',
+    $s === 200 && str_contains($invSection, 'data-ctx-user="alice"') && !str_contains($invSection, 'data-ctx-user="bob"'),
+    (string) $s
+);
+[$s, , $b] = req('GET', '/api/poll?since=0', [], $cjA);
+$pollInv = jsonDecode($b);
+$inPoll = false;
+foreach (($pollInv['online_users'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $inPoll = true; }
+check('invisible user absent from the poll roster', $s === 200 && !$inPoll, $b);
+preg_match('~data-users="([^"]*)"~', $appInv, $mPool);
+$invPool = jsonDecode(html_entity_decode($mPool[1] ?? '', ENT_QUOTES));
+$invMention = null;
+foreach ($invPool as $u) { if (($u['u'] ?? '') === 'bob') $invMention = $u; }
+check('invisible user is offline in the mention pool', ($invMention['on'] ?? 0) === 0, json_encode($invMention));
+preg_match('~<a href="/app\?dm=bob"[^>]*class="([^"]*)"~', $appInv, $dmInv);
+check('invisible user is dimmed in the DM list', str_contains($dmInv[1] ?? '', 'italic'), $dmInv[1] ?? '');
 
 [$s, , $b] = req('POST', '/api/status', ['csrf' => $tB, 'status_mode' => 'custom', 'custom_status' => 'streaming tonight'], $cjB);
 $j = jsonDecode($b);
@@ -693,12 +713,23 @@ dbq('UPDATE users SET away = ?, away_at = datetime("now"), status_mode = ?, last
 preg_match('~<div id="online-section".*?</nav>~s', $appAway, $m);
 $onlineSection = $m[0] ?? '';
 check('away user stays in the initial /app Online list', $s === 200 && str_contains($onlineSection, 'data-ctx-user="bob"'), (string) $s);
+[$s, , $b] = req('GET', '/api/online', [], $cjA);
+$awayApi = false;
+foreach ((jsonDecode($b)['online'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $awayApi = true; }
+check('away user appears in /api/online', $s === 200 && $awayApi, $b);
+preg_match('~data-users="([^"]*)"~', $appAway, $mAwayPool);
+$awayPool = jsonDecode(html_entity_decode($mAwayPool[1] ?? '', ENT_QUOTES));
+$awayMention = null;
+foreach ($awayPool as $u) { if (($u['u'] ?? '') === 'bob') $awayMention = $u; }
+check('away user is online in the mention pool', ($awayMention['on'] ?? 0) === 1, json_encode($awayMention));
+preg_match('~<a href="/app\?dm=bob"[^>]*class="([^"]*)"~', $appAway, $dmAway);
+check('away user is not dimmed in the DM list', !str_contains($dmAway[1] ?? 'italic', 'italic'), $dmAway[1] ?? '');
 [$s, , $b] = req('GET', '/api/poll?since=0', [], $cjA);
 $j = jsonDecode($b);
 $pollBob = null;
 foreach (($j['online_users'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $pollBob = $u; }
-check('away user stays in the first poll online_users', $s === 200 && $pollBob !== null, $b);
-check('poll carries the away status, not a dropped row', ($pollBob['status_mode'] ?? '') === 'away', json_encode($pollBob));
+// A dropped poll row shows up here as null, so this also covers presence.
+check('first poll carries the away row with status_mode=away', $s === 200 && ($pollBob['status_mode'] ?? '') === 'away', json_encode($pollBob));
 // Stronger than "bob is in both": the initial render and the first poll must
 // expose exactly the same names (away included), so neither query can grow its
 // own filter/limit without failing here.
@@ -710,7 +741,7 @@ sort($htmlNames, SORT_NATURAL | SORT_FLAG_CASE);
 sort($pollNames, SORT_NATURAL | SORT_FLAG_CASE);
 check(
     'initial /app roster and first poll return the same users',
-    $htmlNames === $pollNames && in_array('bob', $htmlNames, true),
+    $htmlNames === $pollNames,
     json_encode(['html' => $htmlNames, 'poll' => $pollNames])
 );
 preg_match('~data-ctx-user="bob".*?rounded-full ([^"]+)~s', $onlineSection, $bobDot);
@@ -2755,8 +2786,12 @@ $bobId = (int) ($sseQ("SELECT id FROM users WHERE username = 'bob'")[0]['id'] ??
 $aliceId = (int) ($sseQ("SELECT id FROM users WHERE username = 'alice'")[0]['id'] ?? 0);
 $generalId = (int) ($sseQ("SELECT id FROM channels WHERE slug = 'general'")[0]['id'] ?? 0);
 $ssePrevThrottle = (string) ($sseQ("SELECT value FROM server_config WHERE key = 'presence_throttle'")[0]['value'] ?? '30');
+$ssePrevInterval = (string) ($sseQ("SELECT value FROM server_config WHERE key = 'poll_interval'")[0]['value'] ?? '2');
+// Stream 1: throttle is lowered mid-stream and the row must be released on exit.
 $sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('presence_throttle', '120')");
-exec('timeout 10 curl -s -N --max-time 10 -b ' . escapeshellarg($cjB)
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('poll_interval', '1')");
+$sseStart = microtime(true);
+exec('timeout 14 curl -s -N --max-time 14 -b ' . escapeshellarg($cjB)
     . ' ' . escapeshellarg($BASE . '/api/stream?since=0&client=sse-smoke')
     . ' > ' . escapeshellarg($sseOut) . ' 2>/dev/null &');
 $deadline = microtime(true) + 5;
@@ -2769,7 +2804,10 @@ $sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('presence_throt
 sleep(7); // > 5 s after the loop began: a per-tick read refreshes, a capture does not.
 $sseSeen = (string) ($sseQ('SELECT last_seen FROM users WHERE id = ?', [$bobId])[0]['last_seen'] ?? '');
 check('SSE stream re-reads presence_throttle', $sseSeen !== '' && time() - strtotime($sseSeen . ' UTC') < 60, $sseSeen);
-sleep(3); // let curl hit --max-time and disconnect
+$remaining = 14.5 - (microtime(true) - $sseStart);
+if ($remaining > 0) {
+    sleep((int) ceil($remaining));
+}
 $dropDeadline = microtime(true) + 8;
 $probe = 0;
 while (microtime(true) < $dropDeadline
@@ -2786,7 +2824,52 @@ check('SSE exit drops its client row', (int) ($sseQ("SELECT COUNT(*) AS n FROM r
 $sseBody = (string) @file_get_contents($sseOut);
 check('SSE stream emits data frames', str_contains($sseBody, 'data:'), $sseBody);
 @unlink($sseOut);
+
+// Stream 2: poll_interval is re-read for the next sleep. Start at 1 s, raise to
+// 30 s, deliver one probe (the post-change iteration), then a second probe must
+// wait for the new cadence instead of the captured 1 s.
+$sseOut2 = sys_get_temp_dir() . '/lvc-sse2-' . getmypid() . '.out';
+@unlink($sseOut2);
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('poll_interval', '1')");
+exec('timeout 15 curl -s -N --max-time 14 -b ' . escapeshellarg($cjB)
+    . ' ' . escapeshellarg($BASE . '/api/stream?since=0&client=sse-interval')
+    . ' > ' . escapeshellarg($sseOut2) . ' 2>/dev/null &');
+$deadline = microtime(true) + 5;
+while (microtime(true) < $deadline && !str_contains((string) @file_get_contents($sseOut2), 'data:')) {
+    usleep(100000);
+}
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('poll_interval', '30')");
+$sseQ(
+    "INSERT INTO messages (channel_id, sender_id, content, created_at) VALUES (?, ?, ?, datetime('now'))",
+    [$generalId, $aliceId, 'sse-fast-probe']
+);
+$fastSeen = false;
+$fastDeadline = microtime(true) + 3;
+while (microtime(true) < $fastDeadline) {
+    if (str_contains((string) @file_get_contents($sseOut2), 'sse-fast-probe')) {
+        $fastSeen = true;
+        break;
+    }
+    usleep(200000);
+}
+check('SSE stream picks up a payload before the cadence change', $fastSeen);
+$sseQ(
+    "INSERT INTO messages (channel_id, sender_id, content, created_at) VALUES (?, ?, ?, datetime('now'))",
+    [$generalId, $aliceId, 'sse-slow-probe']
+);
+$slowSeen = false;
+$slowDeadline = microtime(true) + 3;
+while (microtime(true) < $slowDeadline) {
+    if (str_contains((string) @file_get_contents($sseOut2), 'sse-slow-probe')) {
+        $slowSeen = true;
+        break;
+    }
+    usleep(200000);
+}
+check('SSE stream re-reads poll_interval', !$slowSeen, '30 s cadence was ignored');
+@unlink($sseOut2);
 $sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('presence_throttle', ?)", [$ssePrevThrottle]);
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('poll_interval', ?)", [$ssePrevInterval]);
 
 proc_terminate($server);
 if (isset($licenseServer) && is_resource($licenseServer)) {

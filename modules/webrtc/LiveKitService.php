@@ -73,6 +73,77 @@ final class LiveKitService
         return max(1, min(200, (int) (config_get('voice_max_users', '50') ?? 50)));
     }
 
+    /**
+     * Whether 1:1 calls should be negotiated directly between the two browsers
+     * instead of through the SFU. Channel voice and calls with 3+ people always
+     * use LiveKit (a mesh does not scale), so this only covers the 1:1 case.
+     */
+    public static function p2pEnabled(): bool
+    {
+        return (string) (config_get('p2p_calls', '1') ?? '1') === '1';
+    }
+
+    /**
+     * ICE servers handed to the browsers for a direct call: STUN so each peer
+     * learns its public address, plus an optional TURN relay for symmetric NAT.
+     *
+     * Config: `p2p_ice_servers` holds either a JSON array of RTCIceServer
+     * objects or a comma-separated list of URLs; `p2p_stun_url` (default Google
+     * STUN) and `p2p_turn_url` + `p2p_turn_username` + `p2p_turn_credential`
+     * cover the simple case. Returned shape is exactly `iceServers`' input.
+     */
+    public static function iceServers(): array
+    {
+        $out = [];
+        $raw = trim((string) (config_get('p2p_ice_servers', '') ?? ''));
+        if ($raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $srv) {
+                    if (is_array($srv) && !empty($srv['urls'])) {
+                        $out[] = $srv;
+                    }
+                }
+            } else {
+                foreach (preg_split('/[\s,]+/', $raw) ?: [] as $url) {
+                    if ($url !== '') {
+                        $out[] = ['urls' => $url];
+                    }
+                }
+            }
+        }
+        if (!$out) {
+            $stun = trim((string) (config_get('p2p_stun_url', 'stun:stun.l.google.com:19302') ?? ''));
+            if ($stun !== '') {
+                $out[] = ['urls' => $stun];
+            }
+            $turn = trim((string) (config_get('p2p_turn_url', '') ?? ''));
+            if ($turn !== '') {
+                $out[] = ['urls' => $turn];
+            }
+        }
+        // TURN credentials apply to every turn(s): URL in the list.
+        $user = trim((string) (config_get('p2p_turn_username', '') ?? ''));
+        $cred = (string) (config_get('p2p_turn_credential', '') ?? '');
+        if ($user !== '' || $cred !== '') {
+            foreach ($out as $i => $srv) {
+                $urls = is_array($srv['urls'] ?? null) ? $srv['urls'] : [(string) ($srv['urls'] ?? '')];
+                foreach ($urls as $u) {
+                    if (stripos((string) $u, 'turn:') === 0 || stripos((string) $u, 'turns:') === 0) {
+                        if ($user !== '') {
+                            $out[$i]['username'] = $user;
+                        }
+                        if ($cred !== '') {
+                            $out[$i]['credential'] = $cred;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        return array_values($out);
+    }
+
     /** How long an unanswered call rings before it fails as 'missed' (~4 rings). */
     public static function ringSeconds(): int
     {
@@ -199,8 +270,10 @@ final class LiveKitService
     {
         // Waiting-room occupants hold session rows (so hosts can see them) but
         // are not connected to LiveKit — they must not consume the global cap.
+        // Direct 1:1 calls hold a row with no LiveKit token (their media is
+        // peer-to-peer), so they do not consume SFU capacity either.
         $active = (int) Database::scalar(
-            'SELECT COUNT(*) FROM voice_sessions WHERE last_seen >= datetime("now", "-2 minutes") AND waiting = 0'
+            'SELECT COUNT(*) FROM voice_sessions WHERE last_seen >= datetime("now", "-2 minutes") AND waiting = 0 AND token != ""'
         );
         $max = self::maxUsers();
         return [

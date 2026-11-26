@@ -57,6 +57,7 @@ final class AdminVoiceController
             'voice_enabled', 'livekit_url', 'livekit_api_key', 'livekit_api_secret',
             'voice_max_users', 'voice_talker_cap', 'voice_bitrate', 'voice_quality_preset',
             'call_ring_seconds', 'video_quality_default', 'video_quality_available',
+            'p2p_calls', 'p2p_stun_url', 'p2p_turn_url', 'p2p_turn_username', 'p2p_turn_credential',
             'recording_enabled', 'recording_path',
         ];
     }
@@ -68,6 +69,14 @@ final class AdminVoiceController
         $settings = [];
         foreach (self::keys() as $k) {
             $settings[$k] = (string) (config_get($k, '') ?? '');
+        }
+        // Direct calls are on (and use a public STUN server) until an admin
+        // changes it, so show those defaults instead of empty fields.
+        if (($settings['p2p_calls'] ?? '') === '') {
+            $settings['p2p_calls'] = '1';
+        }
+        if (($settings['p2p_stun_url'] ?? '') === '') {
+            $settings['p2p_stun_url'] = 'stun:stun.l.google.com:19302';
         }
         // Write-only secret: never echo it back — just say one is stored.
         $settings['livekit_has_secret'] = trim((string) (config_get('livekit_api_secret', '') ?? '')) !== '';
@@ -150,6 +159,23 @@ final class AdminVoiceController
             $vqAvail = ['720p'];
         }
         config_set('video_quality_available', implode(',', $vqAvail));
+
+        // Direct (peer-to-peer) 1:1 calls + the ICE servers they use. Channel
+        // voice and calls with 3+ people always run through the SFU.
+        config_set('p2p_calls', ($post['p2p_calls'] ?? '0') === '1' ? '1' : '0');
+        $stun = trim((string) ($post['p2p_stun_url'] ?? ''));
+        if ($stun === '' || preg_match('#^stuns?:[^\s]+$#', $stun)) {
+            config_set('p2p_stun_url', $stun === '' ? 'stun:stun.l.google.com:19302' : $stun);
+        }
+        $turn = trim((string) ($post['p2p_turn_url'] ?? ''));
+        if ($turn === '' || preg_match('#^turns?:[^\s]+$#', $turn)) {
+            config_set('p2p_turn_url', $turn);
+        }
+        config_set('p2p_turn_username', substr(trim((string) ($post['p2p_turn_username'] ?? '')), 0, 128));
+        $turnCred = (string) ($post['p2p_turn_credential'] ?? '');
+        if ($turnCred !== '') {
+            config_set('p2p_turn_credential', $turnCred);
+        }
 
         // Recording (egress).
         config_set('recording_enabled', ($post['recording_enabled'] ?? '0') === '1' ? '1' : '0');

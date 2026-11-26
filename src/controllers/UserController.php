@@ -209,7 +209,7 @@ final class UserController
         $pw = presence_window();
         $rows = Database::all(
             'SELECT id, username, away, status_mode, custom_status FROM users
-             WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND status_mode != \'invisible\' AND away IS NULL AND id != ?
+             WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND status_mode != \'invisible\' AND id != ?
              ORDER BY username COLLATE NOCASE',
             [$pw, $user['id']]
         );

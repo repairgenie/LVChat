@@ -42,6 +42,10 @@ return static function (Router $router): void {
     $router->post('/api/webrtc/call/join', [CallController::class, 'join']);
     $router->post('/api/webrtc/call/end', [CallController::class, 'end']);
 
+    // Direct (peer-to-peer) 1:1 calls: SDP/ICE relay between the two browsers.
+    $router->post('/api/webrtc/p2p/signal', [CallController::class, 'signal']);
+    $router->get('/api/webrtc/p2p/signals', [CallController::class, 'signals']);
+
     // Host controls: kick/mute/lock + waiting-room admit/deny.
     $router->post('/api/webrtc/moderate', [ModerationController::class, 'moderate']);
 

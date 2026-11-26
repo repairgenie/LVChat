@@ -39,7 +39,7 @@ final class AdminController
         $admin = self::require();
         $stats = [
             'Total users' => (int) Database::scalar('SELECT COUNT(*) FROM users'),
-            'Online now' => (int) Database::scalar('SELECT COUNT(*) FROM users WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND away IS NULL', [presence_window()]),
+            'Online now' => (int) Database::scalar('SELECT COUNT(*) FROM users WHERE last_seen >= datetime("now", "-" || ? || " seconds") AND status_mode != \'invisible\'', [presence_window()]),
             'Channels' => (int) Database::scalar('SELECT COUNT(*) FROM channels'),
             'Messages logged' => (int) Database::scalar('SELECT COUNT(*) FROM messages'),
             'Private messages' => (int) Database::scalar('SELECT COUNT(*) FROM private_messages'),

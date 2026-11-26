@@ -140,7 +140,9 @@
     channels: {},        // slug -> { voice_enabled }
     session: null,       // { room, kind, waiting, can_moderate, locked, roster, mint }
     calls: { incoming: [], outgoing: [], active: null, recent: [] },
-    room: null,          // livekit Room
+    room: null,          // livekit Room (or the direct-call shim)
+    p2p: null,           // active direct RTCPeerConnection session (1:1 calls)
+    p2pOff: {},          // call_id -> direct link disabled (fell back to the SFU)
     inVoice: false,
     connecting: false,
     waitingRoom: false,  // in the lobby until the host admits us
@@ -522,6 +524,7 @@
     Object.keys(tiles).forEach(function (sid) {
       if (tiles[sid].kind === 'audio') tiles[sid].el.volume = state.deafened ? 0 : 1;
     });
+    if (state.p2p && state.p2p.remoteVideo) state.p2p.remoteVideo.volume = state.deafened ? 0 : 1;
     render();
   }
   function toggleDeafen() { setDeafen(!state.deafened); }
@@ -1332,7 +1335,7 @@
     var dm = currentDm();
     if (!dm) return;
     state.pendingCallVideo = !!video;
-    api('/api/webrtc/call/initiate', { user: dm }).then(function (j) {
+    api('/api/webrtc/call/initiate', { user: dm, video: video ? 1 : 0 }).then(function (j) {
       if (!j.ok) { toast(j.error || 'Could not start the call.'); return; }
       state.pendingCall = j.call_id;
       state.pendingCallAt = Date.now();
@@ -1347,11 +1350,14 @@
   }
 
   function acceptCall(callId) {
-    api('/api/webrtc/call/accept', { call_id: callId }).then(function (j) {
+    api('/api/webrtc/call/accept', { call_id: callId, p2p: 1 }).then(function (j) {
       if (j.ok) {
         state.pendingCall = null;
         state.inVoice = true;
-        connectLivekit(j.url, j.token, j.room);
+        // A direct call hands back the peer's identity + ICE servers instead of
+        // a LiveKit token; the caller's video intent travels with it.
+        if (j.p2p) state.pendingCallVideo = !!j.p2p.video;
+        connectCall(j);
       } else {
         toast(j.error || 'Could not accept the call.');
       }
@@ -1402,10 +1408,25 @@
   function handleCallTransitions() {
     var active = state.calls.active;
     if (active) state.pendingCall = null;
+    // A direct 1:1 call that grew to 3+ people can no longer be peer-to-peer:
+    // tear the direct link down and let the join below reconnect via the SFU.
+    if (state.p2p && active && (active.p2p === false || active.call_id !== state.p2p.callId)) {
+      state.p2pOff[active.call_id] = true;
+      p2pTeardown(state.p2p, true);
+      state.inVoice = false;
+    }
+    // No call anymore (the peer hung up, or the ring expired): release the
+    // camera and microphone. The grace window absorbs a status poll that was
+    // already in flight when this direct call started.
+    if (state.p2p && !active && Date.now() - state.p2p.startedAt > 6000) {
+      p2pTeardown(state.p2p, false);
+      state.inVoice = false;
+    }
     if (active && state.room && state.room.state === 'connected') return;
     if (active && !state.room && !state.connecting) {
-      api('/api/webrtc/call/join', { call_id: active.call_id }).then(function (j) {
-        if (j.ok) { state.inVoice = true; connectLivekit(j.url, j.token, j.room); }
+      var direct = state.p2pOff[active.call_id] ? 0 : 1;
+      api('/api/webrtc/call/join', { call_id: active.call_id, p2p: direct }).then(function (j) {
+        if (j.ok) { state.inVoice = true; connectCall(j); }
       });
     }
     // Prune ring timers that are no longer relevant (accepted / ended / expired).
@@ -2076,6 +2097,527 @@
     room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled());
   }
 
+  /* ── Direct peer-to-peer transport (1:1 calls) ─────────────────────────
+   * A 1:1 call is negotiated straight between the two browsers: each side sends
+   * its audio/video/screen tracks to the other over RTCPeerConnection, so the
+   * media is never relayed by the LiveKit SFU and costs no server capacity.
+   * Channel voice and calls that grew past two people stay on the SFU.
+   *
+   * Signaling rides the app (no extra service): POST /api/webrtc/p2p/signal
+   * relays SDP/ICE into the peer's mailbox and GET /api/webrtc/p2p/signals
+   * drains ours, woken early by the gateway's call push (lvchat:call).
+   * Negotiation is the MDN "perfect negotiation" pattern, so a camera toggle or
+   * a screen share started on both sides at once cannot deadlock: the caller
+   * keeps its offer, the callee rolls back and answers.
+   */
+  var P2P_SIGNAL_MS = 600;
+  var P2P_CONNECT_TIMEOUT_MS = 20000;
+
+  /* Route a join/accept payload to the transport the server picked. */
+  function connectCall(j) {
+    if (j && j.p2p) { startP2P(j); return; }
+    connectLivekit(j.url, j.token, j.room);
+  }
+
+  function p2pVideoRes() {
+    var q = (typeof VIDEO_QUALITY !== 'undefined') ? VIDEO_QUALITY[state.videoQuality] : null;
+    return q || { width: 1280, height: 720, frameRate: 30 };
+  }
+
+  function p2pVideoConstraints() {
+    var res = p2pVideoRes();
+    var v = {
+      width: { ideal: res.width },
+      height: { ideal: res.height },
+      frameRate: { ideal: res.frameRate }
+    };
+    if (state.prefs && state.prefs.cam) v.deviceId = { ideal: state.prefs.cam };
+    return v;
+  }
+
+  function p2pAudioConstraints() {
+    var a = {};
+    if (state.prefs) {
+      if (state.prefs.mic) a.deviceId = { ideal: state.prefs.mic };
+      a.echoCancellation = state.prefs.echoc !== false;
+      a.noiseSuppression = state.prefs.ns !== false;
+      a.autoGainControl = state.prefs.agc !== false;
+    }
+    return a;
+  }
+
+  function p2pOfferLocal(pc) {
+    try {
+      var p = pc.setLocalDescription();
+      if (p && typeof p.then === 'function') return p;
+    } catch (e) { /* implicit offer unsupported */ }
+    return pc.createOffer().then(function (offer) { return pc.setLocalDescription(offer); });
+  }
+
+  function p2pAnswerLocal(pc) {
+    try {
+      var p = pc.setLocalDescription();
+      if (p && typeof p.then === 'function') return p;
+    } catch (e) { /* implicit answer unsupported */ }
+    return pc.createAnswer().then(function (answer) { return pc.setLocalDescription(answer); });
+  }
+
+  /* Open (or answer) a direct call from the join/accept payload. */
+  function startP2P(j) {
+    var info = j.p2p || {};
+    if (typeof RTCPeerConnection === 'undefined') {
+      toast('This browser cannot start a direct call.');
+      return;
+    }
+    if (state.p2p) p2pTeardown(state.p2p, false);
+    state.pendingCallVideo = false;
+    state.connecting = true;
+    state.inVoice = true;
+
+    var pc = new RTCPeerConnection({ iceServers: info.ice || [] });
+    var t = {
+      callId: Number(j.call_id || 0),
+      startedAt: Date.now(),
+      pc: pc,
+      polite: !!info.polite,
+      self: info.self || '',
+      peer: info.peer || j.peer || 'peer',
+      stream: null,
+      screenStream: null,
+      camTrack: null,
+      audioSender: null,
+      sender: null,        // video sender: camera or screen track
+      screenSender: null,  // screen audio sender
+      remote: new MediaStream(),
+      micOn: false,
+      camOn: false,
+      screenOn: false,
+      peerScreen: false,
+      connected: false,
+      makingOffer: false,
+      srdAnswerPending: false,
+      ignoreOffer: false,
+      dead: false,
+      lastId: 0,
+      timer: 0,
+      connectTimer: 0,
+      dc: null,
+      localEl: null,
+      localVideo: null,
+      remoteEl: null,
+      remoteVideo: null
+    };
+    state.p2p = t;
+    state.room = p2pRoom(t);
+    render();
+
+    pc.onicecandidate = function (e) {
+      if (e.candidate) p2pSend(t, 'candidate', e.candidate.toJSON ? e.candidate.toJSON() : e.candidate);
+    };
+    pc.ontrack = function (e) {
+      if (!t.remote.getTracks().some(function (tr) { return tr.id === e.track.id; })) {
+        t.remote.addTrack(e.track);
+      }
+      p2pRenderRemote(t);
+      render();
+    };
+    pc.onconnectionstatechange = function () {
+      if (t.dead) return;
+      var s = pc.connectionState;
+      if (s === 'connected') {
+        t.connected = true;
+        clearTimeout(t.connectTimer);
+        state.connecting = false;
+        state.room.state = 'connected';
+        if (state.prefs && state.prefs.speaker && t.remoteVideo && t.remoteVideo.setSinkId) {
+          t.remoteVideo.setSinkId(state.prefs.speaker).catch(function () {});
+        }
+        render();
+      } else if (s === 'failed') {
+        p2pFallback(t, 'The direct connection failed — switching to the relayed call.');
+      }
+    };
+    pc.ondatachannel = function (e) { p2pBindChannel(t, e.channel); };
+    p2pBindChannel(t, pc.createDataChannel('lvcvoice'));
+    pc.onnegotiationneeded = function () {
+      if (t.dead) return;
+      t.makingOffer = true;
+      p2pOfferLocal(pc).then(function () {
+        p2pSend(t, 'description', pc.localDescription);
+      }).catch(function () {
+        /* glare: the peer's offer wins, our next negotiation retries */
+      }).then(function () { t.makingOffer = false; });
+    };
+
+    var constraints = { audio: p2pAudioConstraints(), video: info.video ? p2pVideoConstraints() : false };
+    navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+      if (t.dead) {
+        stream.getTracks().forEach(function (tr) { tr.stop(); });
+        return;
+      }
+      t.stream = stream;
+      stream.getTracks().forEach(function (track) {
+        var sender = pc.addTrack(track, stream);
+        if (track.kind === 'video') {
+          t.sender = sender;
+          t.camTrack = track;
+          t.camOn = true;
+        } else {
+          t.audioSender = sender;
+          t.micOn = true;
+        }
+      });
+      p2pRenderLocal(t);
+      render();
+    }).catch(function (err) {
+      toast('Could not open your microphone: ' + (err && err.message || err));
+      p2pTeardown(t, true);
+      state.inVoice = false;
+      render();
+    });
+
+    t.connectTimer = setTimeout(function () {
+      if (!t.dead && !t.connected) {
+        p2pFallback(t, 'The direct connection timed out — switching to the relayed call.');
+      }
+    }, P2P_CONNECT_TIMEOUT_MS);
+    t.timer = setInterval(function () { p2pPoll(t); }, P2P_SIGNAL_MS);
+    p2pPoll(t);
+  }
+
+  /* A "room" shim: the pane and its controls talk to LiveKit's localParticipant
+   * API, so a direct call exposes the same small surface on top of the PC. */
+  function p2pRoom(t) {
+    var lp = {
+      identity: t.self,
+      trackPublications: new Map(),
+      isMicrophoneEnabled: function () { return !!t.micOn; },
+      isCameraEnabled: function () { return !!t.camOn && !t.screenOn; },
+      isScreenShareEnabled: function () { return !!t.screenOn; },
+      setMicrophoneEnabled: function (on) { return p2pSetMic(t, on !== false); },
+      setCameraEnabled: function (on) { return p2pSetCam(t, on !== false); },
+      setScreenShareEnabled: function (on) { return p2pSetScreen(t, on !== false); },
+      setAttributes: function () { return Promise.resolve(); },
+      publishData: function (payload) { p2pSendData(t, payload); }
+    };
+    return {
+      p2p: true,
+      state: 'connecting',
+      localParticipant: lp,
+      remoteParticipants: new Map(),
+      on: function () {},
+      connect: function () { return Promise.resolve(); },
+      setSinkId: function () { return Promise.resolve(); },
+      disconnect: function () {
+        p2pTeardown(t, true);
+        state.room = null;
+        state.inVoice = false;
+        render();
+      }
+    };
+  }
+
+  function p2pSetMic(t, on) {
+    if (!t || t.dead) return Promise.resolve();
+    if (!on) {
+      if (t.stream) t.stream.getAudioTracks().forEach(function (tr) { tr.enabled = false; });
+      t.micOn = false;
+      render();
+      return Promise.resolve();
+    }
+    var tracks = t.stream ? t.stream.getAudioTracks() : [];
+    if (tracks.length) {
+      tracks.forEach(function (tr) { tr.enabled = true; });
+      t.micOn = true;
+      render();
+      return Promise.resolve();
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: p2pAudioConstraints(), video: false }).then(function (stream) {
+      var track = stream.getAudioTracks()[0];
+      if (!track) return;
+      if (t.dead) { track.stop(); return; }
+      if (!t.stream) t.stream = new MediaStream();
+      t.stream.addTrack(track);
+      if (t.audioSender && t.pc) t.audioSender.replaceTrack(track);
+      else if (t.pc) t.audioSender = t.pc.addTrack(track, t.stream);
+      t.micOn = true;
+      render();
+    }).catch(function (e) { toast('Could not start the microphone: ' + (e && e.message || e)); });
+  }
+
+  /* Drop every video track from the local stream (camera released). */
+  function p2pDropVideo(t) {
+    if (!t || !t.stream) return;
+    t.stream.getVideoTracks().forEach(function (tr) {
+      try { tr.stop(); } catch (e) {}
+      try { t.stream.removeTrack(tr); } catch (e) {}
+    });
+  }
+
+  function p2pSetCam(t, on) {
+    if (!t || t.dead) return Promise.resolve();
+    if (!on) {
+      t.camOn = false;
+      if (!t.screenOn && t.sender) { try { t.sender.replaceTrack(null); } catch (e) {} }
+      if (t.camTrack) { try { t.camTrack.stop(); } catch (e) {} t.camTrack = null; }
+      p2pDropVideo(t);
+      p2pRenderLocal(t);
+      render();
+      return Promise.resolve();
+    }
+    return navigator.mediaDevices.getUserMedia({ video: p2pVideoConstraints(), audio: false }).then(function (stream) {
+      var track = stream.getVideoTracks()[0];
+      if (!track) return;
+      if (t.dead) { track.stop(); return; }
+      if (t.camTrack) { try { t.camTrack.stop(); } catch (e) {} }
+      t.camTrack = track;
+      t.camOn = true;
+      // Keep the local MediaStream in sync so the self tile shows the live
+      // camera instead of the track the screen share replaced.
+      p2pDropVideo(t);
+      if (t.stream) { try { t.stream.addTrack(track); } catch (e) {} }
+      if (!t.screenOn) {
+        if (t.sender) t.sender.replaceTrack(track);
+        else if (t.pc) t.sender = t.pc.addTrack(track, t.stream || new MediaStream([track]));
+      }
+      p2pRenderLocal(t);
+      render();
+    }).catch(function (e) { toast('Could not start the camera: ' + (e && e.message || e)); });
+  }
+
+  function p2pSetScreen(t, on) {
+    if (!t || t.dead) return Promise.resolve();
+    if (!on) { p2pStopScreen(t); return Promise.resolve(); }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      toast('Screen sharing is not supported here.');
+      return Promise.resolve();
+    }
+    var opts = { video: true, audio: !!(state.prefs && state.prefs.screenAudio) };
+    return navigator.mediaDevices.getDisplayMedia(opts).then(function (stream) {
+      if (t.dead) { stream.getTracks().forEach(function (tr) { tr.stop(); }); return; }
+      t.screenStream = stream;
+      t.screenOn = true;
+      var video = stream.getVideoTracks()[0];
+      if (video) {
+        video.addEventListener('ended', function () { p2pStopScreen(t); });
+        if (t.sender) t.sender.replaceTrack(video);
+        else if (t.pc) t.sender = t.pc.addTrack(video, stream);
+      }
+      var audio = stream.getAudioTracks()[0];
+      if (audio && t.pc) t.screenSender = t.pc.addTrack(audio, stream);
+      // The camera is not needed while the screen is shared; release it.
+      if (t.camTrack) { try { t.camTrack.stop(); } catch (e) {} t.camTrack = null; }
+      p2pChannelSend(t, { type: 'screen', on: true });
+      p2pRenderLocal(t);
+      render();
+    }).catch(function (e) { toast('Could not share your screen: ' + (e && e.message || e)); });
+  }
+
+  function p2pStopScreen(t) {
+    if (!t || t.dead) return;
+    var wasOn = t.screenOn;
+    t.screenOn = false;
+    if (t.screenStream) {
+      try { t.screenStream.getTracks().forEach(function (tr) { tr.stop(); }); } catch (e) {}
+      t.screenStream = null;
+    }
+    if (t.screenSender && t.pc) {
+      try { t.pc.removeTrack(t.screenSender); } catch (e) {}
+      t.screenSender = null;
+    }
+    if (t.sender) { try { t.sender.replaceTrack(null); } catch (e) {} }
+    if (t.camOn) {
+      p2pSetCam(t, true);
+    } else {
+      p2pDropVideo(t);
+      p2pRenderLocal(t);
+    }
+    if (wasOn) p2pChannelSend(t, { type: 'screen', on: false });
+    render();
+  }
+
+  function p2pTileEl(id, muted) {
+    var wrap = document.createElement('div');
+    wrap.className = 'lvcvoice-tile' + (muted ? ' self' : '');
+    wrap.dataset.track = id;
+    var video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = !!muted;
+    wrap.appendChild(video);
+    if (els.videos) els.videos.appendChild(wrap);
+    tiles[id] = { el: wrap, kind: 'video' };
+    return { wrap: wrap, video: video };
+  }
+
+  function p2pRenderLocal(t) {
+    var src = t.screenStream || t.stream;
+    var hasVideo = !!(src && src.getVideoTracks().length);
+    if (!hasVideo) {
+      if (t.localEl) {
+        t.localEl.classList.add('hidden');
+        t.localVideo.srcObject = null;
+      }
+      return;
+    }
+    if (!t.localEl) {
+      var made = p2pTileEl('p2p-local', true);
+      t.localEl = made.wrap;
+      t.localVideo = made.video;
+    }
+    t.localEl.classList.remove('hidden');
+    t.localEl.setAttribute('data-label', t.screenOn ? 'You (screen)' : 'You');
+    if (t.localVideo.srcObject !== src) {
+      t.localVideo.srcObject = src;
+      t.localVideo.play().catch(function () {});
+    }
+  }
+
+  function p2pRenderRemote(t) {
+    if (!t.remote || !t.remote.getTracks().length) return;
+    if (!t.remoteEl) {
+      var made = p2pTileEl('p2p-remote', false);
+      t.remoteEl = made.wrap;
+      t.remoteVideo = made.video;
+      t.remoteVideo.volume = state.deafened ? 0 : 1;
+    }
+    t.remoteEl.setAttribute('data-label', t.peer + (t.peerScreen ? ' (screen)' : ''));
+    if (t.remoteVideo.srcObject !== t.remote) {
+      t.remoteVideo.srcObject = t.remote;
+      t.remoteVideo.play().catch(function () {});
+    }
+  }
+
+  function p2pBindChannel(t, ch) {
+    if (!ch) return;
+    t.dc = ch;
+    ch.onmessage = function (e) {
+      var msg = null;
+      try { msg = JSON.parse(e.data); } catch (err) {}
+      if (!msg) return;
+      if (msg.type === 'reaction' && msg.emoji) addReaction(msg.emoji, t.peer);
+      if (msg.type === 'screen') {
+        t.peerScreen = !!msg.on;
+        p2pRenderRemote(t);
+        render();
+      }
+    };
+  }
+
+  function p2pChannelSend(t, msg) {
+    try {
+      if (t.dc && t.dc.readyState === 'open') t.dc.send(JSON.stringify(msg));
+    } catch (e) { /* channel not open yet */ }
+  }
+
+  /* Reactions use the existing LiveKit data-channel call shape. */
+  function p2pSendData(t, payload) {
+    var msg = null;
+    try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (e) {}
+    if (msg) p2pChannelSend(t, msg);
+  }
+
+  function p2pSend(t, kind, payload) {
+    if (!t || t.dead || !t.callId) return;
+    api('/api/webrtc/p2p/signal', {
+      call_id: t.callId,
+      kind: kind,
+      payload: JSON.stringify(payload || {})
+    });
+  }
+
+  function p2pPoll(t) {
+    if (!t || t.dead) return;
+    api('/api/webrtc/p2p/signals?call_id=' + encodeURIComponent(t.callId) + '&after=' + t.lastId).then(function (j) {
+      if (!t || t.dead || !j || j.ok !== true) return;
+      (j.messages || []).forEach(function (m) {
+        if (Number(m.id) > t.lastId) t.lastId = Number(m.id);
+        p2pHandle(t, m);
+      });
+    });
+  }
+
+  function p2pHandle(t, m) {
+    if (!t || t.dead) return;
+    var pc = t.pc;
+    if (m.kind === 'description') {
+      var desc = null;
+      try { desc = JSON.parse(m.payload); } catch (e) {}
+      if (!desc || !desc.type) return;
+      var ready = !t.makingOffer && (pc.signalingState === 'stable' || t.srdAnswerPending);
+      var collision = desc.type === 'offer' && !ready;
+      t.ignoreOffer = !t.polite && collision;
+      if (t.ignoreOffer) return;
+      t.srdAnswerPending = desc.type === 'answer';
+      pc.setRemoteDescription(new RTCSessionDescription(desc)).then(function () {
+        t.srdAnswerPending = false;
+        if (desc.type !== 'offer') return null;
+        return p2pAnswerLocal(pc).then(function () {
+          p2pSend(t, 'description', pc.localDescription);
+        });
+      }).catch(function () { t.srdAnswerPending = false; });
+    } else if (m.kind === 'candidate') {
+      var cand = null;
+      try { cand = JSON.parse(m.payload); } catch (e) {}
+      if (!cand) return;
+      try {
+        pc.addIceCandidate(cand).catch(function () { /* late or duplicate ICE */ });
+      } catch (e) {}
+    } else if (m.kind === 'bye') {
+      p2pTeardown(t, false);
+      if (!state.room) {
+        state.inVoice = false;
+        state.outgoingRing = false;
+        state.pendingCallVideo = false;
+        stopRing();
+        render();
+        pollStatus();
+      }
+    }
+  }
+
+  /* Direct link unusable (no route through NAT, failed ICE): reconnect through
+   * the SFU instead of dropping the call. Remembered per call so later joins do
+   * not retry the direct path. */
+  function p2pFallback(t, reason) {
+    if (!t || t.dead) return;
+    var cid = t.callId;
+    toast(reason || 'Switching to the relayed call.');
+    p2pTeardown(t, false);
+    state.inVoice = false;
+    state.connecting = false;
+    if (!cid) { render(); return; }
+    state.p2pOff[cid] = true;
+    api('/api/webrtc/call/join', { call_id: cid, p2p: 0 }).then(function (j) {
+      if (j && j.ok) {
+        state.inVoice = true;
+        connectLivekit(j.url, j.token, j.room);
+      }
+      render();
+    });
+  }
+
+  function p2pTeardown(t, notify) {
+    if (!t || t.dead) return;
+    if (notify) p2pSend(t, 'bye', {});
+    t.dead = true;
+    clearInterval(t.timer);
+    clearTimeout(t.connectTimer);
+    try { if (t.dc) { t.dc.onmessage = null; t.dc.close(); } } catch (e) {}
+    try { t.pc.close(); } catch (e) {}
+    [t.stream, t.screenStream].forEach(function (s) {
+      if (!s) return;
+      try { s.getTracks().forEach(function (tr) { tr.stop(); }); } catch (e) {}
+    });
+    if (t.camTrack) { try { t.camTrack.stop(); } catch (e) {} }
+    t.stream = null;
+    t.screenStream = null;
+    t.camTrack = null;
+    if (state.p2p === t) state.p2p = null;
+    if (state.room && state.room.p2p) state.room = null;
+    clearTiles();
+  }
+
   /* ── Ring tone (synthesized, like the messenger web) ─────────────────── */
   function ringToneDataUrl() {
     var rate = 22050, dur = 2.0, n = Math.round(dur * rate);
@@ -2373,7 +2915,12 @@
      * it as this DOM event. Re-read the status at once so the ring, the connect
      * and the hang-up are immediate instead of up to POLL_MS late. The poll
      * stays the source of truth and the only path on poll/SSE transports. */
-    document.addEventListener('lvchat:call', function () { pollStatus(); });
+    document.addEventListener('lvchat:call', function () {
+      pollStatus();
+      // SDP/ICE is time-sensitive: a push means a signal just landed, so drain
+      // the direct-call inbox now instead of on the next signaling tick.
+      if (state.p2p) p2pPoll(state.p2p);
+    });
     pollStatus();
     setInterval(pollStatus, POLL_MS);
   }
