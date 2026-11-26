@@ -683,6 +683,24 @@ check('friend presence carries custom status text', ($bob['status_mode'] ?? '') 
 [$s] = req('POST', '/api/status', ['csrf' => $tB, 'status_mode' => 'online'], $cjB);
 check('bob back online', $s === 200, (string) $s);
 
+// Away users belong in the Online sidebar too (amber dot). The initial /app
+// render and pollPayload use one roster query; this pins both so a stray
+// "away IS NULL" filter in either place fails loudly.
+$bobRow = dbq('SELECT id FROM users WHERE username = ?', ['bob'])[0] ?? [];
+$bobId = (int) ($bobRow['id'] ?? 0);
+dbq('UPDATE users SET away = ?, away_at = datetime("now"), status_mode = ?, last_seen = datetime("now") WHERE id = ?', ['stepped out', 'away', $bobId]);
+[$s, , $appAway] = req('GET', '/app', [], $cjA);
+preg_match('~<div id="online-section".*?</nav>~s', $appAway, $m);
+$onlineSection = $m[0] ?? '';
+check('away user stays in the initial /app Online list', $s === 200 && str_contains($onlineSection, 'data-ctx-user="bob"'), (string) $s);
+[$s, , $b] = req('GET', '/api/poll?since=0', [], $cjA);
+$j = jsonDecode($b);
+$pollBob = null;
+foreach (($j['online_users'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $pollBob = $u; }
+check('away user stays in the first poll online_users', $s === 200 && $pollBob !== null, $b);
+check('poll carries the away status, not a dropped row', ($pollBob['status_mode'] ?? '') === 'away', json_encode($pollBob));
+dbq('UPDATE users SET away = NULL, away_at = NULL, status_mode = ? WHERE id = ?', ['online', $bobId]);
+
 // The web chat header renders the rich status UI (avatar dot + clickable line).
 [$s, , $b] = req('GET', '/app?channel=gaming', [], $cjA);
 check('web header renders the avatar status dot + status line', $s === 200 && strpos($b, 'me-header-avatar') !== false && strpos($b, 'avatar-status') !== false && strpos($b, 'me-status-line') !== false, (string) $s);

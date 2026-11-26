@@ -152,14 +152,7 @@ final class ChatController
              WHERE ' . (MessageService::isGuest($user) ? 'n.guest_user_id = ?' : 'n.user_id = ?') . ' AND n.read = 0 ORDER BY n.id DESC LIMIT 50',
             [$user['id']]
         );
-        $pw = presence_window();
-        $onlineUsers = Database::all(
-            "SELECT id, username, role, guest, away, status_mode FROM users WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible'
-             UNION ALL
-             SELECT id, nick, 'user', 1, NULL, 'online' FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
-             ORDER BY username",
-            [$pw, $pw]
-        );
+        $onlineUsers = self::sidebarOnlineUsers();
         // Name -> slug for every channel the SESSION can access, so #channel
         // references in messages render as clickable links. This must NOT
         // expose slugs the user isn't entitled to know: the event-channel slug
@@ -684,6 +677,26 @@ final class ChatController
         redirect($result['redirect'] ?? ($channel ? '/app?channel=' . rawurlencode($channel['slug']) : '/app'));
     }
 
+    /**
+     * The "Online" sidebar roster: registered and guest actors seen inside the
+     * presence window, minus invisible users. Away users are included on purpose
+     * (the UI gives them the amber dot). The initial /app render and every poll
+     * both call this, so the two lists cannot drift apart again.
+     */
+    private static function sidebarOnlineUsers(): array
+    {
+        $pw = presence_window();
+        return Database::all(
+            "SELECT id, username, role, guest, away, status_mode, custom_status
+             FROM users
+             WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible'
+             UNION ALL
+             SELECT id, nick, 'user', 1, NULL, 'online', '' FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
+             ORDER BY username COLLATE NOCASE",
+            [$pw, $pw]
+        );
+    }
+
     /** Build the JSON payload the poll endpoint returns (shared with SSE). */
     private static function pollPayload(array $user, int $since, bool $markRead = true): array
     {
@@ -694,18 +707,10 @@ final class ChatController
             $out['reconnect'] = 1;
         }
         // Live "Online" sidebar list (registered + guest users seen recently).
-        // Mirrors the app view's list (including the current user) so the first
-        // poll doesn't drop the caller's own row from the sidebar.
-        $pw = presence_window();
-        $out['online_users'] = Database::all(
-            "SELECT id, username, role, guest, away, status_mode, custom_status
-             FROM users
-             WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible' AND away IS NULL
-             UNION ALL
-             SELECT id, nick, 'user', 1, NULL, 'online', '' FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
-             ORDER BY username COLLATE NOCASE",
-            [$pw, $pw]
-        );
+        // Mirrors the app view's list (including the current user, and away users,
+        // who render with the amber dot) so the first poll doesn't drop rows from
+        // the sidebar. Keep the column/filter set in sync with the /app render.
+        $out['online_users'] = self::sidebarOnlineUsers();
 
         $notifyCount = (int) Database::scalar(
             'SELECT COUNT(*) FROM notifications WHERE ' . (MessageService::isGuest($user) ? 'guest_user_id = ?' : 'user_id = ?') . ' AND read = 0',
