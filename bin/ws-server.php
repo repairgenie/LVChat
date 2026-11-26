@@ -82,10 +82,9 @@ if (preg_match('#^http://([^:/]+)(?::(\d+))?(/.*)?$#', $pushUrl, $m)) {
     $pushPort = (int) ($m[2] ?? 9001);
     $pushPath = $m[3] !== '' ? $m[3] : '/push';
 }
-// presence_throttle is admin-tunable and read fresh on every application ping
-// (see onMessage): one indexed config-row lookup, measured at ~4 us here, while
-// pings arrive at most every 10-30 s per socket. Caching it would only add a
-// staleness window, so a settings change applies to live sockets immediately.
+// presence_throttle is admin-tunable and read per heartbeat (application ping
+// or protocol PONG): one indexed config lookup, so a change applies to live
+// sockets immediately. A cache would only add a staleness window.
 // End-to-end liveness. The gateway sends a WebSocket PING frame to every live
 // connection and closes it when nothing at all (pong or app message) arrives
 // within the timeout. Browsers answer PING frames in the network stack, so this
@@ -93,7 +92,8 @@ if (preg_match('#^http://([^:/]+)(?::(\d+))?(/.*)?$#', $pushUrl, $m)) {
 $wsPingInterval = max(1, (int) (getenv('WS_PING_INTERVAL') ?: 30));
 $wsPongTimeout = max($wsPingInterval + 1, (int) (getenv('WS_PONG_TIMEOUT') ?: 75));
 
-// Authenticated connections: id => ['user' => actor, 'sub' => [type,target], 'presence_ts', 'touched'].
+// Authenticated connections by Workerman id: actor, subscription, client id,
+// presence clock and liveness timestamp.
 $state = [];
 
 function rt_log(string $msg): void
