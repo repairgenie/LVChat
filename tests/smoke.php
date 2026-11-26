@@ -1143,6 +1143,10 @@ check('member count ignores offline users', ChannelService::memberCount((int) $t
 Database::query('UPDATE users SET last_seen = datetime("now"), away = NULL WHERE id = ?', [$alice['id']]);
 Database::query('UPDATE users SET last_seen = datetime("now"), away = NULL WHERE id = ?', [$bob['id']]);
 check('online_count counts connected users', online_count() >= 2);
+$onlineBeforeInvisible = online_count();
+Database::query('UPDATE users SET status_mode = ? WHERE id = ?', ['invisible', $bob['id']]);
+check('online_count hides invisible users', online_count() === $onlineBeforeInvisible - 1, (string) online_count());
+Database::query('UPDATE users SET status_mode = ? WHERE id = ?', ['online', $bob['id']]);
 record_peak();
 check('peak_online tracks concurrent users', (int) config_get('peak_online', '0') >= 2);
 

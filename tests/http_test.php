@@ -2770,13 +2770,17 @@ sleep(7); // > 5 s after the loop began: a per-tick read refreshes, a capture do
 $sseSeen = (string) ($sseQ('SELECT last_seen FROM users WHERE id = ?', [$bobId])[0]['last_seen'] ?? '');
 check('SSE stream re-reads presence_throttle', $sseSeen !== '' && time() - strtotime($sseSeen . ' UTC') < 60, $sseSeen);
 sleep(3); // let curl hit --max-time and disconnect
-$sseQ(
-    "INSERT INTO messages (channel_id, sender_id, content, created_at) VALUES (?, ?, ?, datetime('now'))",
-    [$generalId, $aliceId, 'sse-drop-probe']
-);
-$dropDeadline = microtime(true) + 5;
-while (microtime(true) < $dropDeadline && (int) ($sseQ("SELECT COUNT(*) AS n FROM rt_clients WHERE client = 'sse-smoke' AND transport = 'sse'")[0]['n'] ?? 0) > 0) {
-    usleep(200000);
+$dropDeadline = microtime(true) + 8;
+$probe = 0;
+while (microtime(true) < $dropDeadline
+    && (int) ($sseQ("SELECT COUNT(*) AS n FROM rt_clients WHERE client = 'sse-smoke' AND transport = 'sse'")[0]['n'] ?? 0) > 0) {
+    // A disconnected stream only notices on its next write, so keep the payload
+    // changing until the abort is detected (one insert was occasionally too early).
+    $sseQ(
+        "INSERT INTO messages (channel_id, sender_id, content, created_at) VALUES (?, ?, ?, datetime('now'))",
+        [$generalId, $aliceId, 'sse-drop-probe-' . $probe++]
+    );
+    usleep(300000);
 }
 check('SSE exit drops its client row', (int) ($sseQ("SELECT COUNT(*) AS n FROM rt_clients WHERE client = 'sse-smoke' AND transport = 'sse'")[0]['n'] ?? 0) === 0);
 $sseBody = (string) @file_get_contents($sseOut);

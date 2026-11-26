@@ -487,7 +487,7 @@ function presence_ping_ms(): int
 function online_count(): int
 {
     $w = presence_window();
-    $users = (int) Database::scalar("SELECT COUNT(*) FROM users WHERE away IS NULL AND last_seen >= datetime('now', '-' || ? || ' seconds')", [$w]);
+    $users = (int) Database::scalar("SELECT COUNT(*) FROM users WHERE away IS NULL AND status_mode != 'invisible' AND last_seen >= datetime('now', '-' || ? || ' seconds')", [$w]);
     $guests = (int) Database::scalar("SELECT COUNT(*) FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')", [$w]);
     return $users + $guests;
 }
