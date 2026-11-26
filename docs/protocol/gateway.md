@@ -98,7 +98,8 @@ no restart. There is no tuning knob for this. HTTP clients pick it up
 immediately too (`presence_window()` per request, and `ping_ms` on the next
 `GET /api/ws/ticket`), and close/beacon offline writes read the window per call.
 Listener settings (`ws_ip`, `ws_port`, TLS certs, `ws_allowed_origin`) still
-need the usual `start|restart`.
+need the usual `start|restart`. The live refresh is covered by
+`tests/ws_test.php`, which changes the throttle while a socket is connected.
 
 ---
 

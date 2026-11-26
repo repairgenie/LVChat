@@ -64,8 +64,10 @@ use Workerman\Worker;
 require __DIR__ . '/../vendor/autoload.php';
 require __DIR__ . '/../src/bootstrap.php';
 
-Worker::$logFile = ROOT . '/data/ws-server.log';
-Worker::$pidFile = ROOT . '/data/ws-server.pid';
+// Overridable so an integration test can run its own daemon without touching a
+// live gateway's pid/log file (see tests/ws_test.php).
+Worker::$logFile = (string) (getenv('WS_LOG_FILE') ?: ROOT . '/data/ws-server.log');
+Worker::$pidFile = (string) (getenv('WS_PID_FILE') ?: ROOT . '/data/ws-server.pid');
 
 $wsIp = (string) (getenv('WS_IP') ?: (config_get('ws_ip', '0.0.0.0') ?? '0.0.0.0'));
 $wsPort = (int) (getenv('WS_PORT') ?: (config_get('ws_port', '8080') ?? 8080));

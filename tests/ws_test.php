@@ -49,6 +49,10 @@ $pushPort = (int) (getenv('WS_PUSH_PORT') ?: 9093);
 $wsUrl = 'ws://127.0.0.1:' . $wsPort;
 $pushUrl = 'http://127.0.0.1:' . $pushPort . '/push';
 $logFile = dirname($dbPath) . '/ws-test-daemon.log';
+// Own pid file, so the shutdown `stop` can never signal a real gateway running
+// from this checkout (bin/ws-server.php honours WS_PID_FILE).
+$pidFile = $dbPath . '.ws.pid';
+@unlink($pidFile);
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 require dirname(__DIR__) . '/src/bootstrap.php';
@@ -69,6 +73,9 @@ function wcheck(string $label, bool $cond, string $detail = ''): void {
 config_set('realtime', 'ws');
 config_set('ws_port', (string) $wsPort);
 config_set('ws_push_url', $pushUrl);
+// Boot the daemon with a 5 s throttle; the live-refresh section raises it to
+// 120 s later, so a boot-time snapshot (or cache) is caught within seconds.
+config_set('presence_throttle', '5');
 
 Auth::register('rtalice', 'rtalice@example.com', 'Password123', true);
 Auth::register('rtbob', 'rtbob@example.com', 'Password123', true);
@@ -89,6 +96,8 @@ if ($general) {
 // ── Spawn the daemon ────────────────────────────────────────────────────────
 $cmd = 'WS_PORT=' . $wsPort
     . ' WS_PUSH_URL=' . escapeshellarg($pushUrl)
+    . ' WS_PID_FILE=' . escapeshellarg($pidFile)
+    . ' WS_LOG_FILE=' . escapeshellarg($logFile)
     . ' CHAT_DB=' . escapeshellarg($dbPath)
     . ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/bin/ws-server.php') . ' start';
 $proc = proc_open($cmd, [1 => ['file', $logFile, 'a'], 2 => ['file', $logFile, 'a']], $pipes);
@@ -96,8 +105,9 @@ if (!is_resource($proc)) {
     echo "SKIP  cannot spawn daemon\n";
     exit(0);
 }
-register_shutdown_function(function () use ($dbPath): void {
+register_shutdown_function(function () use ($dbPath, $pidFile): void {
     $stop = 'CHAT_DB=' . escapeshellarg($dbPath)
+        . ' WS_PID_FILE=' . escapeshellarg($pidFile)
         . ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/bin/ws-server.php') . ' stop';
     @exec($stop . ' > /dev/null 2>&1');
 });
@@ -154,11 +164,11 @@ function wsOpen(string $wsUrl, string $ticket)
     return $fp;
 }
 
-function wsSend($fp, string $payload): void
+function wsFrame($fp, int $opcode, string $payload): void
 {
     $len = strlen($payload);
     $mask = random_bytes(4);
-    $header = "\x81";
+    $header = chr(0x80 | $opcode);
     if ($len < 126) {
         $header .= chr(0x80 | $len);
     } elseif ($len < 65536) {
@@ -168,6 +178,11 @@ function wsSend($fp, string $payload): void
     }
     $masked = $payload ^ str_repeat($mask, intdiv($len + 3, 4));
     fwrite($fp, $header . $mask . substr($masked, 0, $len));
+}
+
+function wsSend($fp, string $payload): void
+{
+    wsFrame($fp, 0x1, $payload);
 }
 
 function wsReceive($fp, float $seconds): array
@@ -206,6 +221,8 @@ function wsReceive($fp, float $seconds): array
         $opcode = ord($b0) & 0x0f;
         if ($opcode === 0x1) { // text frame
             $messages[] = $payload;
+        } elseif ($opcode === 0x9) { // server PING: reply so the gateway keeps the socket
+            wsFrame($fp, 0xA, $payload);
         }
     }
     return $messages;
@@ -318,6 +335,40 @@ if (is_resource($connCarol)) {
 // ── Invalid ticket rejected ─────────────────────────────────────────────────
 $bad = wsOpen($wsUrl, 'not-a-real-ticket');
 wcheck('invalid ticket rejected', $bad === false);
+
+// ── Live presence throttle refresh ──────────────────────────────────────────
+// The gateway reads presence_throttle on every application ping rather than
+// snapshotting it at boot (or caching it). With the daemon started at 5 s,
+// raising it to 120 s mid-connection must suppress the next last_seen write
+// even though the old 5 s throttle would already have fired; lowering it again
+// must apply on the very next ping. The daemon booted with the 5 s value above.
+$connP = wsOpen($wsUrl, Realtime::mintTicket($alice));
+wcheck('presence-throttle connection opens', is_resource($connP));
+if (is_resource($connP)) {
+    $lastSeen = static fn (): string => (string) Database::scalar(
+        'SELECT last_seen FROM users WHERE id = ?',
+        [(int) $alice['id']]
+    );
+    wsSend($connP, json_encode(['action' => 'ping']));
+    wsReceive($connP, 1.2);
+    $before = $lastSeen();
+    wcheck('presence throttle: baseline last_seen is set', $before !== '', $before);
+
+    config_set('presence_throttle', '120'); // window 360 s; 5 s is the old value
+    for ($i = 0; $i < 7; $i++) {
+        wsSend($connP, json_encode(['action' => 'ping']));
+        wsReceive($connP, 1.0);
+    }
+    $afterHigh = $lastSeen();
+    wcheck('presence throttle: raise to 120 suppresses the write', $afterHigh === $before, "$before -> $afterHigh");
+
+    config_set('presence_throttle', '5');
+    wsSend($connP, json_encode(['action' => 'ping']));
+    wsReceive($connP, 1.2);
+    $afterLow = $lastSeen();
+    wcheck('presence throttle: lower to 5 applies on the next ping', $afterLow !== $before, "$before -> $afterLow");
+    fclose($connP);
+}
 
 echo "ws_test: {$GLOBALS['passed']} passed, {$GLOBALS['failed']} failed\n";
 exit($GLOBALS['failed'] === 0 ? 0 : 1);
