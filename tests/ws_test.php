@@ -95,6 +95,7 @@ if ($general) {
 
 // ── Spawn the daemon ────────────────────────────────────────────────────────
 $cmd = 'WS_PORT=' . $wsPort
+    . ' WS_PING_INTERVAL=1'   // PONG-only presence test below needs prompt PINGs
     . ' WS_PUSH_URL=' . escapeshellarg($pushUrl)
     . ' WS_PID_FILE=' . escapeshellarg($pidFile)
     . ' WS_LOG_FILE=' . escapeshellarg($logFile)
@@ -368,6 +369,42 @@ if (is_resource($connP)) {
     $afterLow = $lastSeen();
     wcheck('presence throttle: lower to 5 applies on the next ping', $afterLow !== $before, "$before -> $afterLow");
     fclose($connP);
+}
+
+// ── PONG-only presence (backgrounded / frozen tab) ──────────────────────────
+// Browser network stacks answer protocol PINGs even when the tab's JS timers
+// are frozen. Those PONGs alone must keep both last_seen and the ws rt_clients
+// row fresh, throttled to presence_throttle — no {action:'ping'} is sent here.
+config_set('presence_throttle', '5');
+$connIdle = wsOpen($wsUrl, Realtime::mintTicket($alice));
+wcheck('pong-presence connection opens', is_resource($connIdle));
+if (is_resource($connIdle)) {
+    wsReceive($connIdle, 1.5); // let the first server PING/PONG land
+    Database::query("UPDATE users SET last_seen = datetime('now', '-600 seconds') WHERE id = ?", [(int) $alice['id']]);
+    Database::query(
+        "UPDATE rt_clients SET updated_at = datetime('now', '-600 seconds') WHERE actor_id = ? AND guest = 0 AND transport = 'ws'",
+        [(int) $alice['id']]
+    );
+    $pongRow = static fn (): array => [
+        'seen' => (string) Database::scalar('SELECT last_seen FROM users WHERE id = ?', [(int) $alice['id']]),
+        'ws' => (string) Database::scalar("SELECT MAX(updated_at) FROM rt_clients WHERE actor_id = ? AND guest = 0 AND transport = 'ws'", [(int) $alice['id']]),
+    ];
+    $stale = $pongRow();
+    wcheck('pong-presence: baseline backdated', $stale['seen'] < gmdate('Y-m-d H:i:s', time() - 60), $stale['seen']);
+
+    wsReceive($connIdle, 2.0); // still inside the 5 s throttle
+    $throttled = $pongRow();
+    wcheck(
+        'pong-presence: throttled inside the window',
+        $throttled['seen'] === $stale['seen'] && $throttled['ws'] === $stale['ws'],
+        json_encode([$stale, $throttled])
+    );
+
+    wsReceive($connIdle, 3.5); // past the throttle: PONGs alone must refresh both
+    $fresh = $pongRow();
+    wcheck('pong-presence: last_seen refreshed by PONGs alone', $fresh['seen'] > $stale['seen'], "{$stale['seen']} -> {$fresh['seen']}");
+    wcheck('pong-presence: ws client row refreshed by PONGs alone', $fresh['ws'] > $stale['ws'], "{$stale['ws']} -> {$fresh['ws']}");
+    fclose($connIdle);
 }
 
 echo "ws_test: {$GLOBALS['passed']} passed, {$GLOBALS['failed']} failed\n";

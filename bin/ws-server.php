@@ -112,6 +112,20 @@ $writePresence = function (array $actor, string $offset = 'now'): void {
     }
 };
 
+/**
+ * Prove a connection is still present: refresh last_seen and its ws client row,
+ * at most once per presence_throttle. Shared by application pings and protocol
+ * PONGs, so a tab whose JS timers are frozen (but which still answers PINGs in
+ * the network stack) does not go offline while its socket is alive.
+ */
+$refreshPresence = function (array &$st) use ($writePresence): void {
+    if (time() - (int) ($st['presence_ts'] ?? 0) >= presence_throttle()) {
+        $writePresence($st['user'], 'now');
+        Realtime::touchClient($st['user'], (string) ($st['client'] ?? ''), 'ws');
+        $st['presence_ts'] = time();
+    }
+};
+
 // Optional WSS: when a TLS cert/key pair is configured the gateway serves
 // encrypted websocket on the same port, so the browser can use wss://.
 $wsSsl = $wsSslCert !== '' && $wsSslKey !== '';
@@ -395,7 +409,7 @@ $ws->onWebSocketConnect = function (TcpConnection $conn) use (&$state, $writePre
         'user' => $user,
         'sub' => ['type' => null, 'target' => null],
         'client' => $wsClient,
-        'presence_ts' => 0,
+        'presence_ts' => time(), // connect already wrote last_seen
         'touched' => time(),
         'ping_at' => 0,
     ];
@@ -407,13 +421,17 @@ $ws->onWebSocketConnect = function (TcpConnection $conn) use (&$state, $writePre
 // Protocol-level PONG (the reply to our PING frame). Browsers send it from the
 // network stack, so it keeps a connection alive even when its JS is throttled —
 // and its absence is what tells us the path is dead.
-$ws->onWebSocketPong = function (TcpConnection $conn, string $data) use (&$state): void {
-    if (isset($state[$conn->id])) {
-        $state[$conn->id]['touched'] = time();
+$ws->onWebSocketPong = function (TcpConnection $conn, string $data) use (&$state, $refreshPresence): void {
+    if (!isset($state[$conn->id])) {
+        return;
     }
+    $state[$conn->id]['touched'] = time();
+    // Network-stack PONGs keep arriving for a backgrounded/frozen tab whose JS
+    // timers stopped; count them as presence proof at the app-ping cadence.
+    $refreshPresence($state[$conn->id]);
 };
 
-$ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $writePresence): void {
+$ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $refreshPresence): void {
     $st = &$state[$conn->id];
     if (!is_array($st)) {
         return;
@@ -437,11 +455,7 @@ $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $wri
         case 'ping':
             // Presence heartbeat: refresh last_seen on a throttled cadence so
             // every existing isOnline() check keeps working unchanged.
-            if (time() - (int) $st['presence_ts'] >= presence_throttle()) {
-                $writePresence($st['user'], 'now');
-                Realtime::touchClient($st['user'], (string) ($st['client'] ?? ''), 'ws');
-                $st['presence_ts'] = time();
-            }
+            $refreshPresence($st);
             $conn->send('{"pong":true}');
             break;
         case 'hello':

@@ -2716,11 +2716,53 @@ check('channel notify mode restored', true);
 check('logout redirects', $s === 302 && ($h['location'] ?? '') === '/login', "$s " . ($h['location'] ?? ''));
 
 // SSE stream (last: the stream holds the single-threaded dev server, so any
-// follow-up request would hang). Bob is still logged in.
-$sseBody = (string) shell_exec(
-    'timeout 4 curl -s -N --max-time 4 -b ' . escapeshellarg($cjB) . ' ' . escapeshellarg($BASE . '/api/stream?since=0') . ' 2>/dev/null'
+// follow-up request would hang). Bob is still logged in. Boot on a long
+// throttle, then lower the setting mid-stream: the loop must pick it up, and
+// disconnecting must release its sse client row.
+$sseOut = sys_get_temp_dir() . '/lvc-sse-' . getmypid() . '.out';
+@unlink($sseOut);
+// Raw harness: no app bootstrap here, so use a private PDO with a busy timeout
+// (the stream writes presence concurrently).
+$sseDb = new PDO('sqlite:' . $DB);
+$sseDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$sseDb->exec('PRAGMA busy_timeout = 5000');
+$sseQ = static function (string $sql, array $p = []) use ($sseDb): array {
+    $st = $sseDb->prepare($sql);
+    $st->execute($p);
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+};
+$bobId = (int) ($sseQ("SELECT id FROM users WHERE username = 'bob'")[0]['id'] ?? 0);
+$aliceId = (int) ($sseQ("SELECT id FROM users WHERE username = 'alice'")[0]['id'] ?? 0);
+$generalId = (int) ($sseQ("SELECT id FROM channels WHERE slug = 'general'")[0]['id'] ?? 0);
+$ssePrevThrottle = (string) ($sseQ("SELECT value FROM server_config WHERE key = 'presence_throttle'")[0]['value'] ?? '30');
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('presence_throttle', '120')");
+exec('timeout 10 curl -s -N --max-time 10 -b ' . escapeshellarg($cjB)
+    . ' ' . escapeshellarg($BASE . '/api/stream?since=0&client=sse-smoke')
+    . ' > ' . escapeshellarg($sseOut) . ' 2>/dev/null &');
+$deadline = microtime(true) + 5;
+while (microtime(true) < $deadline && !str_contains((string) @file_get_contents($sseOut), 'data:')) {
+    usleep(100000);
+}
+check('SSE stream registers its client row', (int) ($sseQ("SELECT COUNT(*) AS n FROM rt_clients WHERE client = 'sse-smoke' AND transport = 'sse'")[0]['n'] ?? 0) === 1);
+$sseQ("UPDATE users SET last_seen = datetime('now', '-600 seconds') WHERE id = ?", [$bobId]);
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('presence_throttle', '5')");
+sleep(7); // > 5 s after the loop began: a per-tick read refreshes, a capture does not.
+$sseSeen = (string) ($sseQ('SELECT last_seen FROM users WHERE id = ?', [$bobId])[0]['last_seen'] ?? '');
+check('SSE stream re-reads presence_throttle', $sseSeen !== '' && time() - strtotime($sseSeen . ' UTC') < 60, $sseSeen);
+sleep(3); // let curl hit --max-time and disconnect
+$sseQ(
+    "INSERT INTO messages (channel_id, sender_id, content, created_at) VALUES (?, ?, ?, datetime('now'))",
+    [$generalId, $aliceId, 'sse-drop-probe']
 );
+$dropDeadline = microtime(true) + 5;
+while (microtime(true) < $dropDeadline && (int) ($sseQ("SELECT COUNT(*) AS n FROM rt_clients WHERE client = 'sse-smoke' AND transport = 'sse'")[0]['n'] ?? 0) > 0) {
+    usleep(200000);
+}
+check('SSE exit drops its client row', (int) ($sseQ("SELECT COUNT(*) AS n FROM rt_clients WHERE client = 'sse-smoke' AND transport = 'sse'")[0]['n'] ?? 0) === 0);
+$sseBody = (string) @file_get_contents($sseOut);
 check('SSE stream emits data frames', str_contains($sseBody, 'data:'), $sseBody);
+@unlink($sseOut);
+$sseQ("INSERT OR REPLACE INTO server_config (key, value) VALUES ('presence_throttle', ?)", [$ssePrevThrottle]);
 
 proc_terminate($server);
 if (isset($licenseServer) && is_resource($licenseServer)) {

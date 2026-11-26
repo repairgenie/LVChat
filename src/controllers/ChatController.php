@@ -902,8 +902,15 @@ final class ChatController
     public static function stream(): void
     {
         $user = self::requireUser();
+        $clientId = (string) ($_GET['client'] ?? '');
         // This tab/device is live for as long as the stream runs.
-        Realtime::touchClient($user, (string) ($_GET['client'] ?? ''), 'sse');
+        Realtime::touchClient($user, $clientId, 'sse');
+        // Release the row however the stream ends: normal break, client abort or
+        // a fatal. A dead stream must not keep liveClients() > 0, or a later
+        // tab-close beacon can never write the account offline.
+        register_shutdown_function(static function () use ($user, $clientId): void {
+            Realtime::dropClient($user, $clientId, 'sse');
+        });
         // Stream-open throttle: each SSE connection pins a PHP worker, so one
         // account must not be able to churn hundreds of them. The rt_transports
         // row is one-per-actor (PK), so throttle on open rate via session.
@@ -928,9 +935,9 @@ final class ChatController
         $interval = max(1, (int) (config_get('poll_interval', '2') ?? 2));
         $start = time();
         $last = 0;
-        // Refresh presence inside the loop so a long-lived stream never goes stale:
-        // without this, SSE users vanish from the online list after presence_throttle.
-        $presenceThrottle = presence_throttle();
+        // Refresh presence inside the loop so a long-lived stream never goes
+        // stale. Re-read the throttle on every tick (like the gateway's per-ping
+        // read) so an admin change applies to an open stream without a reconnect.
         $lastPresence = $start;
 
         $send = function (string $data): void {
@@ -946,7 +953,7 @@ final class ChatController
                 break;
             }
             // Keep "last seen" fresh on a throttled cadence, mirroring Auth::user().
-            if (time() - $lastPresence >= $presenceThrottle) {
+            if (time() - $lastPresence >= presence_throttle()) {
                 if ((int) ($user['guest'] ?? 0) === 1) {
                     Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $user['id']]);
                 } else {
@@ -954,7 +961,7 @@ final class ChatController
                 }
                 $user['last_seen'] = now();
                 $lastPresence = time();
-                Realtime::touchClient($user, (string) ($_GET['client'] ?? ''), 'sse');
+                Realtime::touchClient($user, $clientId, 'sse');
             }
             $out = self::pollPayload($user, $since, false);
             // Advance the server-side watermark once the batch is caught up, so the

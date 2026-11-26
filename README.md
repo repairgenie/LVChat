@@ -565,7 +565,7 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **1385 automated assertions** in three layers:
+Runs **1500 automated assertions** in three layers:
 
 - **`tests/smoke.php`** (695) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/
@@ -624,14 +624,15 @@ Runs **1385 automated assertions** in three layers:
   minimal in-repo fixture license server (`tests/fixtures/license_server.php`):
   saving a key + re-check confirms it (valid badge), a server-refused key shows
   `server refused`, and a malformed key fails offline without any network.
-- **`tests/ws_test.php`** (23) — WebSocket gateway integration: spawns the realtime
+- **`tests/ws_test.php`** (28) — WebSocket gateway integration: spawns the realtime
   daemon against a scratch DB and verifies ticket auth, channel/DM subscriptions,
   and message/msg-update fan-out — plus **realtime authorization** regression
   coverage: non-members are refused a channel subscription, a third party never
   receives DMs they are not a participant in, and legitimate participants still
   do. It also pins the **live presence throttle**: changing `presence_throttle`
-  while a socket is connected is applied on the next ping (ports via `WS_PORT`
-  / `WS_PUSH_PORT`, isolated pid/log via `WS_PID_FILE` / `WS_LOG_FILE`).
+  while a socket is connected is applied on the next ping, and that protocol
+  PONGs alone keep a frozen tab online (ports via `WS_PORT` / `WS_PUSH_PORT`,
+  isolated pid/log via `WS_PID_FILE` / `WS_LOG_FILE`).
 
 The two desktop clients also ship their own Electron end-to-end suites
 (`npm test` in each folder — see [Desktop clients](#desktop-clients)).

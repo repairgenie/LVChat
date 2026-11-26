@@ -73,7 +73,10 @@ no inbound frame at all — pong or app message — for `WS_PONG_TIMEOUT` (defau
 **75 s**, about two missed pings) is closed.
 
 - PONG frames are handled in `onWebSocketPong` and refresh `touched`; they never
-  reach `onMessage`.
+  reach `onMessage`. They are also presence proof: at most once per
+  `presence_throttle` the same handler refreshes `last_seen` and the ws
+  `rt_clients` row, so a backgrounded or frozen tab whose JS timers stopped
+  stays online as long as its network stack keeps answering PINGs.
 - Browsers answer PING frames in the network stack, so a throttled or frozen
   tab is still judged on reachability instead of on JS timers, and a blackholed
   path (NAT drop, dead route, suspended device) is closed even though TCP still
