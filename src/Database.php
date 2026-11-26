@@ -26,7 +26,7 @@ final class Database
     private static ?PDO $pdo = null;
 
     /** Bump whenever schema.sql or the migration block below changes. */
-    private const SCHEMA_VERSION = '44';
+    private const SCHEMA_VERSION = '46';
 
     /** Drop the cached connection so the next access re-opens it (used after fork). */
     public static function close(): void
@@ -259,6 +259,14 @@ final class Database
             $pdo->exec('CREATE INDEX idx_rt_transports_updated ON rt_transports(updated_at)');
         }
 
+        // Live client instances (schema v46): one row per tab/device per
+        // transport, so "offline" means the last live client went away rather
+        // than any one tab closing. Rows expire by age (presence window).
+        if (!in_array('rt_clients', $tables, true)) {
+            $pdo->exec('CREATE TABLE rt_clients (client TEXT NOT NULL, transport TEXT NOT NULL DEFAULT \'poll\', actor_id INTEGER NOT NULL, guest INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')), PRIMARY KEY (client, transport))');
+            $pdo->exec('CREATE INDEX idx_rt_clients_actor ON rt_clients(actor_id, guest, updated_at)');
+        }
+
         // Moderation / reporting / support (added in schema v13).
         if (!in_array('moderation_events', $tables, true)) {
             $pdo->exec('CREATE TABLE moderation_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL, kind TEXT NOT NULL, action TEXT NOT NULL DEFAULT "applied", match TEXT NOT NULL DEFAULT "", content TEXT NOT NULL DEFAULT "", target TEXT NOT NULL DEFAULT "", channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
@@ -331,6 +339,16 @@ final class Database
         $chanCols = array_column($pdo->query('PRAGMA table_info(channels)')->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('channel_url', $chanCols, true)) {
             $pdo->exec('ALTER TABLE channels ADD COLUMN channel_url TEXT');
+        }
+        // Channel ↔ event link (schema v45). Core queries filter on this column
+        // (public listings exclude event channels), so core must own it: the
+        // webrtc module used to create it, which left core-only installs and
+        // module-less test runs with a missing column. Deliberately no FK here —
+        // `events` is module-owned and may not exist, and SQLite rejects inserts
+        // into a table whose FK parent is missing. The module's own guarded
+        // ALTER still runs on installs that predate this and now no-ops.
+        if (!in_array('event_id', $chanCols, true)) {
+            $pdo->exec('ALTER TABLE channels ADD COLUMN event_id INTEGER');
         }
         if (!in_array('banned_urls', $tables, true)) {
             $pdo->exec('CREATE TABLE banned_urls (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL UNIQUE COLLATE NOCASE, reason TEXT NOT NULL DEFAULT "", created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (datetime("now")))');
@@ -787,6 +805,8 @@ final class Database
         $pdo->exec('DELETE FROM typing_indicators WHERE updated_at < datetime("now", "-2 minutes")');
         // Prune old typing indicators from guests (no FK cascade).
         $pdo->exec('DELETE FROM typing_indicators WHERE actor_type = "guest" AND updated_at < datetime("now", "-2 minutes")');
+        // Live-client rows are only meaningful for a presence window; prune old ones.
+        $pdo->exec('DELETE FROM rt_clients WHERE updated_at < datetime("now", "-1 day")');
         // Prune stale TOTP replay counters.
         $pdo->exec('DELETE FROM totp_used_counters WHERE expires_at < datetime("now")');
         // Prune old guests with no recent activity (30 days).

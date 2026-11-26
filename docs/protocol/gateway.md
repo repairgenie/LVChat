@@ -46,7 +46,7 @@ $state[$conn->id] = [
   'user'        => $user,        // actor array (user or guest shape)
   'sub'         => ['type' => null, 'target' => null],
   'presence_ts' => 0,            // last presence write time
-  'touched'     => time(),       // last received frame (idle sweep)
+  'touched'     => time(),       // last received frame (liveness sweep)
 ];
 ```
 
@@ -58,14 +58,35 @@ $state[$conn->id] = [
 
 Connections are established in `onWebSocketConnect` (origin check → ticket
 redemption → state entry → immediate `last_seen` write) and torn down in
-`onClose` (writes `last_seen` as `-60 seconds` so the user goes offline
-promptly instead of waiting for the 30 s window).
+`onClose`. Each state entry carries a `client` key (the browser's per-tab id
+from `?client=`, or a connection-scoped fallback for older clients); on close,
+that client's `rt_clients` row is dropped and `last_seen` is written past the
+presence window only when **no other live client remains** for the actor — so
+closing one tab or device does not hide an account that is active elsewhere.
 
-### Idle sweep
+### Liveness (PING/PONG)
 
-A 30-second timer closes connections whose `touched` is older than **90 s**
-(no frames received in that window). `touched` is refreshed on every inbound
-frame, so a healthy client's `ping` heartbeats keep the connection alive.
+A timer (every 15 s, or the ping interval when that is shorter) sends a
+WebSocket PING frame (opcode `0x9`, written raw through Workerman so it is not
+wrapped as a text frame) to every authenticated connection. Any connection with
+no inbound frame at all — pong or app message — for `WS_PONG_TIMEOUT` (default
+**75 s**, about two missed pings) is closed.
+
+- PONG frames are handled in `onWebSocketPong` and refresh `touched`; they never
+  reach `onMessage`.
+- Browsers answer PING frames in the network stack, so a throttled or frozen
+  tab is still judged on reachability instead of on JS timers, and a blackholed
+  path (NAT drop, dead route, suspended device) is closed even though TCP still
+  looks open.
+- Closing runs `onClose` → presence offline; the client sees `onclose` and its
+  backoff path reconnects with a fresh ticket.
+- `WS_PING_INTERVAL` (default 30) and `WS_PONG_TIMEOUT` (default 75) are env
+  overrides, used by the liveness test.
+
+Clients run the mirror-image check: after a socket opens they track the last
+inbound frame (including `{pong:true}` replies to their own application pings)
+and force-close the socket after 2.5 ping cycles with no frame, so a one-way
+blackhole the server cannot observe also triggers a reconnect.
 
 ---
 
@@ -157,7 +178,7 @@ For completeness, the gateway's frame handling:
   `{"ok":true,"sub":{…}}`; otherwise clears the subscription to `null`.
 - anything else → `{"ok":false,"error":"unknown action"}`.
 
-`touched` is refreshed on every frame received (keeps the idle sweep honest).
+`touched` is refreshed on every frame received, including protocol pongs (keeps the liveness sweep honest).
 
 ---
 

@@ -72,7 +72,7 @@ final class Auth
             // Throttle the presence write so most polls are pure reads (SQLite WAL
             // handles many readers + one writer). The in-memory row is patched so
             // the rest of the request still sees fresh data.
-            $throttle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+            $throttle = presence_throttle();
             $lastWrite = (int) ($_SESSION['presence_ts'] ?? 0);
             if (time() - $lastWrite >= $throttle) {
                 Database::query('UPDATE users SET last_seen = datetime("now"), last_ip = ? WHERE id = ?', [client_ip(), $u['id']]);
@@ -95,7 +95,7 @@ final class Auth
             [$token]
         );
         if ($g) {
-            $throttle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+            $throttle = presence_throttle();
             $lastWrite = (int) ($_SESSION['presence_ts'] ?? 0);
             if (time() - $lastWrite >= $throttle) {
                 Database::query('UPDATE guests SET last_seen = datetime("now"), ip = ? WHERE id = ?', [client_ip(), $g['id']]);
@@ -529,9 +529,9 @@ final class Auth
         return $u;
     }
 
-    public static function isOnline(array $user, int $within = 30): bool
+    public static function isOnline(array $user, ?int $within = null): bool
     {
-        return $user['away'] === null && !empty($user['last_seen']) && (time() - strtotime($user['last_seen'] . ' UTC')) <= $within;
+        return $user['away'] === null && self::actuallyOnline($user, $within);
     }
 
     public const STATUS_MODES = ['online', 'away', 'dnd', 'invisible', 'custom'];
@@ -563,13 +563,14 @@ final class Auth
     }
 
     /** Actually connected right now, regardless of the chosen status mode. */
-    public static function actuallyOnline(array $user, int $within = 30): bool
+    public static function actuallyOnline(array $user, ?int $within = null): bool
     {
+        $within = $within ?? presence_window();
         return !empty($user['last_seen']) && (time() - strtotime($user['last_seen'] . ' UTC')) <= $within;
     }
 
     /** Whether this user appears online to others. 'invisible' hides them. */
-    public static function appearsOnline(array $user, int $within = 30): bool
+    public static function appearsOnline(array $user, ?int $within = null): bool
     {
         return self::actuallyOnline($user, $within) && self::statusMode($user) !== 'invisible';
     }
@@ -581,7 +582,7 @@ final class Auth
     }
 
     /** The presence object clients render: mode, text, and the online flags. */
-    public static function statusInfo(array $user, int $within = 30): array
+    public static function statusInfo(array $user, ?int $within = null): array
     {
         $mode = self::statusMode($user);
         $text = self::statusText($user);

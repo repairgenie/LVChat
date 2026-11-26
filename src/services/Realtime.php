@@ -40,6 +40,94 @@ final class Realtime
         return config_get('realtime', 'poll') === 'ws';
     }
 
+    /** Sanitised per-tab/device client key from a browser ('' when invalid). */
+    public static function clientKey(string $client): string
+    {
+        $client = trim($client);
+        return preg_match('/^[A-Za-z0-9_.:-]{1,64}$/', $client) ? $client : '';
+    }
+
+    /**
+     * Register or refresh a live client (tab / device / app window) for an
+     * actor. Throttled to the presence write cadence, so a 2 s poll does not
+     * turn into a write every 2 s.
+     */
+    public static function touchClient(array $actor, string $client, string $transport = 'poll'): void
+    {
+        $client = self::clientKey($client);
+        if ($client === '' || !in_array($transport, ['ws', 'sse', 'poll'], true)) {
+            return;
+        }
+        $actorId = (int) ($actor['id'] ?? 0);
+        $guest = (int) ($actor['guest'] ?? 0) === 1 ? 1 : 0;
+        $row = Database::row(
+            'SELECT actor_id, guest, updated_at FROM rt_clients WHERE client = ? AND transport = ?',
+            [$client, $transport]
+        );
+        if ($row
+            && (int) $row['actor_id'] === $actorId
+            && (int) $row['guest'] === $guest
+            && time() - strtotime((string) $row['updated_at'] . ' UTC') < presence_throttle()) {
+            return;
+        }
+        Database::query(
+            'INSERT INTO rt_clients (client, transport, actor_id, guest, updated_at)
+             VALUES (?, ?, ?, ?, datetime(\'now\'))
+             ON CONFLICT (client, transport)
+             DO UPDATE SET actor_id = excluded.actor_id, guest = excluded.guest, updated_at = excluded.updated_at',
+            [$client, $transport, $actorId, $guest]
+        );
+    }
+
+    /** Live client rows for an actor, within the presence window. */
+    public static function liveClients(array $actor): int
+    {
+        return (int) Database::scalar(
+            'SELECT COUNT(*) FROM rt_clients WHERE actor_id = ? AND guest = ?
+               AND updated_at >= datetime("now", "-" || ? || " seconds")',
+            [
+                (int) ($actor['id'] ?? 0),
+                (int) ($actor['guest'] ?? 0) === 1 ? 1 : 0,
+                presence_window(),
+            ]
+        );
+    }
+
+    /** Remove a client's live row(s). Null transport removes every transport. */
+    public static function dropClient(array $actor, string $client, ?string $transport = null): void
+    {
+        $client = self::clientKey($client);
+        if ($client === '') {
+            return;
+        }
+        $sql = 'DELETE FROM rt_clients WHERE client = ? AND actor_id = ? AND guest = ?';
+        $args = [$client, (int) ($actor['id'] ?? 0), (int) ($actor['guest'] ?? 0) === 1 ? 1 : 0];
+        if ($transport !== null) {
+            $sql .= ' AND transport = ?';
+            $args[] = $transport;
+        }
+        Database::query($sql, $args);
+    }
+
+    /**
+     * Mark an actor offline, but only when this was the last live client. The
+     * caller's own row(s) are removed first so another tab/device keeps the
+     * account online. Returns true when last_seen was written offline.
+     */
+    public static function markOfflineIfLast(array $actor, string $client = '', ?string $transport = null): bool
+    {
+        if ($client !== '') {
+            self::dropClient($actor, $client, $transport);
+        }
+        if (self::liveClients($actor) > 0) {
+            return false;
+        }
+        $offset = '-' . (presence_window() + 1) . ' seconds';
+        $table = (int) ($actor['guest'] ?? 0) === 1 ? 'guests' : 'users';
+        Database::query("UPDATE $table SET last_seen = datetime('now', ?) WHERE id = ?", [$offset, (int) ($actor['id'] ?? 0)]);
+        return true;
+    }
+
     /** Mint a one-time WS handshake ticket for a user/guest actor. */
     public static function mintTicket(array $user): string
     {

@@ -1290,11 +1290,29 @@
     if (j.alerts) handleAlerts(j.alerts);
     if (j.typing) applyTyping(j.typing);
   }
+  /* Stable id for this tab/window (sessionStorage is per tab; other devices
+   * have their own). The server keeps the account online while any live client
+   * exists and only goes offline when the last one disconnects. */
+  function clientId() {
+    try {
+      let id = sessionStorage.getItem('lvchat-client');
+      if (!id) {
+        id = (window.crypto && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+        sessionStorage.setItem('lvchat-client', id);
+      }
+      return id;
+    } catch (err) {
+      return 'tab:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+  }
   function poll() {
     const q = new URLSearchParams({ since: lastId });
     if (CHANNEL) q.set('channel', CHANNEL);
     if (DM) q.set('dm', DM);
     q.set('bg_since', bgLast);
+    q.set('client', clientId());
     fetch('/api/poll?' + q.toString())
       .then((r) => r.json())
       .then((j) => {
@@ -4292,6 +4310,12 @@ if (j.mode) {
     let wsRetryTimer = null;
     let wsBase = body.dataset.wsUrl || '';
     let wsTicket = body.dataset.rtTicket || '';
+    // Server-derived presence cadence (GET /api/ws/ticket ping_ms).
+    let wsPingMs = 30000;
+    let wsPingTimer = null;
+    // Liveness: time of the last inbound frame (any frame, including pongs).
+    let wsLastFrameAt = 0;
+    let wsLivenessTimer = null;
     // Keep a plain ws:// variant of the configured wss:// URL to try once if the
     // secure handshake fails. It only stands a chance on a non-secure page
     // (http://) — on an https page the browser hard-blocks ws:// as mixed
@@ -4306,6 +4330,20 @@ if (j.mode) {
     function wsSend(obj) {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
     }
+    function startWsPings() {
+      if (wsPingTimer) clearInterval(wsPingTimer);
+      wsPingTimer = setInterval(() => wsSend({ action: 'ping' }), wsPingMs);
+    }
+    // A blackholed socket stays OPEN and silently receives nothing; force a
+    // reconnect when no frame (including a pong) arrives for 2.5 ping cycles.
+    function startWsLiveness() {
+      if (wsLivenessTimer) clearInterval(wsLivenessTimer);
+      wsLivenessTimer = setInterval(() => {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !wsLastFrameAt) return;
+        if (Date.now() - wsLastFrameAt <= Math.max(15000, wsPingMs * 2.5)) return;
+        try { ws.close(); } catch (e) {}
+      }, 5000);
+    }
     function wsSubscribe() {
       if (CHANNEL) wsSend({ action: 'subscribe', channel: CHANNEL });
       else if (DM) wsSend({ action: 'subscribe', dm: DM });
@@ -4318,6 +4356,9 @@ if (j.mode) {
         })
         .then((j) => {
           if (j && j.ticket) { wsTicket = j.ticket; wsBase = j.url || wsBase; }
+          if (j && j.ping_ms) wsPingMs = Number(j.ping_ms) || wsPingMs;
+          startWsPings();
+          startWsLiveness();
           done();
         })
         .catch(() => {
@@ -4346,11 +4387,12 @@ if (j.mode) {
       if (wsGone) return;
       const base = (plainTried && plainBase()) ? plainBase() : wsBase;
       const sep = base.indexOf('?') >= 0 ? '&' : '?';
-      try { ws = new WebSocket(base + sep + 'ticket=' + encodeURIComponent(wsTicket)); }
+      try { ws = new WebSocket(base + sep + 'ticket=' + encodeURIComponent(wsTicket) + '&client=' + encodeURIComponent(clientId())); }
       catch (e) { ws = null; }
       if (!ws) { giveUp(); return; }
-      ws.onopen = () => { wsFails = 0; showTransport('ws'); wsSubscribe(); };
+      ws.onopen = () => { wsFails = 0; wsLastFrameAt = Date.now(); showTransport('ws'); wsSubscribe(); };
       ws.onmessage = (ev) => {
+        wsLastFrameAt = Date.now();
         let j = null;
         try { j = JSON.parse(ev.data); } catch (err) { return; }
         if (j.pong) return;
@@ -4361,6 +4403,7 @@ if (j.mode) {
       ws.onerror = () => { if (RT_FORCE) showTransport('none'); try { ws.close(); } catch (e) {} };
       ws.onclose = () => {
         ws = null;
+        wsLastFrameAt = 0;
         if (wsGone) return;
         if (RT_FORCE) showTransport('none');
         wsFails++;
@@ -4381,8 +4424,10 @@ if (j.mode) {
     showTransport('connecting', false); // badge is visible from boot, not just after a fallback
     refreshTicket(() => openWs()); // always fetch a fresh ticket+URL like the messenger does
     // Presence heartbeat keeps last_seen fresh server-side and the connection
-    // alive past idle timeouts.
-    setInterval(() => wsSend({ action: 'ping' }), 30000);
+    // alive past idle timeouts. The cadence is the server's effective window / 3
+    // (refreshed with every ticket), so a low presence_throttle can't outrun it.
+    startWsPings();
+    startWsLiveness();
     // Hybrid reconcile: WS carries messages instantly; this cheap HTTP call
     // refreshes the sidebar summaries every 30s (only while WS is actually open,
     // so force mode never becomes polling by another name).
@@ -4403,6 +4448,7 @@ if (j.mode) {
       if (CHANNEL) q.set('channel', CHANNEL);
       if (DM) q.set('dm', DM);
       q.set('bg_since', bgLast);
+      q.set('client', clientId());
       es = new EventSource('/api/stream?' + q.toString());
       es.onopen = () => showTransport('sse');
       es.onmessage = (e) => {
@@ -4422,14 +4468,15 @@ if (j.mode) {
     startPolling();
   }
 
-  // Mark the user offline immediately on tab/window close so they don't
-  // ghost-online for the full 30-second presence window.  sendBeacon is
-  // the only reliable async call during beforeunload; the server sets
-  // last_seen to -60 seconds (same as a clean WebSocket close).
+  // Tell the server this tab is closing so the account goes offline promptly —
+  // but only if it was the last live client (the client id scopes the drop, and
+  // the server keeps a fresh row per tab/device). sendBeacon is the only
+  // reliable async call during beforeunload.
   window.addEventListener('beforeunload', () => {
     const fd = new FormData();
     fd.append('action', 'offline');
     fd.append('csrf', CSRF);
+    fd.append('client', clientId());
     navigator.sendBeacon('/api/heartbeat', fd);
   });
 

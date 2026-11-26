@@ -452,10 +452,35 @@ function site_logo(): ?string
     return $url !== '' ? $url : null;
 }
 
-/** Seconds after which a user is considered offline (matches presence_throttle). */
-function presence_window(): int
+/** Seconds between per-user "last seen" writes (admin-tunable, min 5). */
+function presence_throttle(): int
 {
     return max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+}
+
+/**
+ * Seconds after which a participant is considered offline.
+ *
+ * Deliberately a multiple of the write throttle. The two used to be the same
+ * value, so every refresh raced the offline test: one late (or skipped) write
+ * flipped an active user offline, and a low throttle left WebSocket clients
+ * offline for most of every ping cycle. Three throttles tolerates two missed
+ * writes; clean disconnects do not wait for it, they write an explicit
+ * window+1 offset (see the WS onClose and /api/heartbeat offline paths).
+ */
+function presence_window(): int
+{
+    return max(30, presence_throttle() * 3);
+}
+
+/**
+ * Client heartbeat cadence for the effective window: at least three pings per
+ * window, floored at 5 s and capped at 30 s so the previous fixed 30 s cadence
+ * is never exceeded. Clients read this from GET /api/ws/ticket.
+ */
+function presence_ping_ms(): int
+{
+    return max(5, min(30, intdiv(presence_window(), 3))) * 1000;
 }
 
 /** Number of people currently connected (registered users + guests, last presence_window). */

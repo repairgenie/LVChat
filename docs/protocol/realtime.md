@@ -121,7 +121,7 @@ All client frames are JSON objects with an `action` field:
 | Action | Server response | Purpose |
 |---|---|---|
 | `hello` | `{"ok":true,"id":<actor id>,"nick":"<username>","guest":0\|1}` | Identity confirmation. |
-| `ping` | `{"pong":true}` | Presence heartbeat. The client sends one every **30 s**; the gateway writes `last_seen` on a throttled cadence (`presence_throttle`), keeping the existing `isOnline()` checks accurate. |
+| `ping` | `{"pong":true}` | Presence heartbeat. The client cadence comes from `GET /api/ws/ticket` `ping_ms` (a third of `presence_window()`, 5–30 s); the gateway writes `last_seen` on a throttled cadence (`presence_throttle`), keeping the existing `isOnline()` checks accurate. |
 | `subscribe` | `{"ok":true,"sub":{"type":"channel"\|"dm","target":"<slug or nick>"}}` | Set the connection's single subscription. The gateway routes pushed messages by this. |
 
 A client sends `subscribe` immediately on `onopen`. Any other action receives
@@ -155,9 +155,14 @@ beforehand.
 
 ### 3.4 Connection lifecycle
 
-- **Heartbeats**: `ping` every 30 s keeps presence fresh and proxies happy.
-- **Idle sweep**: the gateway closes any connection that hasn't sent a frame
-  in 90 s (no pong).
+- **Heartbeats**: `ping` on the server-derived cadence (`ping_ms` from the
+  ticket, window / 3, 5–30 s) keeps presence fresh and proxies happy.
+- **Liveness**: the gateway sends WebSocket PING frames every 30 s
+  (`WS_PING_INTERVAL`) and closes any connection with no inbound frame for 75 s
+  (`WS_PONG_TIMEOUT`); browsers answer PING frames natively, so a throttled tab
+  stays healthy while a blackholed path is dropped. The client mirrors this —
+  no inbound frame for 2.5 ping cycles forces `close()` and a fresh-ticket
+  reconnect.
 - **Reconnect**: on close, the client backs off (`pollMs * (fails + 1)`) and
   mints a fresh ticket before reopening, because tickets are single-use and
   60 s short-lived. After 3 consecutive failures it gives up and falls back.

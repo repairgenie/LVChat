@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS channels (
   bg_fit TEXT NOT NULL DEFAULT 'contain',
   bg_overlay INTEGER NOT NULL DEFAULT 55,
   channel_url TEXT,
+  event_id INTEGER,
   successor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   registered_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -701,6 +702,19 @@ CREATE TABLE IF NOT EXISTS rt_transports (
   PRIMARY KEY (actor_id, guest)
 );
 CREATE INDEX IF NOT EXISTS idx_rt_transports_updated ON rt_transports(updated_at);
+
+-- Live client instances (one per browser tab / device / app window), updated by
+-- poll, SSE and the WS gateway. Offline is only marked when the last fresh row
+-- for an actor goes away, so closing one tab or device keeps the account online.
+CREATE TABLE IF NOT EXISTS rt_clients (
+  client TEXT NOT NULL,
+  transport TEXT NOT NULL DEFAULT 'poll',
+  actor_id INTEGER NOT NULL,
+  guest INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (client, transport)
+);
+CREATE INDEX IF NOT EXISTS idx_rt_clients_actor ON rt_clients(actor_id, guest, updated_at);
 
 -- Messenger contact groups: per-user custom groupings of friends ("nodes").
 -- Each row is one group owned by a user; members are the OTHER user's id and

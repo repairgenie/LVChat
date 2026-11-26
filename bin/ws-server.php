@@ -80,7 +80,13 @@ if (preg_match('#^http://([^:/]+)(?::(\d+))?(/.*)?$#', $pushUrl, $m)) {
     $pushPort = (int) ($m[2] ?? 9001);
     $pushPath = $m[3] !== '' ? $m[3] : '/push';
 }
-$presenceThrottle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+$presenceThrottle = presence_throttle();
+// End-to-end liveness. The gateway sends a WebSocket PING frame to every live
+// connection and closes it when nothing at all (pong or app message) arrives
+// within the timeout. Browsers answer PING frames in the network stack, so this
+// still proves reachability for a throttled/frozen tab whose JS timers stopped.
+$wsPingInterval = max(1, (int) (getenv('WS_PING_INTERVAL') ?: 30));
+$wsPongTimeout = max($wsPingInterval + 1, (int) (getenv('WS_PONG_TIMEOUT') ?: 75));
 
 // Authenticated connections: id => ['user' => actor, 'sub' => [type,target], 'presence_ts', 'touched'].
 $state = [];
@@ -119,7 +125,7 @@ if ($wsSsl) {
 $ws->name = 'lvchat-ws';
 $ws->count = 1;
 
-$ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, $writePresence, $pushHost, $pushPort, $pushPath, $wsPort): void {
+$ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, $writePresence, $pushHost, $pushPort, $pushPath, $wsPort, $wsPingInterval, $wsPongTimeout): void {
     // We forked from the master process which already opened the SQLite
     // connection; re-open it inside this worker so each process owns its PDO.
     Database::close();
@@ -290,13 +296,28 @@ $ws->onWorkerStart = function (Worker $worker) use (&$state, $presenceThrottle, 
     $push->listen();
     Worker::$globalEvent->add($push->getMainSocket(), EventInterface::EV_READ, [$push, 'acceptConnection']);
 
-    // Idle sweep: close connections that stopped sending frames (no pong).
-    Timer::add(30, static function () use ($worker, &$state): void {
+    // Liveness sweep: PING every live connection on a fixed cadence and close
+    // it when no inbound frame (pong or app message) has arrived for longer
+    // than the timeout. A blackholed path leaves TCP "open" with no error, so
+    // pongs are the only proof the peer is still there. Closing runs onClose →
+    // presence offline, and the client's onclose → backoff reconnect with a
+    // fresh ticket. The tick is short enough to enforce a short test interval.
+    Timer::add(max(1, min(15, $wsPingInterval)), static function () use ($worker, &$state, $wsPingInterval, $wsPongTimeout): void {
         $now = time();
         foreach ($worker->connections as $conn) {
             $st = $state[$conn->id] ?? null;
-            if ($st !== null && $now - ($st['touched'] ?? $now) > 90) {
+            if ($st === null) {
+                continue;
+            }
+            if ($now - ($st['touched'] ?? $now) > $wsPongTimeout) {
+                rt_log('ws liveness: no frame for ' . ($now - (int) ($st['touched'] ?? $now)) . 's, closing ' . ($st['user']['username'] ?? '?'));
                 $conn->close();
+                continue;
+            }
+            if ($now - (int) ($st['ping_at'] ?? 0) >= $wsPingInterval) {
+                // Opcode 0x9 (PING), empty payload, unmasked: FIN+PING, len 0.
+                $conn->send("\x89\x00", true);
+                $state[$conn->id]['ping_at'] = $now;
             }
         }
     });
@@ -358,14 +379,33 @@ $ws->onWebSocketConnect = function (TcpConnection $conn) use (&$state, $writePre
         $conn->close();
         return;
     }
+    // Per-tab/device key from the browser so this socket can be dropped
+    // without hiding the same account on another tab or device. Older clients
+    // send none: fall back to a connection-scoped id.
+    $wsClient = Realtime::clientKey((string) ($_GET['client'] ?? ''));
+    if ($wsClient === '') {
+        $wsClient = 'ws:' . getmypid() . ':' . $conn->id;
+    }
     $state[$conn->id] = [
         'user' => $user,
         'sub' => ['type' => null, 'target' => null],
+        'client' => $wsClient,
         'presence_ts' => 0,
         'touched' => time(),
+        'ping_at' => 0,
     ];
     $writePresence($user, 'now');
+    Realtime::touchClient($user, $wsClient, 'ws');
     rt_log('ws connect: ' . ($user['username'] ?? '?') . ' (guest=' . ($user['guest'] ?? 0) . ')');
+};
+
+// Protocol-level PONG (the reply to our PING frame). Browsers send it from the
+// network stack, so it keeps a connection alive even when its JS is throttled —
+// and its absence is what tells us the path is dead.
+$ws->onWebSocketPong = function (TcpConnection $conn, string $data) use (&$state): void {
+    if (isset($state[$conn->id])) {
+        $state[$conn->id]['touched'] = time();
+    }
 };
 
 $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $presenceThrottle, $writePresence): void {
@@ -394,6 +434,7 @@ $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $pre
             // every existing isOnline() check keeps working unchanged.
             if (time() - (int) $st['presence_ts'] >= $presenceThrottle) {
                 $writePresence($st['user'], 'now');
+                Realtime::touchClient($st['user'], (string) ($st['client'] ?? ''), 'ws');
                 $st['presence_ts'] = time();
             }
             $conn->send('{"pong":true}');
@@ -442,13 +483,17 @@ $ws->onMessage = function (TcpConnection $conn, string $data) use (&$state, $pre
     }
 };
 
-$ws->onClose = function (TcpConnection $conn) use (&$state, $writePresence): void {
-    if (isset($state[$conn->id])) {
-        // Mark offline promptly instead of waiting for the 30s presence window.
-        $writePresence($state[$conn->id]['user'], '-60 seconds');
-        rt_log('ws close: ' . ($state[$conn->id]['user']['username'] ?? '?'));
-        unset($state[$conn->id]);
+$ws->onClose = function (TcpConnection $conn) use (&$state): void {
+    if (!isset($state[$conn->id])) {
+        return;
     }
+    $actor = $state[$conn->id]['user'];
+    $client = (string) ($state[$conn->id]['client'] ?? '');
+    unset($state[$conn->id]);
+    // Only go offline when this was the actor's last live client — closing one
+    // socket (or one of several tabs/devices) must leave the account online.
+    Realtime::markOfflineIfLast($actor, $client, 'ws');
+    rt_log('ws close: ' . ($actor['username'] ?? '?'));
 };
 
 // Workerman forks a master + worker processes on Linux, so the pcntl and posix

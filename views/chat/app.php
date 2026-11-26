@@ -262,13 +262,10 @@ function presence_dot_class(array $u): string {
     if (isset($u['is_online']) && !$u['is_online']) {
         return 'bg-discord-500';
     }
-    // Fallback: when is_online isn't set (online sidebar, DM header) check last_seen
-    // against the presence window so stale rows never show a green dot.
-    if (!isset($u['is_online']) && !empty($u['last_seen'])) {
-        $ts = strtotime($u['last_seen'] . ' UTC');
-        if ($ts !== false && (time() - $ts) > presence_window()) {
-            return 'bg-discord-500';
-        }
+    // Fallback: when is_online isn't set (online sidebar, DM header) ask the same
+    // window-based helper so a stale or missing last_seen never shows a green dot.
+    if (!isset($u['is_online']) && !Auth::actuallyOnline($u)) {
+        return 'bg-discord-500';
     }
     $m = (string) ($u['status_mode'] ?? '');
     if (!in_array($m, ['online', 'away', 'dnd', 'invisible', 'custom'], true)) {
@@ -461,7 +458,7 @@ function presence_label(array $u): string {
           <?php if (!$dmPartners): ?>
           <div class="px-2 py-1 text-xs text-discord-500">No conversations yet</div>
           <?php endif; ?>
-          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = $d['away'] === null && !empty($d['last_seen']) && (time() - strtotime($d['last_seen'] . ' UTC')) <= 90; $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
+          <?php foreach ($dmPartners as $d): $uc = array_filter($unreadDms, fn ($x) => $x['user_id'] == $d['id']); $ucnt = $uc ? $uc[0]['count'] : 0; $dOnline = Auth::isOnline($d); $unreadCls = $ucnt ? 'font-semibold' . (($d['role'] ?? '') === 'admin' ? '' : ' text-white') : ''; ?>
           <a href="/app?dm=<?= h(rawurlencode($d['username'])) ?>"
              data-ctx-user="<?= h($d['username']) ?>"
              data-user-id="<?= (int) ($d['id'] ?? 0) ?>"

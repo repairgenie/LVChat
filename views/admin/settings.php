@@ -371,7 +371,7 @@ require ROOT . '/views/admin/_page_header.php';
     <div>
       <label class="label">Presence throttle (seconds)</label>
       <input class="input" type="number" min="5" name="presence_throttle" value="<?= (int) $settings['presence_throttle'] ?>">
-      <p class="text-xs text-discord-400 mt-1">How often the server writes "last seen" per user. Most polls become pure reads.</p>
+      <p class="text-xs text-discord-400 mt-1">How often the server writes "last seen" per user. Most polls become pure reads. Users count as offline after 3× this value (min 30 s), so leave headroom.</p>
     </div>
   </div>
   <script <?= nonce_attr() ?>>

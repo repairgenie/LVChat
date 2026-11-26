@@ -401,6 +401,25 @@ async function doLogout () {
 
 /* ── Main app data ────────────────────────────────────────── */
 
+/* Stable id for this tab/window (sessionStorage is per tab and survives
+ * reloads; other devices have their own). The server uses it to keep the
+ * account online while any tab is live, and to go offline only when the last
+ * one closes. */
+function clientId () {
+  try {
+    let id = sessionStorage.getItem('lvchat-client')
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
+      sessionStorage.setItem('lvchat-client', id)
+    }
+    return id
+  } catch (err) {
+    return 'tab:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  }
+}
+
 async function startMain (me) {
   state.me = me
   $('#me-name').textContent = me.username
@@ -411,11 +430,12 @@ async function startMain (me) {
   updateMeStatus()
 
   // Mark the user offline immediately on tab/window close so they don't
-  // ghost-online for the full 30-second presence window.
+  // ghost-online for the whole presence window.
   window.addEventListener('beforeunload', () => {
     const fd = new FormData()
     fd.append('action', 'offline')
     fd.append('csrf', state.csrf || '')
+    fd.append('client', clientId())
     navigator.sendBeacon('/api/heartbeat', fd)
   })
 
@@ -527,6 +547,7 @@ async function pollTick () {
       path += '&' + key + '=' + encodeURIComponent(state.open.id)
     }
     path += '&bg_since=' + notif.bgMax
+    path += '&client=' + encodeURIComponent(clientId())
     const j = await LvApi.getJson(path)
     if (j.status === 401) {
       LvApi.resetCsrf()
@@ -1186,7 +1207,7 @@ function effectiveSound (senderUid, fallback) {
  * sidebar/friends/reconcile source. WS only accelerates delivery of messages
  * in the open conversation and drives the notifications feed on bell changes.
  * Handshake mirrors the web app (GET /api/ws/ticket, one-time ticket in the
- * URL, {action:'subscribe'} after open, 30s pings, backoff reconnects). */
+ * URL, {action:'subscribe'} after open, ping_ms pings, backoff reconnects). */
 const wsrt = {
   ws: null,
   ticket: '',
@@ -1194,11 +1215,39 @@ const wsrt = {
   fails: 0,
   retryTimer: null,
   pingTimer: null,
+  // Derived from the server's presence window (GET /api/ws/ticket ping_ms).
+  pingMs: 30000,
+  // Liveness: time of the last inbound frame (any frame, including {pong:true}).
+  lastFrameAt: 0,
+  livenessTimer: null,
   gone: false
 }
 
 function wsSend (obj) {
   if (wsrt.ws && wsrt.ws.readyState === WebSocket.OPEN) wsrt.ws.send(JSON.stringify(obj))
+}
+
+function wsStartPings () {
+  if (wsrt.pingTimer) clearInterval(wsrt.pingTimer)
+  wsrt.pingTimer = setInterval(() => wsSend({ action: 'ping' }), wsrt.pingMs)
+}
+
+/* A socket can stay OPEN with nothing arriving — NAT timeout, dead route,
+ * suspended device — and no error ever fires, so onclose never runs. The
+ * server's {pong:true} replies are the only proof the path is alive: require
+ * an inbound frame at least every 2.5 ping cycles, then force the socket
+ * closed so the normal backoff path reconnects with a fresh ticket. */
+function wsLivenessMs () {
+  return Math.max(15000, wsrt.pingMs * 2.5)
+}
+
+function wsStartLiveness () {
+  if (wsrt.livenessTimer) clearInterval(wsrt.livenessTimer)
+  wsrt.livenessTimer = setInterval(() => {
+    if (!wsrt.ws || wsrt.ws.readyState !== WebSocket.OPEN || !wsrt.lastFrameAt) return
+    if (Date.now() - wsrt.lastFrameAt <= wsLivenessMs()) return
+    try { wsrt.ws.close() } catch (err) { /* onclose retries */ }
+  }, 5000)
 }
 
 function wsSubscribe () {
@@ -1209,16 +1258,34 @@ function wsSubscribe () {
   wsrt.ws.send(JSON.stringify(payload))
 }
 
+/* Reconnect with exponential backoff (2s, 4s, 8s, 16s, 30s cap). Every
+ * failure path goes through here — socket close, a failed or empty ticket
+ * fetch, and a WebSocket constructor throw — so one transient error can never
+ * disable realtime for the rest of the tab session. A fresh ticket is fetched
+ * at attempt time (tickets are single-use and short-lived, so fetching before
+ * a long backoff delay would hand the socket an expired one). */
+function wsRetry () {
+  if (wsrt.gone || wsrt.retryTimer) return
+  wsrt.fails++
+  const delay = Math.min(30000, 2000 * Math.pow(2, Math.max(1, wsrt.fails) - 1))
+  wsrt.retryTimer = setTimeout(() => {
+    wsrt.retryTimer = null
+    wsRefreshTicket(wsOpen)
+  }, delay)
+}
+
 function wsRefreshTicket (done) {
   LvApi.getJson('/api/ws/ticket')
     .then((j) => {
-      if (j.ok && j.body && j.body.ticket) {
-        wsrt.ticket = j.body.ticket
-        wsrt.base = j.body.url || wsrt.base
-      }
+      if (!j.ok || !j.body || !j.body.ticket) { wsRetry(); return }
+      wsrt.ticket = j.body.ticket
+      wsrt.base = j.body.url || wsrt.base
+      if (j.body.ping_ms) wsrt.pingMs = Number(j.body.ping_ms) || wsrt.pingMs
+      wsStartPings()
+      wsStartLiveness()
       done()
     })
-    .catch(() => done())
+    .catch(() => wsRetry())
 }
 
 function wsHandle (j) {
@@ -1262,16 +1329,19 @@ function wsHandle (j) {
 function wsOpen () {
   if (wsrt.gone) return
   const base = wsrt.base
-  if (!base) { wsrt.gone = true; return }
+  // No base yet (ticket fetch failed, or the server returned no URL): retry
+  // rather than disabling WebSocket for the rest of the session.
+  if (!base) { wsRetry(); return }
   const sep = base.indexOf('?') >= 0 ? '&' : '?'
   let socket = null
   try {
-    socket = new WebSocket(base + sep + 'ticket=' + encodeURIComponent(wsrt.ticket))
+    socket = new WebSocket(base + sep + 'ticket=' + encodeURIComponent(wsrt.ticket) + '&client=' + encodeURIComponent(clientId()))
   } catch (err) { /* fall through */ }
-  if (!socket) { wsrt.gone = true; return }
+  if (!socket) { wsRetry(); return }
   wsrt.ws = socket
-  socket.onopen = () => { wsrt.fails = 0; wsSubscribe() }
+  socket.onopen = () => { wsrt.fails = 0; wsrt.lastFrameAt = Date.now(); wsSubscribe() }
   socket.onmessage = (ev) => {
+    wsrt.lastFrameAt = Date.now()
     let j = null
     try { j = JSON.parse(ev.data) } catch (err) { return }
     wsHandle(j)
@@ -1279,19 +1349,17 @@ function wsOpen () {
   socket.onerror = () => { try { socket.close() } catch (err) {} }
   socket.onclose = () => {
     wsrt.ws = null
+    wsrt.lastFrameAt = 0
     if (wsrt.gone) return
-    wsrt.fails++
-    // Exponential backoff: 2s, 4s, 8s, 16s, 30s cap. After reaching the
-    // cap, keep retrying at the cap interval so we reconnect promptly when
-    // the daemon comes back (the 2s poll keeps everything working).
-    const delay = Math.min(30000, 2000 * Math.pow(2, wsrt.fails - 1))
-    wsRefreshTicket(() => { wsrt.retryTimer = setTimeout(wsOpen, delay) })
+    // Backoff keeps retrying at the 30s cap so we reconnect promptly when the
+    // daemon comes back (the 2s poll keeps everything working meanwhile).
+    wsRetry()
   }
 }
 
 async function initWs () {
   if (typeof WebSocket === 'undefined' || wsrt.gone) return
-  wsrt.pingTimer = setInterval(() => wsSend({ action: 'ping' }), 30000)
+  wsStartPings()
   wsRefreshTicket(wsOpen)
 }
 
@@ -1299,6 +1367,7 @@ function stopWs () {
   wsrt.gone = true
   if (wsrt.retryTimer) { clearTimeout(wsrt.retryTimer); wsrt.retryTimer = null }
   if (wsrt.pingTimer) { clearInterval(wsrt.pingTimer); wsrt.pingTimer = null }
+  if (wsrt.livenessTimer) { clearInterval(wsrt.livenessTimer); wsrt.livenessTimer = null }
   if (wsrt.ws) { try { wsrt.ws.close() } catch (err) {} wsrt.ws = null }
 }
 

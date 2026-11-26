@@ -839,6 +839,8 @@ final class ChatController
     {
         $user = self::requireUser();
         $since = max(0, (int) ($_GET['since'] ?? 0));
+        // Register this tab/device as a live client (throttled write).
+        Realtime::touchClient($user, (string) ($_GET['client'] ?? ''), 'poll');
         TypingService::sweep();
         MessageService::pruneDmDeletions();
         json_out(self::pollPayload($user, $since));
@@ -848,7 +850,15 @@ final class ChatController
     public static function wsTicket(): void
     {
         $user = self::requireUser();
-        json_out(['ok' => true, 'ticket' => Realtime::mintTicket($user), 'url' => Realtime::clientUrl()]);
+        json_out([
+            'ok' => true,
+            'ticket' => Realtime::mintTicket($user),
+            'url' => Realtime::clientUrl(),
+            // Presence cadence derived from the effective window, so a short
+            // window (low presence_throttle) cannot outrun a fixed 30 s ping.
+            'ping_ms' => presence_ping_ms(),
+            'presence_window' => presence_window(),
+        ]);
     }
 
     /**
@@ -887,6 +897,8 @@ final class ChatController
     public static function stream(): void
     {
         $user = self::requireUser();
+        // This tab/device is live for as long as the stream runs.
+        Realtime::touchClient($user, (string) ($_GET['client'] ?? ''), 'sse');
         // Stream-open throttle: each SSE connection pins a PHP worker, so one
         // account must not be able to churn hundreds of them. The rt_transports
         // row is one-per-actor (PK), so throttle on open rate via session.
@@ -913,7 +925,7 @@ final class ChatController
         $last = 0;
         // Refresh presence inside the loop so a long-lived stream never goes stale:
         // without this, SSE users vanish from the online list after presence_throttle.
-        $presenceThrottle = max(5, (int) (config_get('presence_throttle', '30') ?? 30));
+        $presenceThrottle = presence_throttle();
         $lastPresence = $start;
 
         $send = function (string $data): void {
@@ -937,6 +949,7 @@ final class ChatController
                 }
                 $user['last_seen'] = now();
                 $lastPresence = time();
+                Realtime::touchClient($user, (string) ($_GET['client'] ?? ''), 'sse');
             }
             $out = self::pollPayload($user, $since, false);
             // Advance the server-side watermark once the batch is caught up, so the

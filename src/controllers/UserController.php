@@ -73,16 +73,18 @@ final class UserController
     {
         $user = Auth::require();
         $action = (string) ($_POST['action'] ?? '');
+        $client = (string) ($_POST['client'] ?? '');
         if ($action === 'offline') {
-            // Mark the user offline immediately (same offset as WS close).
+            // Offline only when this was the last live client: closing one tab
+            // or device must not hide an account that is active elsewhere. A
+            // missing/unknown client id deletes nothing, so the presence window
+            // expires naturally instead of guessing the account is gone.
             // CSRF is skipped: sendBeacon in beforeunload cannot fetch a token
             // asynchronously.  The session check above prevents cross-origin abuse.
-            Database::query(
-                'UPDATE users SET last_seen = datetime("now", "-60 seconds") WHERE id = ?',
-                [(int) $user['id']]
-            );
+            Realtime::markOfflineIfLast($user, $client);
         } else {
             Csrf::verify();
+            Realtime::touchClient($user, $client, 'poll');
         }
         json_out(['ok' => true]);
     }
