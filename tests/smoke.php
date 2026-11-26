@@ -1915,5 +1915,25 @@ $r = LicensingService::validate('strict-mod', $stk);
 check('strict: unreachable refuses', $r['status'] === 'unreachable_strict');
 config_set('license_policy', 'grace');
 
+// --- Presence window ---
+// The offline window must track presence_throttle, not a hardcoded 30 s. At
+// throttle 120 the window is 360 s, so a 200 s-old row is still online and a
+// 400 s-old one is not; the explicit-30 case pins what the old default did.
+echo "== presence window ==\n";
+$presencePrevThrottle = (string) config_get('presence_throttle', '30');
+config_set('presence_throttle', '120');
+$presenceRow = static fn (int $ago): array => [
+    'last_seen' => gmdate('Y-m-d H:i:s', time() - $ago),
+    'away' => null,
+    'status_mode' => 'online',
+];
+check('presence_window derives from presence_throttle', presence_window() === 360, (string) presence_window());
+check('200 s old is online inside a 360 s window', Auth::statusInfo($presenceRow(200))['is_online'] === 1);
+check('400 s old is offline past a 360 s window', Auth::statusInfo($presenceRow(400))['is_online'] === 0);
+check('Auth::isOnline agrees with the 360 s window', Auth::isOnline($presenceRow(200)) === true && Auth::isOnline($presenceRow(400)) === false);
+check('explicit 30 s window still reports a 200 s old row offline', Auth::statusInfo($presenceRow(200), 30)['is_online'] === 0);
+config_set('presence_throttle', $presencePrevThrottle);
+check('default throttle keeps an 80 s old row online', Auth::statusInfo($presenceRow(80))['is_online'] === 1);
+
 echo "\n" . $GLOBALS['passed'] . " passed, " . $GLOBALS['failed'] . " failed\n";
 exit($GLOBALS['failed'] > 0 ? 1 : 0);
