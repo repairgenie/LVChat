@@ -565,7 +565,7 @@ the daemon running under systemd — see "Realtime gateway (WebSocket)" above.
 bash bin/test.sh
 ```
 
-Runs **1501 automated assertions** in three layers:
+Runs **1502 automated assertions** in three layers:
 
 - **`tests/smoke.php`** (695) — every slash command and service against a scratch DB:
   registration/login, channels, messaging, all Core/Channel-Op/ChanServ/NickServ/

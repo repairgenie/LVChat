@@ -713,6 +713,12 @@ check(
     $htmlNames === $pollNames && in_array('bob', $htmlNames, true),
     json_encode(['html' => $htmlNames, 'poll' => $pollNames])
 );
+preg_match('~data-ctx-user="bob".*?rounded-full ([^"]+)~s', $onlineSection, $bobDot);
+check(
+    'away user renders the amber dot in the initial /app roster',
+    str_contains($bobDot[1] ?? '', 'bg-amber-400'),
+    $bobDot[1] ?? ''
+);
 dbq('UPDATE users SET away = NULL, away_at = NULL, status_mode = ? WHERE id = ?', ['online', $bobId]);
 
 // The web chat header renders the rich status UI (avatar dot + clickable line).

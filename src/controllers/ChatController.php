@@ -687,11 +687,14 @@ final class ChatController
     {
         $pw = presence_window();
         return Database::all(
-            "SELECT id, username, role, guest, away, status_mode, custom_status
+            // is_online is true by construction (the window filter above); the
+            // renderer's dot helper needs it because the roster doesn't carry
+            // last_seen, and the poll's JS sets the same flag.
+            "SELECT id, username, role, guest, away, status_mode, custom_status, 1 AS is_online
              FROM users
              WHERE last_seen >= datetime('now', '-' || ? || ' seconds') AND status_mode != 'invisible'
              UNION ALL
-             SELECT id, nick, 'user', 1, NULL, 'online', '' FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
+             SELECT id, nick, 'user', 1, NULL, 'online', '', 1 FROM guests WHERE last_seen >= datetime('now', '-' || ? || ' seconds')
              ORDER BY username COLLATE NOCASE",
             [$pw, $pw]
         );
@@ -706,10 +709,9 @@ final class ChatController
         if (Realtime::reconnectRequested()) {
             $out['reconnect'] = 1;
         }
-        // Live "Online" sidebar list (registered + guest users seen recently).
-        // Mirrors the app view's list (including the current user, and away users,
-        // who render with the amber dot) so the first poll doesn't drop rows from
-        // the sidebar. Keep the column/filter set in sync with the /app render.
+        // Same roster the /app render used (including the current user and away
+        // users, who render with the amber dot), so the first poll cannot drop
+        // sidebar rows.
         $out['online_users'] = self::sidebarOnlineUsers();
 
         $notifyCount = (int) Database::scalar(
