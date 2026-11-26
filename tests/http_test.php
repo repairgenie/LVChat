@@ -699,6 +699,20 @@ $pollBob = null;
 foreach (($j['online_users'] ?? []) as $u) { if (($u['username'] ?? '') === 'bob') $pollBob = $u; }
 check('away user stays in the first poll online_users', $s === 200 && $pollBob !== null, $b);
 check('poll carries the away status, not a dropped row', ($pollBob['status_mode'] ?? '') === 'away', json_encode($pollBob));
+// Stronger than "bob is in both": the initial render and the first poll must
+// expose exactly the same names (away included), so neither query can grow its
+// own filter/limit without failing here.
+preg_match_all('~data-ctx-user="([^"]+)"~', $onlineSection, $rosterHtml);
+$htmlNames = array_values(array_unique($rosterHtml[1] ?? []));
+$pollNames = array_map(static fn (array $u): string => (string) ($u['username'] ?? ''), $j['online_users'] ?? []);
+$pollNames = array_values(array_unique($pollNames));
+sort($htmlNames, SORT_NATURAL | SORT_FLAG_CASE);
+sort($pollNames, SORT_NATURAL | SORT_FLAG_CASE);
+check(
+    'initial /app roster and first poll return the same users',
+    $htmlNames === $pollNames && in_array('bob', $htmlNames, true),
+    json_encode(['html' => $htmlNames, 'poll' => $pollNames])
+);
 dbq('UPDATE users SET away = NULL, away_at = NULL, status_mode = ? WHERE id = ?', ['online', $bobId]);
 
 // The web chat header renders the rich status UI (avatar dot + clickable line).
